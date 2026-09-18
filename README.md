@@ -74,28 +74,54 @@ Configuration (see `.env.example`): `SIGRITY_HOME` (default
 matching this machine's `CDS_LIC_FILE`), `SIGRITY_WORKDIR` (default `runs/`, where every
 job's scratch directory is created).
 
-## Known environment limitation: no active FlexNet license
+## Live validation and what it caught
 
-This machine's FlexNet license server (`5280@localhost`) is not currently running and
-no local `.lic` file was found — confirmed via `get_license_server_status` returning a
-connection-refused error, and via directly testing a licensed tool (`AmLibGen.exe`),
-which aborts immediately with a negative exit code and no output before printing
-anything. This means **licensed Sigrity tool runs cannot be fully verified end-to-end
-on this machine right now** — what's tested and confirmed working instead:
+`lmutil lmstat` reports this machine's FlexNet server (`5280@localhost`) as
+unreachable, and one AMM tool (`AmLibGen.exe`) aborted immediately with no output when
+tested directly — so a blanket "no license available" was the initial assumption.
+That turned out to be wrong for at least PowerSI and PowerDC: running a real session
+against real sample designs shipped with Sigrity (`share/SpeedXP/Samples/...`) showed
+both tools successfully fetching a license, loading the design, and running. Whatever
+`AmLibGen.exe`'s problem is, it isn't a suite-wide license outage — treat license
+status as per-tool/per-feature, not a single on/off switch, and check
+`get_license_server_status`/`diagnose_license_feature` for the specific feature you
+need rather than assuming from one tool's failure.
 
-- Every tool's exact CLI/Tcl argument construction (unit tests, `tests/`)
-- Every tool's MCP registration, schema, and description (`scripts/smoke_test.py`)
-- The non-licensed platform tools live against the real install (install manifest
-  parsing, executable inventory, FlexNet client queries, name-server check)
-- Full MCP tool-calling protocol end-to-end with a real LLM
-  (`scripts/test_llm_e2e.py`, against a local `qwen3-max` endpoint configured via the
-  `TEST_LLM_BASE_URL` env var) — the model correctly discovers tools, chains multiple
-  calls, and reports accurate results back, including the license-server-down state itself.
+Running real tools against real designs caught two genuine bugs that documentation
+alone didn't surface, both now fixed:
 
-Once a license is active, every `run_*`/`*_run_session` tool is ready to execute for
-real — nothing in the design assumes a license is present, and `job_tools`'s
-`license_issue_suspected` flag plus `core.process`'s silent-failure heuristic exist
-specifically to surface this class of failure clearly if it recurs.
+1. **Tcl flag/value spacing.** Cadence's own docs render Tcl flags as `-start{value}`
+   (no space), which reads naturally as one token — but the real Tcl parser requires
+   `-start {value}` as two separate words; the concatenated form is rejected as one
+   unrecognized parameter. This affected several flags in `si/powersi_tools.py` and
+   `pi/powerdc_tools.py` and is now fixed everywhere it was found (`git log` for the
+   fix commit has the full list).
+2. **Frequency value format.** PowerSI's `-start`/`-end` frequency flags reject
+   unit-suffixed strings like `"1MHz"`/`"1GHz"` — they need plain numeric Hz values
+   (`"1e6"`, `"1e9"`). Fixed in `powersi_set_frequency_sweep`'s docstring and applied
+   the same caution to `optimizepi_set_frequency_range` (same underlying Tcl engine,
+   not yet independently tested).
+
+This also resolved a standing question: PowerDC's `-tcl` batch switch — never
+documented in PowerDC's own user guide, only inferred from the shared launcher
+family — is now confirmed working, not just best-effort.
+
+**What this does and doesn't prove:** PowerSI and PowerDC were exercised against real
+sample designs end-to-end (session compose → run → job succeeds, real Sigrity log
+shows real Tcl commands executing). The other domains (XcitePI, OptimizePI, Clarity3D,
+XtractIM, the translators, T2B, AMM) are built from the same research rigor and pass
+their unit tests (argv/Tcl-line construction, job lifecycle), but have not each been
+individually run against a real license and a real design — given the bugs found in
+the two that *were* tested, treat any untested tool's exact flag spellings as "best
+transcription from documentation," not guaranteed correct, until exercised the same
+way. `job_tools`'s `license_issue_suspected` flag and `core.process`'s silent-failure
+heuristic exist to help surface it quickly if a specific flag turns out wrong.
+
+Full MCP tool-calling protocol was also validated end-to-end with a real LLM
+(`scripts/test_llm_e2e.py`, against a local OpenAI-compatible endpoint configured via
+the `TEST_LLM_BASE_URL` env var) — the model correctly discovers tools, composes a
+multi-step PowerSI session (open → mode → frequency sweep → ports → export → run →
+check status) unassisted, and reports accurate results back.
 
 ## Testing
 
@@ -103,5 +129,8 @@ specifically to surface this class of failure clearly if it recurs.
 python -m uv run pytest -q                          # unit tests (no Sigrity install required for most)
 python -m uv run python scripts/smoke_test.py        # lists every registered MCP tool
 python -m uv run python scripts/smoke_call.py         # calls a few real platform tools live
+python -m uv run python scripts/smoke_amm.py          # runs AmLibGen against a real sample spreadsheet
+python -m uv run python scripts/smoke_powersi_real.py # real PowerSI session against a shipped sample .spd
+python -m uv run python scripts/smoke_powerdc_real.py # real PowerDC session against a shipped sample .spd
 python -m uv run python scripts/test_llm_e2e.py "<prompt>"   # real LLM-driven MCP tool-calling test
 ```

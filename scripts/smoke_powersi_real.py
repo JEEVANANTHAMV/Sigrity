@@ -18,7 +18,7 @@ async def main():
     session = await start_powersi_session(spd_file=spd)
     sid = session["session_id"]
     await powersi_set_mode(sid, "extraction")
-    await powersi_set_frequency_sweep(sid, "1MHz", "1GHz", use_afs=True)
+    await powersi_set_frequency_sweep(sid, "1e6", "1e9", use_afs=True)
     await powersi_add_ports_auto(sid)
     await powersi_export_network(sid, "@ALL_NETS", "one_trace.s4p", matrix_type="S")
     run = await powersi_run_session(sid, output_format="touchstone")

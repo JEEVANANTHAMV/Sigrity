@@ -49,16 +49,16 @@ async def test_compose_tools_append_expected_tcl():
     await powerdc_save_workspace(sid, "setup.pdcx")
 
     script = tcl_sessions.preview(sid)
-    assert "sigrity::set pdcSimMode -irDropAnalysis {1} -eTcoSimulation{0} -thermalOnly{0} {!}" in script
+    assert "sigrity::set pdcSimMode -irDropAnalysis {1} {!}" in script
     assert "sigrity::add pdcVRM -auto -net {PowerNets,GND} -ckt {Vrm3}{Vrm2}{Vrm1} -voltage {1.5} {!}" in script
     assert "sigrity::add pdcSink -auto -net {VCC,GND} -ckt {U1} -model {Equal Current} -current {2.0}" in script
     assert "-upperTolerance {5%} -lowerTolerance {5%} {!}" in script
-    assert "sigrity::add pdcInter -auto -net {VCC,GND} -ckt {R1} -positivePin{1} -negativePin{2} -resistance {0.01} {!}" in script
+    assert "sigrity::add pdcInter -auto -net {VCC,GND} -ckt {R1} -positivePin {1} -negativePin {2} -resistance {0.01} {!}" in script
     assert "sigrity::update circuit {U1} -setAsThermalComponent {1} {!}" in script
     assert "-dissipation {-type {Power} -value {5.0} -source {Volume} -outputTemmperatureMap {U1_temp.dat}} {!}" in script
     assert "sigrity::update pdcTestBoard -type {tbLead2s2p27} -stackup {0.0762,0.1143,0.0096,0.0096} -dimension {10,10} -enhancePKGArea {1} {!}" in script
     assert "sigrity::update option -AutoSaveSimulationResult {1} -AutoSaveExcelResult {1} {!}" in script
-    assert "sigrity::do OneStepPowerTree -VrmSink{vrm_sink.csv} -ExtractRules{rules.xml} -ammLibrary{amm.lib} {!}" in script
+    assert "sigrity::do OneStepPowerTree -VrmSink {vrm_sink.csv} -ExtractRules {rules.xml} -ammLibrary {amm.lib} {!}" in script
     assert "sigrity::do pdcReport -resultTable -diagramPlot -sinkIRDropSummaryCsv -fileName {report.htm} {!}" in script
     assert "sigrity::save -w {setup.pdcx} {!}" in script
 

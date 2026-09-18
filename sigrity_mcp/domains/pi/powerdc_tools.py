@@ -1,16 +1,17 @@
 """PowerDC automation — DC IR-drop analysis, electro-thermal (E-T) co-simulation, and
 thermal power-integrity analysis.
 
-IMPORTANT CAVEAT: PowerDC's own user guide never documents a raw `-tcl <script.tcl>`
-batch switch the way PowerSI's does — the documented model there is "configure via Tcl
-in the GUI, `sigrity::save -w {file.pdcx}`, then run PowerDC in batch against that
-`.pdcx`". `powerdc_run_session` (below) follows the same shared-launcher-family
-convention as PowerSI/OptimizePI/XcitePI anyway (`-b -tcl <script> [spd]`) since that's
-the most defensible inference (all four share the same launcher binary family) — but
-this has NOT been empirically verified against a live license on this machine, so treat
-it as best-effort until confirmed. The `sigrity::` Tcl vocabulary itself (open/set/add/
-update/save/do) and the `-Report` CLI sign-off mode are transcribed from real sample
-scripts and the CLI reference, not guessed.
+NOTE: PowerDC's own user guide never documents a raw `-tcl <script.tcl>` batch switch
+the way PowerSI's does. `powerdc_run_session` (below) uses it anyway (`-b -tcl <script>
+[spd]`), following the same shared-launcher-family convention as PowerSI/OptimizePI/
+XcitePI — and this has now been CONFIRMED empirically against a real license and a real
+sample design on this machine (see powerdc_run_session's docstring). What's still
+genuinely unconfirmed is the exact spelling of every individual `sigrity::` flag —
+e.g. PowerDC rejected `-eTcoSimulation` outright when tested (see
+powerdc_set_simulation_mode's docstring). The `sigrity::` Tcl vocabulary itself
+(open/set/add/update/save/do) and the `-Report` CLI sign-off mode are transcribed from
+real sample scripts and the CLI reference, not guessed, but individual flag names
+should still be treated as "best transcription, not guaranteed" until exercised.
 
 Usage pattern: start_powerdc_session -> one or more powerdc_* "compose" tools (each just
 appends a Tcl line, no process launched) -> powerdc_run_session (writes the accumulated
@@ -80,19 +81,31 @@ async def powerdc_set_simulation_mode(
 ) -> dict:
     """Select which PowerDC analysis mode(s) this session runs: DC IR-drop, electro-thermal co-simulation, or thermal-only.
 
-    Appends `sigrity::set pdcSimMode -irDropAnalysis {0|1} -eTcoSimulation{0|1} -thermalOnly{0|1} {!}`.
-    These are independent toggles per PowerDC's own Tcl option — pass True for whichever
-    mode(s) this run needs (real sample scripts typically set just one, e.g.
-    `-IRDropAnalysis {1}` for a pure DC IR-drop study).
+    Appends `sigrity::set pdcSimMode` with only the flags whose boolean is True (real
+    sample scripts always set exactly one mode, e.g. `-IRDropAnalysis {1}` alone for a
+    pure DC IR-drop study — not all three every time). `-irDropAnalysis {0|1}` and
+    `-thermalOnly {0|1}` are confirmed against a real license on this machine (this
+    machine's PowerDC accepted `-tcl` batch scripts at all, resolving a prior open
+    question). `e_t_co_simulation`'s exact flag spelling is NOT confirmed — PowerDC
+    rejected `-eTcoSimulation` outright ("simulation mode -eTcoSimulation isn't
+    supported"), and the research this was transcribed from showed an inconsistent
+    `-E/TCoSimulation` form elsewhere, suggesting the real name may use different
+    capitalization or punctuation. Passing `e_t_co_simulation=True` will very likely
+    fail until the correct spelling is confirmed against this machine's PowerDC — treat
+    it as unverified, not a documented fact. Note also that every flag here needs a
+    space before its brace-quoted value — a concatenated `-flag{value}` token is
+    rejected as one unrecognized parameter by Sigrity's Tcl parser (confirmed
+    empirically against PowerSI, which shares the same parser).
     """
-    tcl_sessions.add_line(
-        session_id,
-        (
-            f"sigrity::set pdcSimMode -irDropAnalysis {{{int(ir_drop_analysis)}}} "
-            f"-eTcoSimulation{{{int(e_t_co_simulation)}}} "
-            f"-thermalOnly{{{int(thermal_only)}}} {{!}}"
-        ),
-    )
+    parts = ["sigrity::set pdcSimMode"]
+    if ir_drop_analysis:
+        parts.append("-irDropAnalysis {1}")
+    if e_t_co_simulation:
+        parts.append("-eTcoSimulation {1}")
+    if thermal_only:
+        parts.append("-thermalOnly {1}")
+    parts.append("{!}")
+    tcl_sessions.add_line(session_id, " ".join(parts))
     return {
         "session_id": session_id,
         "ir_drop_analysis": ir_drop_analysis,
@@ -175,13 +188,13 @@ async def powerdc_add_interconnect(
     """Add a fixed-resistance interconnect element (e.g. a jumper or fuse) on a power/ground net pair.
 
     Appends
-    `sigrity::add pdcInter -auto -net {power,ground} -ckt {RefDes} [-positivePin{pin}] [-negativePin{pin}] -resistance {v} {!}`.
+    `sigrity::add pdcInter -auto -net {power,ground} -ckt {RefDes} [-positivePin {pin}] [-negativePin {pin}] -resistance {v} {!}`.
     """
     parts = ["sigrity::add pdcInter -auto", _net_arg(power_net, ground_net), _ckt_arg(ref_des)]
     if positive_pin is not None:
-        parts.append(f"-positivePin{tcl_str(positive_pin)}")
+        parts.append(f"-positivePin {tcl_str(positive_pin)}")
     if negative_pin is not None:
-        parts.append(f"-negativePin{tcl_str(negative_pin)}")
+        parts.append(f"-negativePin {tcl_str(negative_pin)}")
     parts.append(f"-resistance {{{resistance}}}")
     parts.append("{!}")
     tcl_sessions.add_line(session_id, " ".join(parts))
@@ -299,14 +312,14 @@ async def powerdc_run_one_step_powertree(
 
     PowerTree has no standalone documented batch executable of its own — it is driven
     from inside PowerDC (or OptimizePI) via this Tcl command. Appends
-    `sigrity::do OneStepPowerTree -VrmSink{<vrm_sink_csv>} -ExtractRules{<extract_rules_xml>} -ammLibrary{<amm_library>} {!}`.
+    `sigrity::do OneStepPowerTree -VrmSink {<vrm_sink_csv>} -ExtractRules {<extract_rules_xml>} -ammLibrary {<amm_library>} {!}`.
     This only records the step; call powerdc_run_session afterwards to actually execute it.
     """
     tcl_sessions.add_line(
         session_id,
         (
-            f"sigrity::do OneStepPowerTree -VrmSink{tcl_path(vrm_sink_csv)} "
-            f"-ExtractRules{tcl_path(extract_rules_xml)} -ammLibrary{tcl_path(amm_library)} {{!}}"
+            f"sigrity::do OneStepPowerTree -VrmSink {tcl_path(vrm_sink_csv)} "
+            f"-ExtractRules {tcl_path(extract_rules_xml)} -ammLibrary {tcl_path(amm_library)} {{!}}"
         ),
     )
     return {
@@ -359,15 +372,14 @@ async def powerdc_generate_signoff_report(
 async def powerdc_run_session(session_id: str, spd_file: Optional[str] = None) -> dict:
     """Write out the session's accumulated Tcl macro and launch PowerDC against it as a background job.
 
-    UNVERIFIED SYNTAX CAVEAT: PowerDC's official docs do not confirm a `-tcl` batch
-    switch the way PowerSI's do; this follows the same shared-launcher convention as the
-    other `sigrity::`-scripted tools (PowerSI/OptimizePI/XcitePI) but has not been
-    empirically verified against a live license on this machine — treat it as
-    best-effort until confirmed. The documented, confirmed alternative is: use the
-    compose tools above to build up a setup, call powerdc_save_workspace to write a
-    `.pdcx`, then invoke PowerDC's batch mode directly against that file
-    (`PowerDC.exe -b [switches] setup.pdcx [layout.spd]`) yourself if this run mode turns
-    out not to work on your license.
+    The `-tcl` batch switch is CONFIRMED working (empirically, against a real license
+    and a real sample design on this machine) even though PowerDC's official docs never
+    document it the way PowerSI's do — it loaded the design, ran the Tcl commands, and
+    returned normally. What's still unconfirmed is the *exact spelling* of every
+    individual `sigrity::` flag this session's compose tools might have queued (see
+    powerdc_set_simulation_mode's docstring for one confirmed example: PowerDC rejected
+    `-eTcoSimulation` outright) — a failed run is more likely to mean "wrong flag name
+    for this option" than "this run mode doesn't work at all."
 
     Before running, this appends `sigrity::begin simulation {!}` as the final macro line
     (confirmed via real sample scripts, e.g. MB.tcl, even though it isn't documented on

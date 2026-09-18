@@ -60,17 +60,24 @@ async def powersi_set_frequency_sweep(
 ) -> dict:
     """Define the frequency sweep range for the simulation.
 
-    `start`/`end` must include a unit suffix exactly as PowerSI's Tcl expects, e.g.
-    "1MHz", "20GHz", "0Hz" — passed through verbatim, not parsed. `use_afs=True`
-    (default) enables PowerSI's Adaptive Frequency Sweep, which picks intermediate
-    points automatically instead of a fixed linear/log step; set False for a plain
-    swept range if you intend to control point spacing another way.
-    Appends `sigrity::update freq -start{<start>} -end{<end>} [-AFS] {!}`.
+    `start`/`end` must be plain numeric values in Hz, e.g. "1e6" (1 MHz), "1e9" (1 GHz),
+    "0" — NOT unit-suffixed strings. Confirmed empirically on this machine: PowerSI
+    accepted "-start 1e6 -end 1e9" but rejected "-start 1MHz -end 1GHz" with "The ending
+    frequency should not be smaller than the starting frequency" (it doesn't parse the
+    unit suffix the way you'd expect). Values are passed through verbatim, not
+    validated, so always use scientific/plain notation. `use_afs=True` (default)
+    enables PowerSI's Adaptive Frequency Sweep, which picks intermediate points
+    automatically instead of a fixed linear/log step; set False for a plain swept range
+    if you intend to control point spacing another way.
+    Appends `sigrity::update freq -start {<start>} -end {<end>} [-AFS] {!}`. Note the
+    space between each flag and its brace-quoted value is required — PowerSI's Tcl
+    parser rejects a concatenated `-start{1e6}` token as one unrecognized parameter
+    (also confirmed empirically against a real design on this machine).
     """
     afs_flag = " -AFS" if use_afs else ""
     tcl_sessions.add_line(
         session_id,
-        f"sigrity::update freq -start{tcl_str(start)} -end{tcl_str(end)}{afs_flag} {{!}}",
+        f"sigrity::update freq -start {tcl_str(start)} -end {tcl_str(end)}{afs_flag} {{!}}",
     )
     return {"session_id": session_id, "start": start, "end": end, "use_afs": use_afs}
 
@@ -86,15 +93,15 @@ async def powersi_add_ports_auto(
 
     This is PowerSI's fast path for port creation — appropriate when you want a port on
     every signal/power pin rather than hand-picking specific nets. Appends
-    `sigrity::add port -all [-circuit {ref_des}] [-SignalRefZ{v}] [-PowerRefZ{v}] {!}`.
+    `sigrity::add port -all [-circuit {ref_des}] [-SignalRefZ {v}] [-PowerRefZ {v}] {!}`.
     """
     parts = ["sigrity::add port -all"]
     if ref_des:
         parts.append(f"-circuit {tcl_str(ref_des)}")
     if signal_ref_impedance is not None:
-        parts.append(f"-SignalRefZ{{{signal_ref_impedance}}}")
+        parts.append(f"-SignalRefZ {{{signal_ref_impedance}}}")
     if power_ref_impedance is not None:
-        parts.append(f"-PowerRefZ{{{power_ref_impedance}}}")
+        parts.append(f"-PowerRefZ {{{power_ref_impedance}}}")
     parts.append("{!}")
     tcl_sessions.add_line(session_id, " ".join(parts))
     return {"session_id": session_id, "ref_des": ref_des}
@@ -113,14 +120,14 @@ async def powersi_add_edge_port(
 
     Use this instead of powersi_add_ports_auto when you need precise control over a
     specific port's location/impedance rather than blanket per-pin ports. Appends
-    `sigrity::add EdgePort -positiveNode{} -negativeNode{} -Width{} -RefZ{} {!}`.
+    `sigrity::add EdgePort -positiveNode {} -negativeNode {} -Width {} -RefZ {} {!}`.
     """
     tcl_sessions.add_line(
         session_id,
         (
-            f"sigrity::add EdgePort -positiveNode{tcl_str(positive_node)} "
-            f"-negativeNode{tcl_str(negative_node)} -Width{{{width}}} "
-            f"-RefZ{{{reference_impedance}}} {{!}} ; # port {tcl_str(name)}"
+            f"sigrity::add EdgePort -positiveNode {tcl_str(positive_node)} "
+            f"-negativeNode {tcl_str(negative_node)} -Width {{{width}}} "
+            f"-RefZ {{{reference_impedance}}} {{!}} ; # port {tcl_str(name)}"
         ),
     )
     return {"session_id": session_id, "name": name}
@@ -136,17 +143,17 @@ async def powersi_add_excitation(
 ) -> dict:
     """Add a signal excitation source between two nets, for time/frequency-domain response analysis.
 
-    Appends `sigrity::excitation add -posnet{} -negnet{} [-cktfromsrc{}] [-ampa{}] {!}`.
+    Appends `sigrity::excitation add -posnet {} -negnet {} [-cktfromsrc {}] [-ampa {}] {!}`.
     """
     parts = [
         "sigrity::excitation add",
-        f"-posnet{tcl_str(positive_net)}",
-        f"-negnet{tcl_str(negative_net)}",
+        f"-posnet {tcl_str(positive_net)}",
+        f"-negnet {tcl_str(negative_net)}",
     ]
     if source_circuit:
-        parts.append(f"-cktfromsrc{tcl_str(source_circuit)}")
+        parts.append(f"-cktfromsrc {tcl_str(source_circuit)}")
     if amplitude is not None:
-        parts.append(f"-ampa{{{amplitude}}}")
+        parts.append(f"-ampa {{{amplitude}}}")
     parts.append("{!}")
     tcl_sessions.add_line(session_id, " ".join(parts))
     return {"session_id": session_id, "positive_net": positive_net, "negative_net": negative_net}
@@ -164,15 +171,15 @@ async def powersi_export_network(
 
     `output_file`'s extension determines the on-disk format PowerSI writes (e.g. `.s4p`
     for a 4-port Touchstone file). Appends
-    `sigrity::export network -network{} -fileName{} [-freq{}] -type {S|Z|Y} {!}`.
+    `sigrity::export network -network {} -fileName {} [-freq {}] -type {S|Z|Y} {!}`.
     """
     parts = [
         "sigrity::export network",
-        f"-network{tcl_str(network_name)}",
-        f"-fileName{tcl_path(output_file)}",
+        f"-network {tcl_str(network_name)}",
+        f"-fileName {tcl_path(output_file)}",
     ]
     if frequency:
-        parts.append(f"-freq{tcl_str(frequency)}")
+        parts.append(f"-freq {tcl_str(frequency)}")
     parts.append(f"-type {tcl_str(matrix_type)}")
     parts.append("{!}")
     tcl_sessions.add_line(session_id, " ".join(parts))
@@ -192,12 +199,12 @@ async def powersi_export_rlgc(
 ) -> dict:
     """Queue an export of the network's per-unit-length RLGC parameters to a file.
 
-    Appends `sigrity::export NetworkRLGC -network{} -FileName{} [-R][-L][-G][-C] [-Frequency{}]`.
+    Appends `sigrity::export NetworkRLGC -network {} -FileName {} [-R][-L][-G][-C] [-Frequency {}]`.
     """
     parts = [
         "sigrity::export NetworkRLGC",
-        f"-network{tcl_str(network_name)}",
-        f"-FileName{tcl_path(output_file)}",
+        f"-network {tcl_str(network_name)}",
+        f"-FileName {tcl_path(output_file)}",
     ]
     if resistance:
         parts.append("-R")
@@ -208,7 +215,7 @@ async def powersi_export_rlgc(
     if capacitance:
         parts.append("-C")
     if frequency:
-        parts.append(f"-Frequency{tcl_str(frequency)}")
+        parts.append(f"-Frequency {tcl_str(frequency)}")
     tcl_sessions.add_line(session_id, " ".join(parts))
     return {"session_id": session_id, "output_file": output_file}
 

@@ -40,12 +40,12 @@ async def test_compose_tools_append_expected_tcl():
 
     script = tcl_sessions.preview(sid)
     assert "sigrity::update option -mode {extraction} {!}" in script
-    assert "-start{1MHz} -end{20GHz} -AFS {!}" in script
-    assert "sigrity::add port -all -circuit {U1} -SignalRefZ{50} {!}" in script
-    assert "sigrity::add EdgePort -positiveNode{node_a} -negativeNode{node_b} -Width{0.1} -RefZ{50.0}" in script
-    assert "sigrity::excitation add -posnet{NET_P} -negnet{NET_N} -ampa{1.0} {!}" in script
-    assert "sigrity::export network -network{SParam1} -fileName{out.s4p} -type {S} {!}" in script
-    assert "sigrity::export NetworkRLGC -network{SParam1} -FileName{out_rlgc.csv} -R -L -G -C" in script
+    assert "-start {1MHz} -end {20GHz} -AFS {!}" in script
+    assert "sigrity::add port -all -circuit {U1} -SignalRefZ {50} {!}" in script
+    assert "sigrity::add EdgePort -positiveNode {node_a} -negativeNode {node_b} -Width {0.1} -RefZ {50.0}" in script
+    assert "sigrity::excitation add -posnet {NET_P} -negnet {NET_N} -ampa {1.0} {!}" in script
+    assert "sigrity::export network -network {SParam1} -fileName {out.s4p} -type {S} {!}" in script
+    assert "sigrity::export NetworkRLGC -network {SParam1} -FileName {out_rlgc.csv} -R -L -G -C" in script
     assert "sigrity::do GenReport {!}" in script
 
     await close_tcl_session(sid)

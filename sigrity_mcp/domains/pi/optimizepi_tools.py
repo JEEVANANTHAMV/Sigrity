@@ -133,9 +133,12 @@ async def optimizepi_add_impedance_observation(
 async def optimizepi_set_frequency_range(session_id: str, start_freq: str, end_freq: str) -> dict:
     """Set the frequency range OptimizePI analyzes over.
 
-    `start_freq`/`end_freq` must include a unit suffix exactly as OptimizePI's Tcl
-    expects (e.g. "10kHz", "1GHz") — passed through verbatim, not parsed, matching the
-    same convention as PowerSI's frequency tools. Appends
+    `start_freq`/`end_freq` should be plain numeric values in Hz (e.g. "1e4" for 10kHz,
+    "1e9" for 1GHz), not unit-suffixed strings — PowerSI, which shares the same
+    `sigrity::` Tcl engine, was confirmed empirically to reject unit suffixes like
+    "1MHz"/"1GHz" on its equivalent `-start`/`-end` frequency flags, so treat
+    OptimizePI's as the same convention until proven otherwise. Values are passed
+    through verbatim, not validated. Appends
     `sigrity::update simu -startFreq {<start_freq>} -endFreq {<end_freq>} {!}`.
     """
     tcl_sessions.add_line(
