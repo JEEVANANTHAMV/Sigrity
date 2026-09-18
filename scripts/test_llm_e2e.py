@@ -1,13 +1,16 @@
 """End-to-end test: a real LLM (local qwen3-max) drives our MCP tools via OpenAI-style
 tool calling, using fastmcp's in-process Client against the actual server object.
 
-The local model endpoint is a LAN address and must bypass the corporate HTTP(S) proxy
-(which returns a 407 auth page for it) -- hence `trust_env=False` on the httpx client.
+The model endpoint is supplied via the TEST_LLM_BASE_URL environment variable (see
+.env.example) so no LAN address is hard-coded. It must bypass the corporate HTTP(S)
+proxy (which returns a 407 auth page for it) -- hence `trust_env=False` on the httpx
+client.
 """
 
 import asyncio
 import io
 import json
+import os
 import sys
 
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
@@ -18,8 +21,8 @@ from openai import AsyncOpenAI
 
 from sigrity_mcp.server import mcp
 
-BASE_URL = "http://LAN_MODEL_HOST:8000/v1"
-MODEL = "qwen3-max"
+BASE_URL = os.environ["TEST_LLM_BASE_URL"]
+MODEL = os.environ.get("TEST_LLM_MODEL", "qwen3-max")
 
 
 def mcp_tool_to_openai(tool) -> dict:

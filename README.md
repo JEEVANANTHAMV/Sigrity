@@ -88,9 +88,9 @@ on this machine right now** — what's tested and confirmed working instead:
 - The non-licensed platform tools live against the real install (install manifest
   parsing, executable inventory, FlexNet client queries, name-server check)
 - Full MCP tool-calling protocol end-to-end with a real LLM
-  (`scripts/test_llm_e2e.py`, against the local `qwen3-max` endpoint at
-  `LAN_MODEL_HOST:8000`) — the model correctly discovers tools, chains multiple calls,
-  and reports accurate results back, including the license-server-down state itself.
+  (`scripts/test_llm_e2e.py`, against a local `qwen3-max` endpoint configured via the
+  `TEST_LLM_BASE_URL` env var) — the model correctly discovers tools, chains multiple
+  calls, and reports accurate results back, including the license-server-down state itself.
 
 Once a license is active, every `run_*`/`*_run_session` tool is ready to execute for
 real — nothing in the design assumes a license is present, and `job_tools`'s
