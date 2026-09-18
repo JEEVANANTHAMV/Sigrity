@@ -7,3 +7,6 @@ __pycache__/
 /runs/
 /workdir/
 .uv-cache/
+/GPUCache/
+*.jrl
+*.jrl,*

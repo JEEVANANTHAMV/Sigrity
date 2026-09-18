@@ -55,24 +55,21 @@ async def list_allegro_tools() -> dict:
 
     Same shape and status semantics as list_sigrity_tools, scoped to the separate
     Allegro/OrCAD SPB install (schematic capture, PCB layout) rather than the Sigrity
-    Suite. As of this writing `allegro`/`capture` (the two GUI editors) are
-    'known_blocked': launching either — even with a documented print-and-exit flag, or
-    an explicit `-product=<name>` argument — opens an interactive product/license-
-    chooser dialog and blocks there rather than proceeding headlessly, on this machine,
-    right now. This is NOT a license failure (the dialog genuinely lists real license
-    tiers, including Sigrity Aurora, as available choices) — it looks like a one-time
-    per-user-profile interactive confirmation that hasn't been done yet.
-    The standalone batch/report executables (`allegro_report`, `allegro_dbdoctor`, ...)
-    are a different, confirmed-safe story: genuinely headless and NOT affected by the
-    dialog blocker — each already ran a real operation against a real board sample
-    end-to-end. `allegro_batch` (the "central batch utility" multiplexer that wraps
-    ~68 of these) is itself unreliable at actually dispatching to them (confirmed:
-    routing `dbdoctor` through it failed outright even though calling `dbdoctor.exe`
-    directly works), so this suite calls each standalone exe directly instead. Design
-    *creation* (placing components, defining nets/board outline/stackup) still needs a
-    live SKILL/Tcl session inside allegro.exe/Capture.exe, so that half of "CAD
-    creation" remains blocked until the product-chooser dialog is resolved — check each
-    entry's `note` for the exact symptom observed.
+    Suite. Status as of this writing:
+    - `allegro`: 'confirmed_live' — the initial product-chooser dialog blocker is
+      resolved; a real board loads and a real SKILL query executes and returns
+      correctly via `allegro.exe -s script.scr board.brd`. Database *mutation* calls
+      (create net/component/etc.) are a different story — see allegro_tools.py's module
+      docstring for what's still unverified there.
+    - `capture`: 'known_blocked' — a bare launch now opens cleanly, but the batch-script
+      invocation itself remains unreliable across repeated attempts.
+    - `allegro_report`/`allegro_dbdoctor`: 'confirmed_live' — genuinely headless,
+      each already ran a real operation against a real board sample end-to-end.
+    - `allegro_batch` (the "central batch utility" multiplexer): 'known_blocked' at
+      actually dispatching sub-programs (confirmed: routing `dbdoctor` through it
+      failed outright even though calling `dbdoctor.exe` directly works) — this suite
+      calls each standalone exe directly instead.
+    Check each entry's `note` for the exact symptom/confirmation observed.
     """
     cad_names = set(executables.CAD_EXECUTABLES)
     report = {name: present for name, present in executables.available_tools().items() if name in cad_names}

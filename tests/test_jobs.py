@@ -1,3 +1,4 @@
+import asyncio
 import sys
 
 import pytest
@@ -83,3 +84,31 @@ async def test_cancel_running_job(tmp_path, monkeypatch):
     )
     record = jm.cancel(job_id)
     assert record.state == "cancelled"
+
+
+@pytest.mark.asyncio
+async def test_cancel_state_survives_watcher_completion(tmp_path, monkeypatch):
+    # Regression: cancel() sets state="cancelled" synchronously, but the _watch() task
+    # (already awaiting proc.wait() when kill() fires) used to unconditionally overwrite
+    # that with "failed" once the killed process's exit code arrived a moment later --
+    # discovered live against a real hung Allegro process (Phase B0.3). A cancelled job
+    # must stay reported as cancelled, not get silently relabeled as a failure.
+    monkeypatch.chdir(tmp_path)
+    jm = JobManager()
+    job_id, job_dir = jm.new_job_dir("fake_tool")
+    await jm.submit(
+        tool="fake_tool",
+        command=[sys.executable, "-c", "import time; time.sleep(30)"],
+        job_dir=job_dir,
+        job_id=job_id,
+    )
+    jm.cancel(job_id)
+
+    proc = jm._procs[job_id]
+    await asyncio.wait_for(proc.wait(), timeout=10)
+    # Give the _watch() task a beat to run past the now-resolved proc.wait().
+    await asyncio.sleep(0.2)
+
+    final = jm.get(job_id)
+    assert final.state == "cancelled"
+    assert final.returncode is not None

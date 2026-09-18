@@ -5,24 +5,22 @@ the Sigrity Suite everything else in this project automates — used for schemat
 capture (OrCAD Capture) and PCB layout (Allegro PCB Editor) rather than post-layout
 signal/power analysis.
 
-Current status, verified live (not just from documentation): the two GUI editors
-themselves — `allegro.exe` (SKILL-scriptable layout) and `Capture.exe` (Tcl-scriptable
-schematic) — both open an interactive product/license-chooser dialog on every launch
-attempt observed so far, even with a documented print-and-exit flag or an explicit
-`-product=<name>` argument, and block there rather than proceeding headlessly. This is
-NOT a license failure (the dialog genuinely lists real license tiers, including
-Sigrity Aurora, as available choices) — it looks like a one-time per-user-profile
-interactive confirmation that hasn't been done yet on this machine. Design *creation*
-(placing components, defining nets/board outline/stackup) needs a live session inside
-one of these two editors, so no `capture_tools.py`/`allegro_tools.py` compose-session
-tools exist yet — building them before this is resolved would mean shipping tools with
-no way to verify they actually work.
+Status, verified live (not just from documentation):
 
-What IS confirmed safe and working right now: the standalone batch/report executables
-that ship alongside the two editors (verified against real sample board files, not just
-`-help` text). `allegro_batch_tools.py` wraps these directly — see its module docstring
-for why they're called directly rather than through the `allegro_batch.exe` multiplexer
-Cadence's own docs describe as the entry point for them.
+- `allegro_batch_tools.py` (report/dbdoctor via their standalone exes) — fully
+  confirmed, headless, no GUI dialog involved at all.
+- `allegro_tools.py` (SKILL-scripted PCB layout) — the initial "Product Choices"
+  license-tier dialog blocker is resolved (the user set a default product
+  interactively); the session/query mechanics are now confirmed live (a real board
+  loads, a real SKILL query executes and returns, the process exits cleanly). Database
+  *mutation* calls (create net/component/etc.) are implemented from documentation but
+  did not complete within two minutes in live testing — treat those specific compose
+  tools as unverified until independently confirmed; see the module's own docstring.
+- `capture_tools.py` (Tcl-scripted schematic capture) — a bare launch now opens
+  cleanly, but the batch-script invocation itself remains unreliable across repeated
+  attempts (inconsistent behavior, once triggering a crash-recovery dialog per
+  Cadence's own docs). Built from documentation and real sample scripts, but not
+  confirmed working end-to-end — see the module's own docstring.
 """
 
-from sigrity_mcp.domains.cad import allegro_batch_tools  # noqa: F401
+from sigrity_mcp.domains.cad import allegro_batch_tools, allegro_tools, capture_tools  # noqa: F401

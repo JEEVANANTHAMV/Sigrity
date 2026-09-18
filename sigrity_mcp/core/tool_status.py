@@ -39,7 +39,7 @@ TOOL_STATUS: dict[str, ToolStatus] = {
     "powersi": "confirmed_live",
     "powerdc": "confirmed_live",
     "amlibgen": "known_blocked",
-    "allegro": "known_blocked",
+    "allegro": "confirmed_live",
     "capture": "known_blocked",
     "allegro_batch": "known_blocked",
     "allegro_report": "confirmed_live",
@@ -52,17 +52,27 @@ TOOL_STATUS_NOTES: dict[str, str] = {
     "amlibgen": "Exits immediately with a negative return code and no output when run "
     "directly; cause unconfirmed (possibly unrelated to licensing — PowerSI/PowerDC work "
     "fine on this same machine). See core.process.run_quick's silent-failure heuristic.",
-    "allegro": "Every launch attempt (even a documented print-and-exit flag like "
-    "'-product help') immediately opens an interactive 'Product Choices' license-tier "
-    "chooser dialog and blocks there — not a license failure (Sigrity Aurora and other "
-    "tiers are genuinely listed as available choices in that dialog), but headless/batch "
-    "invocation is blocked until a default product choice is configured for this user "
-    "profile, which normally happens by answering that dialog once interactively.",
-    "capture": "Same blocker as allegro: launching with an explicit -product=<name> "
-    "argument still opens an interactive 'Product Choices' dialog ('CaptureCIS Product "
-    "Choices') rather than proceeding to run the supplied Tcl script. Needs the same "
-    "one-time interactive resolution as allegro before any capture_* tool can be built "
-    "against a live session.",
+    "allegro": "Was initially blocked by an interactive 'Product Choices' license-tier "
+    "chooser dialog on every launch (confirmed not a license failure -- Sigrity Aurora "
+    "and other tiers were genuinely listed as available choices); resolved by the user "
+    "setting a default product interactively once. Now confirmed live for the "
+    "session/query mechanics: `allegro.exe -s script.scr <real .brd>` loads the board "
+    "and a `skill (axlCurrentDesign)` query executed and returned correctly, followed by "
+    "a clean `quit`-triggered exit, all within ~20s. NOT yet confirmed: an actual "
+    "database mutation call (`axlDBCreateNet`) did not complete within two minutes in "
+    "the same session shape -- see allegro_tools.py's module docstring. Treat "
+    "session/query capability as reliable, treat any axlDBCreate*/axlSaveDesign/"
+    "axlDRCUpdate call as unverified.",
+    "capture": "Initially hit the same-looking 'Product Choices' dialog as allegro; "
+    "after the user's fix, a bare `Capture.exe` launch (no arguments) now opens cleanly. "
+    "However, the batch-script invocation (`-product=<name> script.tcl`) remains "
+    "unreliable: repeated attempts inconsistently opened Capture's own default/tutorial "
+    "project instead of running the given script, exited immediately with no output, or "
+    "triggered a 'Capture Custom Launch' dialog -- which Cadence's own docs describe as "
+    "a crash-recovery prompt ('displayed only after Capture fails at launching for the "
+    "first time'), not a license chooser. Root cause not isolated (a Tcl syntax issue in "
+    "the probe script, a version-specific CLI quirk, or something else) -- see "
+    "capture_tools.py's module docstring.",
     "allegro_batch": "The multiplexer's own -help and '<program> -help' output is fine "
     "(genuinely headless, no dialog), but actually dispatching a sub-program through it "
     "is unreliable: `allegro_batch dbdoctor -check_only <real .brd>` failed immediately "

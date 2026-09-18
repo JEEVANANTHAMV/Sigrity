@@ -49,9 +49,10 @@ async def test_list_sigrity_tools_reports_every_registered_name():
 async def test_list_allegro_tools_scoped_to_cad_registry():
     report = await list_allegro_tools()
     assert set(report["tools"].keys()) == set(executables.CAD_EXECUTABLES)
-    # allegro/capture (GUI apps) were actually tried live and hit the product-chooser
-    # dialog; allegro_batch (a separate CLI multiplexer) has not been tried yet at all.
-    assert report["tools"]["allegro"]["status"] == "known_blocked"
+    # allegro's session/query mechanics are now confirmed live; capture's batch-script
+    # invocation remains unreliable; allegro_batch (the multiplexer) is known broken for
+    # sub-program dispatch (calls go to the standalone exes directly instead).
+    assert report["tools"]["allegro"]["status"] == "confirmed_live"
     assert report["tools"]["allegro"]["note"]
     assert report["tools"]["capture"]["status"] == "known_blocked"
     assert report["tools"]["capture"]["note"]

@@ -98,7 +98,12 @@ class JobManager:
         record = self._jobs[job_id]
         record.returncode = returncode
         record.ended_at = time.time()
-        record.state = "succeeded" if returncode == 0 else "failed"
+        # cancel() already set state="cancelled" synchronously before killing the
+        # process; this task was already awaiting proc.wait() at that point and would
+        # otherwise overwrite it with "failed" once the kill's exit code arrives — a
+        # cancelled job must stay reported as cancelled, not misreported as a failure.
+        if record.state != "cancelled":
+            record.state = "succeeded" if returncode == 0 else "failed"
         try:
             tail = Path(record.log_path).read_text(encoding="utf-8", errors="replace").lower()
             record.license_issue_suspected = any(m in tail for m in _LICENSE_MARKERS)
