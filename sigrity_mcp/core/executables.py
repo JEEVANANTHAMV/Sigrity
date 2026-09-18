@@ -25,7 +25,14 @@ LICENSE_EXECUTABLES: dict[str, str] = {
 CAD_EXECUTABLES: dict[str, str] = {
     "capture": "Capture.exe",
     "allegro": "allegro.exe",
+    # allegro_batch.exe (the "central batch utility" multiplexer) is confirmed to have at
+    # least one broken sub-program dispatch (dbdoctor: "Cannot find program 'dbdoctor'")
+    # even though its own -help/<program> -help output is fine — so tools call each
+    # underlying standalone exe directly instead of routing through it. Kept registered
+    # here only for its own -help-style discovery value, not for running sub-programs.
     "allegro_batch": "allegro_batch.exe",
+    "allegro_report": "report.exe",
+    "allegro_dbdoctor": "dbdoctor.exe",
 }
 
 # logical name -> exe filename under SIGRITY_HOME/tools/bin

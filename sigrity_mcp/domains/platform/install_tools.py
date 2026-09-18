@@ -12,24 +12,75 @@ import configparser
 from sigrity_mcp.core import executables
 from sigrity_mcp.core.config import settings
 from sigrity_mcp.core.process import run_quick
+from sigrity_mcp.core.tool_status import get_tool_status
 from sigrity_mcp.mcp_app import mcp
+
+
+def _tools_with_status(names: dict[str, bool]) -> dict[str, dict]:
+    return {name: {"available": present, **get_tool_status(name)} for name, present in names.items()}
 
 
 @mcp.tool
 async def list_sigrity_tools() -> dict:
-    """List every Sigrity/FlexNet executable this MCP suite knows how to drive, and whether it's actually installed here.
+    """List every Sigrity/FlexNet/Allegro-OrCAD executable this MCP suite knows how to drive: is it installed, and has it actually been proven to work.
 
-    Cross-checks the suite's internal tool registry against disk. A tool being 'available:
-    false' means either this Sigrity edition doesn't include it, or SIGRITY_HOME is
-    misconfigured — check get_install_info's `product_path` first.
+    Each entry has `available` (the exe is present on disk — a false here means either
+    this edition doesn't include it or SIGRITY_HOME/SIGRITY_CADENCE_SPB_HOME is
+    misconfigured, check get_install_info's `product_path` first) and a verification
+    `status`: 'confirmed_live' (actually run successfully against a real license and
+    design), 'built_untested' (implemented and unit-tested but never run live — treat
+    exact command/flag spellings as best-effort), or 'known_blocked' (attempted live and
+    found genuinely stuck — see its `note` for specifics). This status is a hand-curated
+    fact, not a live license query — `lmutil lmstat` has been proven unreliable as a
+    predictor of real tool usability on this machine (PowerSI/PowerDC both work despite
+    it reporting the license server unreachable), so don't rely on lmstat-based tools to
+    answer "can I actually run this" — this field is the honest answer to that question.
     """
     report = executables.available_tools()
+    tools = _tools_with_status(report)
     return {
         "sigrity_home": str(settings.home),
         "license_manager_home": str(settings.license_manager_home),
+        "cadence_spb_home": str(settings.cadence_spb_home),
+        "available_count": sum(report.values()),
+        "confirmed_live_count": sum(1 for t in tools.values() if t["status"] == "confirmed_live"),
+        "total_count": len(report),
+        "tools": tools,
+    }
+
+
+@mcp.tool
+async def list_allegro_tools() -> dict:
+    """List the Allegro/OrCAD (CAD creation) executables this suite knows about, whether each is installed, and its verification status.
+
+    Same shape and status semantics as list_sigrity_tools, scoped to the separate
+    Allegro/OrCAD SPB install (schematic capture, PCB layout) rather than the Sigrity
+    Suite. As of this writing `allegro`/`capture` (the two GUI editors) are
+    'known_blocked': launching either — even with a documented print-and-exit flag, or
+    an explicit `-product=<name>` argument — opens an interactive product/license-
+    chooser dialog and blocks there rather than proceeding headlessly, on this machine,
+    right now. This is NOT a license failure (the dialog genuinely lists real license
+    tiers, including Sigrity Aurora, as available choices) — it looks like a one-time
+    per-user-profile interactive confirmation that hasn't been done yet.
+    The standalone batch/report executables (`allegro_report`, `allegro_dbdoctor`, ...)
+    are a different, confirmed-safe story: genuinely headless and NOT affected by the
+    dialog blocker — each already ran a real operation against a real board sample
+    end-to-end. `allegro_batch` (the "central batch utility" multiplexer that wraps
+    ~68 of these) is itself unreliable at actually dispatching to them (confirmed:
+    routing `dbdoctor` through it failed outright even though calling `dbdoctor.exe`
+    directly works), so this suite calls each standalone exe directly instead. Design
+    *creation* (placing components, defining nets/board outline/stackup) still needs a
+    live SKILL/Tcl session inside allegro.exe/Capture.exe, so that half of "CAD
+    creation" remains blocked until the product-chooser dialog is resolved — check each
+    entry's `note` for the exact symptom observed.
+    """
+    cad_names = set(executables.CAD_EXECUTABLES)
+    report = {name: present for name, present in executables.available_tools().items() if name in cad_names}
+    return {
+        "cadence_spb_home": str(settings.cadence_spb_home),
         "available_count": sum(report.values()),
         "total_count": len(report),
-        "tools": report,
+        "tools": _tools_with_status(report),
     }
 
 

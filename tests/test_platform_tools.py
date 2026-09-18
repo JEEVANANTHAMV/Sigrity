@@ -11,6 +11,7 @@ from sigrity_mcp.domains.platform.install_tools import (
     check_name_server,
     get_cds_environment_info,
     get_install_info,
+    list_allegro_tools,
     list_sigrity_tools,
 )
 from sigrity_mcp.domains.platform.license_tools import get_license_host_id, get_license_server_status
@@ -41,6 +42,22 @@ async def test_list_sigrity_tools_reports_every_registered_name():
     expected = set(executables.EXECUTABLES) | set(executables.LICENSE_EXECUTABLES) | set(executables.CAD_EXECUTABLES)
     assert set(report["tools"].keys()) == expected
     assert report["total_count"] == len(expected)
+    assert report["tools"]["powersi"]["status"] == "confirmed_live"
+    assert report["confirmed_live_count"] >= 2  # powersi + powerdc, at minimum
+
+
+async def test_list_allegro_tools_scoped_to_cad_registry():
+    report = await list_allegro_tools()
+    assert set(report["tools"].keys()) == set(executables.CAD_EXECUTABLES)
+    # allegro/capture (GUI apps) were actually tried live and hit the product-chooser
+    # dialog; allegro_batch (a separate CLI multiplexer) has not been tried yet at all.
+    assert report["tools"]["allegro"]["status"] == "known_blocked"
+    assert report["tools"]["allegro"]["note"]
+    assert report["tools"]["capture"]["status"] == "known_blocked"
+    assert report["tools"]["capture"]["note"]
+    assert report["tools"]["allegro_batch"]["status"] == "known_blocked"
+    assert report["tools"]["allegro_report"]["status"] == "confirmed_live"
+    assert report["tools"]["allegro_dbdoctor"]["status"] == "confirmed_live"
 
 
 @requires_sigrity
