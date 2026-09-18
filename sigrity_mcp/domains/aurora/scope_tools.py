@@ -1,8 +1,9 @@
 """Domain 4 (Sigrity Aurora / In-Design Analysis) tools.
 
 See the package docstring in `sigrity_mcp/domains/aurora/__init__.py` for the full
-research finding this domain is built on: Aurora runs inside Allegro/OrCAD X, not as a
-standalone Sigrity Suite tool, and no Allegro/OrCAD install exists on this machine.
+research finding this domain is built on: Allegro/OrCAD (SPB 22.1) IS installed on this
+machine, and Aurora is a real, confirmed GUI-only mode inside it with zero CLI/SKILL
+automation surface for any of its six checks.
 """
 
 from __future__ import annotations
@@ -54,16 +55,20 @@ async def get_aurora_scope_notice() -> dict:
     """Explain what this MCP suite can and cannot do for Sigrity Aurora / in-design analysis, and why.
 
     Call this before trying to "run Aurora" through this suite — there is no Aurora
-    tool here to run. Aurora is Cadence's real-time SI/PI/power-aware checking flow
-    that runs *inside* Allegro/OrCAD X PCB Editor during layout, using Sigrity's
-    simulation engines as a linked library. It has no standalone executable, and no
-    Allegro/OrCAD install exists on this machine (confirmed: zero Aurora-named files
-    anywhere under the Sigrity Suite install, despite "Sigrity Aurora" appearing as a
-    licensed product *bundle name* in this machine's install manifest — that bundle
-    entry describes what the license covers if Allegro/OrCAD were also installed, not
-    a tool present here). No public documentation of an Aurora-specific SKILL/Tcl
-    scripting surface was found either, so even a hypothetical future Allegro install
-    couldn't be safely automated from what's confirmed today.
+    tool here to run, even though Allegro/OrCAD (SPB 22.1, at C:\\Cadence\\SPB_22.1) IS
+    installed on this machine. Aurora is a real, license-gated MODE inside `allegro.exe`
+    itself (selected at its GUI product-chooser dialog, then driven entirely through
+    `Analyze -> Workflow Manager`), performing six checks — impedance, coupling,
+    crosstalk, return path, reflection, IR drop — each menu/dialog-driven with zero CLI
+    or SKILL automation surface found anywhere in Allegro's own SKILL function reference
+    or narrative docs. Automating it would mean scripting mouse clicks through a GUI,
+    which this suite doesn't do for any tool.
+
+    One name-collision worth knowing about: `C:\\Cadence\\SPB_22.1\\tools\\bin\\aurora.exe`
+    looks like it should be this feature, but is a same-name-different-product false
+    lead — a launcher for Allegro Design Workbench (a PDM/design-collaboration tool),
+    confirmed via its own config folder and a full-tree grep finding zero references to
+    it from anywhere in Allegro's SI/PI-analysis code paths.
 
     What IS honestly available: every check Aurora performs in-design has a
     post-layout equivalent already implemented in this suite's other domains — see
@@ -72,19 +77,26 @@ async def get_aurora_scope_notice() -> dict:
     return {
         "aurora_available": False,
         "reason": (
-            "Sigrity Aurora runs inside Allegro/OrCAD X PCB Editor, not as a standalone "
-            "Sigrity Suite executable. No Allegro/OrCAD install is present on this "
-            "machine, and no public Aurora-specific SKILL/Tcl automation surface was "
-            "found during research, so this suite cannot launch, configure, or query "
-            "Aurora sessions without fabricating a capability it doesn't have."
+            "Sigrity Aurora is a real, license-gated GUI mode inside allegro.exe (Allegro/"
+            "OrCAD SPB 22.1, which IS installed on this machine), with zero documented "
+            "CLI or SKILL automation surface for any of its six checks — every workflow "
+            "is menu/dialog-driven only, confirmed by searching Allegro's complete SKILL "
+            "function reference (840 files) and narrative SKILL user guide for any "
+            "Aurora/Workflow-Manager-related command and finding none."
         ),
         "confirmed_by": [
-            "Zero Aurora-named executables/DLLs anywhere under C:\\Cadence\\Sigrity2024.0",
-            "This machine's install manifest lists 'Sigrity Aurora' only as a licensed "
-            "product *bundle name* (what an Allegro/OrCAD license would unlock), not an "
-            "installed component",
-            "Cadence installation-guide text: Aurora/SystemSI/SystemPI/Topology Explorer "
-            "flows run 'from the Cadence OrCAD and Allegro 22.10 base or later release'",
+            "doc/sigrity_aurora and doc/algroroute/chap13.html (Allegro's own docs) "
+            "describe every Aurora workflow as wizard/dialog-driven: net-selection "
+            "dialogs, per-workflow Analysis Options dialogs, a 'Start Analysis' button",
+            "Zero hits for 'aurora'/'WorkflowManager' anywhere in "
+            "share/pcb/examples/skill/DOC/FUNCS/ (Allegro's complete SKILL function "
+            "reference) or doc/algroskill (the narrative SKILL user guide)",
+            "aurora.exe (tools/bin) is confirmed to be an unrelated Allegro Design "
+            "Workbench/PDM launcher, not the SI/PI analysis feature — a same-name "
+            "false lead, not evidence Aurora is scriptable",
+            "allegrosigritypi.exe/allegrosigritysi.exe are confirmed plain GUI "
+            "product-launchers into Allegro (pre-selecting a license tier), not "
+            "independently batch-scriptable — no -b/-tcl-style flag exists for either",
         ],
         "see_also": "get_in_design_analysis_alternatives",
     }
@@ -95,9 +107,10 @@ async def get_in_design_analysis_alternatives() -> dict:
     """List the standalone-tool equivalents in this suite for each kind of check Sigrity Aurora performs in-design.
 
     Aurora's value is doing these checks live, inside the layout editor, as routing
-    happens. This suite can't reproduce that interactivity without Allegro/OrCAD
-    installed — but it can run the same underlying analysis after the fact (or on a
-    pre-layout stackup/topology) using PowerSI, PowerDC, Clarity3D, and XtractIM, which
-    are all confirmed real and working in this environment.
+    happens — that interactivity is GUI-only with no scripting hook, so this suite can't
+    reproduce it even though Allegro/OrCAD is installed here. What it can do is run the
+    same underlying analysis after the fact (or on a pre-layout stackup/topology) using
+    PowerSI, PowerDC, Clarity3D, and XtractIM, which are all confirmed real and working
+    in this environment.
     """
     return {"alternatives": _ALTERNATIVES}
