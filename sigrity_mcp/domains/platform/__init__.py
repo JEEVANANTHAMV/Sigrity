@@ -10,4 +10,9 @@ and untested (SigritySuiteCon.exe turned out to be a Chromium-embedded GUI shell
 scripting console), so building tools around them would be fabricating capability.
 """
 
-from sigrity_mcp.domains.platform import job_tools, license_tools, install_tools  # noqa: F401
+from sigrity_mcp.domains.platform import (  # noqa: F401
+    amm_tools,
+    install_tools,
+    job_tools,
+    license_tools,
+)

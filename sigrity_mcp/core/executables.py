@@ -29,6 +29,8 @@ EXECUTABLES: dict[str, str] = {
     "optimality": "Optimality.exe",
     "optimizepi": "OptimizePI.exe",
     "decapgenerator": "DecapGenerator.exe",
+    "amm": "Amm.exe",
+    "amlibgen": "AmLibGen.exe",
     # --- Signal Integrity & Power-Aware ---
     "powersi": "PowerSI.exe",
     "spdsim": "SPDSIM.exe",

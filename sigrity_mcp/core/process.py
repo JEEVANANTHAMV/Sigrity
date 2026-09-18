@@ -32,13 +32,23 @@ async def run_quick(tool: str, args: list[str], timeout: float = 60.0, cwd: Opti
         proc.kill()
         stdout = b""
         timed_out = True
-    return {
+    returncode = _normalize_returncode(proc.returncode)
+    output = stdout.decode(errors="replace")
+    result = {
         "tool": tool,
         "command": [str(exe), *args],
-        "returncode": _normalize_returncode(proc.returncode),
+        "returncode": returncode,
         "timed_out": timed_out,
-        "output": stdout.decode(errors="replace"),
+        "output": output,
     }
+    if not timed_out and returncode is not None and returncode < 0 and not output.strip():
+        result["note"] = (
+            "Process exited immediately with a negative code and no output. On this suite "
+            "that pattern has been observed when the FlexNet license server is unreachable "
+            "(licensed Sigrity tools abort silently before printing anything in that case) — "
+            "call get_license_server_status to check before assuming this is a tool bug."
+        )
+    return result
 
 
 def _normalize_returncode(code: Optional[int]) -> Optional[int]:
