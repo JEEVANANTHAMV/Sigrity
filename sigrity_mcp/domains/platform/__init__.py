@@ -15,4 +15,5 @@ from sigrity_mcp.domains.platform import (  # noqa: F401
     install_tools,
     job_tools,
     license_tools,
+    session_tools,
 )
