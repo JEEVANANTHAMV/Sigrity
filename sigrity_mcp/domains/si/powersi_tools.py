@@ -228,6 +228,12 @@ async def powersi_run_session(
 ) -> dict:
     """Write out the session's accumulated Tcl macro and launch PowerSI against it as a background job.
 
+    Before running, this appends `sigrity::begin simulation {!}` as the macro's final
+    line. This is required, not optional: PowerSI's batch CLI only auto-starts the
+    simulation if the script actually contains a simulation-trigger command — confirmed
+    empirically (a session without it opens the design, applies settings, and exits
+    with returncode 0 having done nothing else at all; adding this line is what makes it
+    actually simulate and produce exportable results).
     Runs `powersi.exe -b <-ft|-fb|-fbt> -tcl <macro.tcl> [spd_file]`. Only pass
     `spd_file` if the design isn't already the one opened by start_powersi_session (e.g.
     to run the same macro against a different layout) — most callers should omit it.
@@ -235,6 +241,7 @@ async def powersi_run_session(
     files), 'bnp' (-fb, Sigrity's binary format, the CLI default), or 'both' (-fbt).
     Returns a job_id immediately; poll it with get_job_status/wait_for_job.
     """
+    tcl_sessions.add_line(session_id, "sigrity::begin simulation {!}")
     fmt_flag = {"touchstone": "-ft", "bnp": "-fb", "both": "-fbt"}[output_format]
     record = await run_session(
         session_id,
