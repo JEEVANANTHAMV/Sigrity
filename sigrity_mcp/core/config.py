@@ -24,6 +24,11 @@ class SigritySettings(BaseSettings):
     license_manager_home: Path = Path(r"C:\Cadence\LicenseManager")
     """Install directory of the Cadence FlexNet License Manager (contains lmutil.exe)."""
 
+    cadence_spb_home: Path = Path(r"C:\Cadence\SPB_22.1")
+    """Root install directory of Allegro/OrCAD (Silicon Package Board) — a separate,
+    sibling Cadence product line from the Sigrity Suite, used for CAD creation (schematic
+    capture, PCB layout). Same tools/bin layout convention as Sigrity's `home`."""
+
     license_file: str = "5280@localhost"
     """Default FlexNet license server spec, as understood by `lmutil lmstat -c`. Matches
     this machine's CDS_LIC_FILE env var by default; override if your license server differs."""
@@ -43,6 +48,10 @@ class SigritySettings(BaseSettings):
     @property
     def bin_dir(self) -> Path:
         return self.home / self.bin_subdir
+
+    @property
+    def cad_bin_dir(self) -> Path:
+        return self.cadence_spb_home / self.bin_subdir
 
     def resolve_workdir(self) -> Path:
         wd = self.workdir if self.workdir.is_absolute() else Path.cwd() / self.workdir

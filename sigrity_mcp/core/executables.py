@@ -19,6 +19,15 @@ LICENSE_EXECUTABLES: dict[str, str] = {
     "lmutil": "lmutil.exe",
 }
 
+# logical name -> exe filename under SIGRITY_CADENCE_SPB_HOME/tools/bin — Allegro/OrCAD
+# (Silicon Package Board), a separate sibling product line from the Sigrity Suite, used
+# for CAD creation (schematic capture, PCB layout) rather than post-layout analysis.
+CAD_EXECUTABLES: dict[str, str] = {
+    "capture": "Capture.exe",
+    "allegro": "allegro.exe",
+    "allegro_batch": "allegro_batch.exe",
+}
+
 # logical name -> exe filename under SIGRITY_HOME/tools/bin
 EXECUTABLES: dict[str, str] = {
     # --- Power Integrity ---
@@ -83,36 +92,50 @@ EXECUTABLES: dict[str, str] = {
 }
 
 
+def _registries() -> list[tuple[dict[str, str], Path, str]]:
+    """Each registry paired with the base dir its filenames resolve against and a
+    human-readable hint for the error message when a file is missing. Order matters only
+    in that the first dict containing `name` wins; names are unique across all three today."""
+    return [
+        (EXECUTABLES, settings.bin_dir, f"Check SIGRITY_HOME (currently {settings.home})"),
+        (
+            LICENSE_EXECUTABLES,
+            settings.license_manager_home,
+            f"Check SIGRITY_LICENSE_MANAGER_HOME (currently {settings.license_manager_home})",
+        ),
+        (
+            CAD_EXECUTABLES,
+            settings.cad_bin_dir,
+            f"Check SIGRITY_CADENCE_SPB_HOME (currently {settings.cadence_spb_home})",
+        ),
+    ]
+
+
 @lru_cache(maxsize=None)
 def resolve(name: str) -> Path:
     """Resolve a logical tool name to its absolute executable path.
 
-    Checks the Sigrity Suite registry first, then the FlexNet license-manager registry.
-    Raises ExecutableNotFoundError if the name is unknown in both, or if the exe is not
-    present on disk (e.g. a differently-licensed/installed Sigrity edition).
+    Checks the Sigrity Suite, FlexNet license-manager, and Allegro/OrCAD registries in
+    turn. Raises ExecutableNotFoundError if the name is unknown in all three, or if the
+    exe is not present on disk (e.g. a differently-licensed/installed edition).
     """
-    if name in EXECUTABLES:
-        path = settings.bin_dir / EXECUTABLES[name]
-        hint = f"Check SIGRITY_HOME (currently {settings.home})"
-    elif name in LICENSE_EXECUTABLES:
-        path = settings.license_manager_home / LICENSE_EXECUTABLES[name]
-        hint = f"Check SIGRITY_LICENSE_MANAGER_HOME (currently {settings.license_manager_home})"
-    else:
-        known = sorted(set(EXECUTABLES) | set(LICENSE_EXECUTABLES))
-        raise ExecutableNotFoundError(f"Unknown Sigrity tool '{name}'. Known tools: {known}")
+    for registry, base_dir, hint in _registries():
+        if name in registry:
+            path = base_dir / registry[name]
+            if not path.is_file():
+                raise ExecutableNotFoundError(
+                    f"'{name}' should be at {path} but the file does not exist. {hint} and "
+                    "confirm this component was installed."
+                )
+            return path
 
-    if not path.is_file():
-        raise ExecutableNotFoundError(
-            f"'{name}' should be at {path} but the file does not exist. {hint} and confirm "
-            "this component was installed."
-        )
-    return path
+    known = sorted(set(EXECUTABLES) | set(LICENSE_EXECUTABLES) | set(CAD_EXECUTABLES))
+    raise ExecutableNotFoundError(f"Unknown Sigrity tool '{name}'. Known tools: {known}")
 
 
 def available_tools() -> dict[str, bool]:
     """Report, for every registered logical tool name, whether the exe is actually present."""
-    report = {name: (settings.bin_dir / exe).is_file() for name, exe in EXECUTABLES.items()}
-    report.update(
-        {name: (settings.license_manager_home / exe).is_file() for name, exe in LICENSE_EXECUTABLES.items()}
-    )
+    report: dict[str, bool] = {}
+    for registry, base_dir, _hint in _registries():
+        report.update({name: (base_dir / exe).is_file() for name, exe in registry.items()})
     return report

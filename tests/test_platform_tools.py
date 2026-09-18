@@ -38,7 +38,7 @@ async def test_get_install_info_reads_real_manifest():
 @requires_sigrity
 async def test_list_sigrity_tools_reports_every_registered_name():
     report = await list_sigrity_tools()
-    expected = set(executables.EXECUTABLES) | set(executables.LICENSE_EXECUTABLES)
+    expected = set(executables.EXECUTABLES) | set(executables.LICENSE_EXECUTABLES) | set(executables.CAD_EXECUTABLES)
     assert set(report["tools"].keys()) == expected
     assert report["total_count"] == len(expected)
 

@@ -1,9 +1,16 @@
 import sys
+from pathlib import Path
 
 import pytest
 
 from sigrity_mcp.core.errors import JobNotFoundError
-from sigrity_mcp.core.tclsession import TclSessionManager, SessionNotFoundError, run_session
+from sigrity_mcp.core.tclsession import (
+    ScriptSession,
+    ScriptSessionManager,
+    TclSessionManager,
+    SessionNotFoundError,
+    run_session,
+)
 from sigrity_mcp.core.jobs import JobManager
 
 
@@ -79,3 +86,28 @@ async def test_run_session_writes_script_and_launches_job(tmp_path, monkeypatch)
 async def test_run_session_unknown_id_raises():
     with pytest.raises(SessionNotFoundError):
         await run_session("nope", tool="powersi")
+
+
+def test_tcl_session_is_alias_for_script_session():
+    assert TclSessionManager is ScriptSessionManager
+    mgr = TclSessionManager()
+    session = mgr.create("allegro")
+    assert isinstance(session, ScriptSession)
+
+
+@pytest.mark.asyncio
+async def test_run_session_supports_positional_arg_and_custom_filename(fake_exe):
+    from sigrity_mcp.core.tclsession import tcl_sessions
+
+    session = tcl_sessions.create("capture")
+    tcl_sessions.add_line(session.session_id, "puts hello")
+
+    record = await run_session(
+        session.session_id,
+        tool="fake_tool",
+        tcl_arg_flag=None,
+        build_args=["-product=OrCAD Capture"],
+        script_filename="macro.tcl",
+    )
+    script_path = str(Path(record.job_dir) / "macro.tcl")
+    assert record.command[1:] == ["-product=OrCAD Capture", script_path]

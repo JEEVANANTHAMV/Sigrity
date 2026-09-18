@@ -64,13 +64,21 @@ async def submit_job(
     tool: str,
     build_args: list[str] | None = None,
     tcl_script: Optional[TclScript] = None,
-    tcl_arg_flag: str = "-TCL",
+    tcl_arg_flag: Optional[str] = "-TCL",
     extra_args: list[str] | None = None,
+    script_filename: str = "macro.tcl",
 ) -> JobRecord:
     """Write `tcl_script` (if given) into a fresh job directory, then launch `tool` against it.
 
-    `build_args` are literal argv tokens placed before the tcl flag (e.g. an input file path).
-    `extra_args` are appended after the tcl script argument.
+    `build_args` are literal argv tokens placed before the script argument (e.g. an input
+    file path). `extra_args` are appended after it. `tcl_arg_flag` is the flag token placed
+    immediately before the script path (e.g. "-tcl"); pass `None` for tools that take the
+    script path as a bare positional argument instead (e.g. OrCAD Capture's
+    `capture -product=... script.tcl`, with no preceding flag at all). `script_filename`
+    controls the on-disk name the script is written under within the job directory —
+    override it for non-Tcl script languages (e.g. "macro.scr" for an Allegro SKILL
+    command-replay script) so `list_job_files`/`read_job_output_file` output isn't
+    misleadingly named.
     Returns immediately once the process has been *started*; use job_manager.status()/wait()
     to track completion.
     """
@@ -79,8 +87,11 @@ async def submit_job(
 
     argv: list[str] = list(build_args or [])
     if tcl_script is not None:
-        script_path = tcl_script.write(job_dir / "macro.tcl")
-        argv += [tcl_arg_flag, str(script_path)]
+        script_path = tcl_script.write(job_dir / script_filename)
+        if tcl_arg_flag is None:
+            argv += [str(script_path)]
+        else:
+            argv += [tcl_arg_flag, str(script_path)]
     argv += list(extra_args or [])
 
     command = [str(exe), *argv]
