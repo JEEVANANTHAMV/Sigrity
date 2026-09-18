@@ -10,6 +10,7 @@ from sigrity_mcp.domains.si.powersi_tools import (
     powersi_export_rlgc,
     powersi_generate_html_report,
     powersi_run_session,
+    powersi_save_document,
     powersi_set_frequency_sweep,
     powersi_set_mode,
     start_powersi_session,
@@ -26,9 +27,10 @@ async def test_start_session_opens_document():
 
 @pytest.mark.asyncio
 async def test_compose_tools_append_expected_tcl():
-    session = await start_powersi_session(spd_file="board.spd")
+    session = await start_powersi_session(spd_file="board.brd")
     sid = session["session_id"]
 
+    await powersi_save_document(sid, "board.spd")
     await powersi_set_mode(sid, "extraction")
     await powersi_set_frequency_sweep(sid, "1MHz", "20GHz", use_afs=True)
     await powersi_add_ports_auto(sid, ref_des="U1", signal_ref_impedance=50)
@@ -39,6 +41,7 @@ async def test_compose_tools_append_expected_tcl():
     await powersi_generate_html_report(sid)
 
     script = tcl_sessions.preview(sid)
+    assert "sigrity::save {board.spd} {!}" in script
     assert "sigrity::update option -mode {extraction} {!}" in script
     assert "-start {1MHz} -end {20GHz} -AFS {!}" in script
     assert "sigrity::add port -all -circuit {U1} -SignalRefZ {50} {!}" in script

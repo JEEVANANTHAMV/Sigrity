@@ -11,6 +11,13 @@ script and actually launches PowerSI once). Use preview_tcl_session/close_tcl_se
 (sigrity_mcp.domains.platform.session_tools) to inspect or discard a session, and the
 job-control tools (get_job_status, tail_job_log, list_job_files, read_job_output_file)
 to track/retrieve the run started by powersi_run_session.
+
+Confirmed live: this is also the real CAD-to-analysis bridge for this whole suite — a
+real Allegro/OrCAD 22.1 `.brd` file (e.g. one written by the cad domain's Allegro tools)
+opens directly via start_powersi_session, auto-translated by PowerSI's built-in
+"BRDExtractor". Call powersi_save_document right after opening a non-`.spd` design and
+before adding any other steps — PowerSI refuses to simulate a design that hasn't been
+saved to native SPD form first.
 """
 
 from __future__ import annotations
@@ -29,16 +36,41 @@ _MODES = Literal[
 
 @mcp.tool
 async def start_powersi_session(spd_file: str) -> dict:
-    """Begin a new PowerSI automation session by opening a layout (.spd) design.
+    """Begin a new PowerSI automation session by opening a layout design.
 
+    Confirmed live: PowerSI's `sigrity::open document` accepts more than native `.spd`
+    files — it also directly opened a real Allegro/OrCAD 22.1 `.brd` file (via its
+    built-in "BRDExtractor" translator, invoked automatically, no separate translate
+    step needed) and made it available to the rest of the session. This is the real,
+    confirmed CAD-to-analysis bridge: create/export a board in Allegro, hand its `.brd`
+    straight to `spd_file` here.
+    One consequence, also confirmed live: a design opened from a non-`.spd` format is
+    NOT yet in native SPD form — PowerSI refuses to simulate it ("Cannot run the
+    simulation because the loaded design file is not in SPD format") until you call
+    powersi_save_document to save it as `.spd` first. Call that before
+    powersi_run_session whenever `spd_file` isn't already a `.spd` path.
     Returns a session_id — pass it to every other powersi_* tool below to keep adding
-    steps (ports, frequency sweep, exports, ...) to the same macro, then finish with
-    powersi_run_session. Nothing is executed yet; this only records
+    steps (save, ports, frequency sweep, exports, ...) to the same macro, then finish
+    with powersi_run_session. Nothing is executed yet; this only records
     `sigrity::open document {<spd_file>} {!}` in the session's script.
     """
     session = tcl_sessions.create("powersi")
     tcl_sessions.add_line(session.session_id, f"sigrity::open document {tcl_path(spd_file)} {{!}}")
     return {"session_id": session.session_id, "spd_file": spd_file}
+
+
+@mcp.tool
+async def powersi_save_document(session_id: str, spd_file: str) -> dict:
+    """Save the currently-open design to a native `.spd` file.
+
+    Confirmed live: required after opening a non-`.spd` design (e.g. a real Allegro
+    `.brd`, translated automatically on open by PowerSI's built-in BRDExtractor) before
+    powersi_run_session can actually simulate it — PowerSI errors on `begin simulation`
+    otherwise ("the loaded design file is not in SPD format"). Appends
+    `sigrity::save {<spd_file>} {!}`.
+    """
+    tcl_sessions.add_line(session_id, f"sigrity::save {tcl_path(spd_file)} {{!}}")
+    return {"session_id": session_id, "spd_file": spd_file}
 
 
 @mcp.tool
