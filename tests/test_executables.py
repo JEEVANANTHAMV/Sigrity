@@ -17,4 +17,5 @@ def test_all_registered_names_have_exe_suffix():
 
 def test_available_tools_matches_registry_keys():
     report = executables.available_tools()
-    assert set(report.keys()) == set(executables.EXECUTABLES.keys())
+    expected = set(executables.EXECUTABLES) | set(executables.LICENSE_EXECUTABLES)
+    assert set(report.keys()) == expected

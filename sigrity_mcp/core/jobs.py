@@ -92,6 +92,8 @@ class JobManager:
 
     async def _watch(self, job_id: str, proc: asyncio.subprocess.Process, log_file) -> None:
         returncode = await proc.wait()
+        if returncode > 0x7FFFFFFF:
+            returncode -= 0x100000000
         log_file.close()
         record = self._jobs[job_id]
         record.returncode = returncode

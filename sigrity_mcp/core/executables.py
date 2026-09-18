@@ -13,6 +13,12 @@ from pathlib import Path
 from sigrity_mcp.core.config import settings
 from sigrity_mcp.core.errors import ExecutableNotFoundError
 
+# logical name -> exe filename, resolved against C:\Cadence\LicenseManager (FlexNet client
+# tools ship separately from the Sigrity Suite install itself).
+LICENSE_EXECUTABLES: dict[str, str] = {
+    "lmutil": "lmutil.exe",
+}
+
 # logical name -> exe filename under SIGRITY_HOME/tools/bin
 EXECUTABLES: dict[str, str] = {
     # --- Power Integrity ---
@@ -72,23 +78,32 @@ EXECUTABLES: dict[str, str] = {
 def resolve(name: str) -> Path:
     """Resolve a logical tool name to its absolute executable path.
 
-    Raises ExecutableNotFoundError if the name is unknown, or if the exe is not present
-    on disk (e.g. a differently-licensed/installed Sigrity edition).
+    Checks the Sigrity Suite registry first, then the FlexNet license-manager registry.
+    Raises ExecutableNotFoundError if the name is unknown in both, or if the exe is not
+    present on disk (e.g. a differently-licensed/installed Sigrity edition).
     """
-    if name not in EXECUTABLES:
-        raise ExecutableNotFoundError(
-            f"Unknown Sigrity tool '{name}'. Known tools: {sorted(EXECUTABLES)}"
-        )
-    path = settings.bin_dir / EXECUTABLES[name]
+    if name in EXECUTABLES:
+        path = settings.bin_dir / EXECUTABLES[name]
+        hint = f"Check SIGRITY_HOME (currently {settings.home})"
+    elif name in LICENSE_EXECUTABLES:
+        path = settings.license_manager_home / LICENSE_EXECUTABLES[name]
+        hint = f"Check SIGRITY_LICENSE_MANAGER_HOME (currently {settings.license_manager_home})"
+    else:
+        known = sorted(set(EXECUTABLES) | set(LICENSE_EXECUTABLES))
+        raise ExecutableNotFoundError(f"Unknown Sigrity tool '{name}'. Known tools: {known}")
+
     if not path.is_file():
         raise ExecutableNotFoundError(
-            f"'{name}' should be at {path} but the file does not exist. "
-            f"Check SIGRITY_HOME (currently {settings.home}) and confirm this component "
-            "was installed."
+            f"'{name}' should be at {path} but the file does not exist. {hint} and confirm "
+            "this component was installed."
         )
     return path
 
 
 def available_tools() -> dict[str, bool]:
     """Report, for every registered logical tool name, whether the exe is actually present."""
-    return {name: (settings.bin_dir / exe).is_file() for name, exe in EXECUTABLES.items()}
+    report = {name: (settings.bin_dir / exe).is_file() for name, exe in EXECUTABLES.items()}
+    report.update(
+        {name: (settings.license_manager_home / exe).is_file() for name, exe in LICENSE_EXECUTABLES.items()}
+    )
+    return report

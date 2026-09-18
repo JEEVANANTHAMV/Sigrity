@@ -35,10 +35,19 @@ async def run_quick(tool: str, args: list[str], timeout: float = 60.0, cwd: Opti
     return {
         "tool": tool,
         "command": [str(exe), *args],
-        "returncode": proc.returncode,
+        "returncode": _normalize_returncode(proc.returncode),
         "timed_out": timed_out,
         "output": stdout.decode(errors="replace"),
     }
+
+
+def _normalize_returncode(code: Optional[int]) -> Optional[int]:
+    """Windows reports a negative process exit code as its unsigned 32-bit wraparound
+    (e.g. -15 comes back as 4294967281); undo that so callers see the code the tool
+    actually set."""
+    if code is not None and code > 0x7FFFFFFF:
+        return code - 0x100000000
+    return code
 
 
 async def submit_job(

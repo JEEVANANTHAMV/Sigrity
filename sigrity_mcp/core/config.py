@@ -21,6 +21,13 @@ class SigritySettings(BaseSettings):
     bin_subdir: str = r"tools\bin"
     """Subdirectory of `home` that contains the tool executables."""
 
+    license_manager_home: Path = Path(r"C:\Cadence\LicenseManager")
+    """Install directory of the Cadence FlexNet License Manager (contains lmutil.exe)."""
+
+    license_file: str = "5280@localhost"
+    """Default FlexNet license server spec, as understood by `lmutil lmstat -c`. Matches
+    this machine's CDS_LIC_FILE env var by default; override if your license server differs."""
+
     workdir: Path = Path("runs")
     """Directory (relative to CWD unless absolute) where per-job scratch folders are created."""
 

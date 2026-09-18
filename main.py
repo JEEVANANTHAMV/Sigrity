@@ -1,5 +1,8 @@
+from sigrity_mcp.server import mcp
+
+
 def main():
-    print("Hello from sigrity-mcp!")
+    mcp.run()
 
 
 if __name__ == "__main__":
