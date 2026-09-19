@@ -10,9 +10,18 @@ from __future__ import annotations
 from pathlib import Path
 
 
+_TOUCHSTONE_HARD_CAP_BYTES = 500 * 1024 * 1024
+
+
 def touchstone_summary(path: str | Path) -> dict:
     """Parse the header of a Touchstone file (.s1p/.s2p/.s4p/...) without loading the matrix."""
     path = Path(path)
+    size = path.stat().st_size
+    if size > _TOUCHSTONE_HARD_CAP_BYTES:
+        # Defense in depth against the same runaway-output class of bug documented in
+        # core.config's `max_log_bytes` — a genuine Touchstone export has never
+        # approached this size in any real run on this machine; something is wrong.
+        return {"path": str(path), "size_bytes": size, "note": "file too large to parse safely — inspect manually"}
     text = path.read_text(encoding="utf-8", errors="replace")
     option_line = None
     port_count = None
@@ -37,18 +46,45 @@ def touchstone_summary(path: str | Path) -> dict:
     }
 
 
+_PREVIEW_HEAD_BYTES = 512 * 1024
+_PREVIEW_TAIL_BYTES = 512 * 1024
+
+
 def text_preview(path: str | Path, max_lines: int = 80) -> dict:
-    """Return the first/last few lines of a text report/log file plus its size."""
+    """Return the first/last few lines of a text report/log file plus its size.
+
+    Reads only bounded head/tail byte windows, never the whole file — a real incident
+    on this machine (see core.config's `max_log_bytes` docstring) saw a job's output
+    file grow to ~150GB; `path.read_text()` on that would exhaust memory regardless of
+    how small `max_lines` was, since the whole file has to be loaded before it can be
+    split into lines and trimmed.
+    """
     path = Path(path)
-    lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
-    head = lines[: max_lines // 2]
-    tail = lines[-max_lines // 2 :] if len(lines) > max_lines // 2 else []
+    size = path.stat().st_size
+    half = max(1, max_lines // 2)
+
+    with open(path, "rb") as f:
+        head_bytes = f.read(_PREVIEW_HEAD_BYTES)
+        whole_file = size <= _PREVIEW_HEAD_BYTES
+        if not whole_file:
+            f.seek(max(0, size - _PREVIEW_TAIL_BYTES))
+            tail_bytes = f.read()
+
+    head_all_lines = head_bytes.decode("utf-8", errors="replace").splitlines()
+    head_lines = head_all_lines[:half]
+    # Whole small file: derive both head and tail from the one read. Large file: the
+    # tail comes from the separate end-of-file window read above instead.
+    tail_lines = head_all_lines[-half:] if whole_file else tail_bytes.decode("utf-8", errors="replace").splitlines()[-half:]
+    # total_lines is only exact for files small enough to have been read whole above;
+    # otherwise it's unknown rather than a misleadingly-precise-looking guess.
+    total_lines = len(head_all_lines) if whole_file else None
     return {
         "path": str(path),
-        "total_lines": len(lines),
-        "head": head,
-        "tail": tail if tail and tail != head else [],
-        "size_bytes": path.stat().st_size,
+        "total_lines": total_lines,
+        "total_lines_note": None if total_lines is not None else "file too large to count exactly; head/tail only",
+        "head": head_lines,
+        "tail": tail_lines if tail_lines and tail_lines != head_lines else [],
+        "size_bytes": size,
     }
 
 

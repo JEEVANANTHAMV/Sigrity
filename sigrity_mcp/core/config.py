@@ -45,6 +45,18 @@ class SigritySettings(BaseSettings):
     max_log_tail_lines: int = 400
     """Cap on how many lines a "tail log" style tool will return in one call."""
 
+    max_log_bytes: int = 200 * 1024 * 1024
+    """Runaway-process safety net: if a job's log file grows past this size, JobManager
+    force-kills it and marks the job "failed" with an explanatory note, instead of
+    letting it run forever. Added after a real incident on this machine: `report.exe`/
+    `step_out.exe`/`ipc356_out.exe`, given a nonexistent board-file path, entered an
+    unbounded output loop instead of failing fast — one such job's log reached ~150GB
+    before being caught and killed by hand. 200MB is already far beyond any legitimate
+    Sigrity/Allegro log this suite has seen in real testing."""
+
+    log_watchdog_poll_seconds: float = 2.0
+    """How often JobManager polls a running job's log size against `max_log_bytes`."""
+
     @property
     def bin_dir(self) -> Path:
         return self.home / self.bin_subdir
