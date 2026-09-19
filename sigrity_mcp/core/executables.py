@@ -33,6 +33,33 @@ CAD_EXECUTABLES: dict[str, str] = {
     "allegro_batch": "allegro_batch.exe",
     "allegro_report": "report.exe",
     "allegro_dbdoctor": "dbdoctor.exe",
+    # --- DRC / rule checking (confirmed live headless CLI, see allegro_drc_tools.py) ---
+    "allegro_batch_drc": "batch_drc.exe",
+    "allegro_checkplus": "checkplus.exe",
+    # --- Placement & routing (confirmed live standalone CLI, see allegro_placement_tools.py) ---
+    "allegro_placement": "placement.exe",
+    "allegro_ncroute": "ncroute.exe",
+    "allegro_zrouter": "zrouter.exe",
+    # --- Manufacturing output (confirmed live CLI, see allegro_manufacturing_tools.py) ---
+    "allegro_ipc2581_out": "ipc2581_out.exe",
+    "allegro_ipc356_out": "ipc356_out.exe",
+    "allegro_step_out": "step_out.exe",
+    "allegro_gbplot": "gbplot.exe",
+    # --- Library / model checking (confirmed live CLI, see allegro_library_tools.py) ---
+    "ibischk3": "ibischk3.exe",
+    "ibischk4": "ibischk4.exe",
+    "ibischk5": "ibischk5.exe",
+    "ibischk6": "ibischk6.exe",
+    "allegro_diacheck": "diacheck.exe",
+    "allegro_diacompare": "diacompare.exe",
+    # --- Design data extraction (confirmed live CLI, see allegro_extraction_tools.py) ---
+    "allegro_designextractor": "designextractor.exe",
+    # --- Interchange translators (real CLI, confirmed license-gated on this machine —
+    # see interchange_tools.py and core.tool_status) ---
+    "con2xml": "con2xml.exe",
+    "cap2xml": "cap2xml.exe",
+    "dml2con": "dml2con.exe",
+    "apd2con": "apd2con.exe",
 }
 
 # logical name -> exe filename under SIGRITY_HOME/tools/bin
@@ -86,6 +113,15 @@ EXECUTABLES: dict[str, str] = {
     "fdtdgenerator": "FDTDGenerator.exe",
     "fdtdcombine": "FDTDCombine.exe",
     "fdtdpcfmaker": "FDTDPCFMaker.exe",
+    # --- Standalone utility solvers (confirmed live self-documenting CLI, no doc-tree
+    # coverage, see extraction/utility_solvers.py) ---
+    "abcd": "abcd.exe",
+    "bem2d3": "bem2d3.exe",
+    # --- Thermal (Celsius) — confirmed live end-to-end against real
+    # share/PostInstallationCheck sample projects, see domains/thermal/ ---
+    "celsius3d": "Celsius3D.exe",
+    "celsiuscfd": "CelsiusCFD.exe",
+    "celsius2d": "Celsius2D.exe",
     # --- Unified Sigrity X platform / suite management ---
     "sigritysuite": "SigritySuite.exe",
     "sigritysuite_console": "SigritySuiteCon.exe",

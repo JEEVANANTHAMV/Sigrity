@@ -213,6 +213,39 @@ TASKS = [
             "not and what I should use instead, using the actual tools available."
         ),
     },
+    {
+        "name": "cad_drc_and_placement",
+        "user_prompt": (
+            "There's a real, already-staged Allegro board file at "
+            "C:/Users/aicoe/Desktop/Sigrity/runs/cad_smoke/board.brd (read-only, don't "
+            "modify it in place). Run a headless batch DRC pass on it, and separately "
+            "run the standalone auto-placement engine on it with output named "
+            "'placed.brd'. Tell me whether each one succeeded, and if the placement "
+            "step failed, tell me exactly what error it reported."
+        ),
+    },
+    {
+        "name": "cad_manufacturing_export_and_ibis_check",
+        "user_prompt": (
+            "Using the same real board at C:/Users/aicoe/Desktop/Sigrity/runs/"
+            "cad_smoke/board.brd (read-only), export it to IPC-2581 format and "
+            "separately to STEP (3D) format. Also, independently, check the IBIS model "
+            "at 'C:/Cadence/Sigrity2024.0/share/SpeedXP/Samples/SPEEDEM/demo.ibs' "
+            "against the IBIS 6 checker. Report whether the two exports succeeded and "
+            "summarize what the IBIS checker found (errors/warnings), don't just say "
+            "the job exited."
+        ),
+    },
+    {
+        "name": "thermal_celsius3d_signoff",
+        "user_prompt": (
+            "There's a real, already-staged Celsius3D thermal project at "
+            "C:/Users/aicoe/Desktop/Sigrity/runs/celsius3d_smoke/case.3dth. Run a full "
+            "Celsius3D electrothermal/stress simulation against it and tell me whether "
+            "the stress engine completed successfully, citing what its own log actually "
+            "said rather than just the process exit code."
+        ),
+    },
 ]
 
 

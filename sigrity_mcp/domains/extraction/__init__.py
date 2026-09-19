@@ -25,12 +25,24 @@ SigmaMesh.exe. These are internal worker processes that Clarity3D/XtractIM auto-
 during a run (mesh generation, adaptive frequency sampling, distributed/HPC dispatch) —
 none of them are documented anywhere in the shipped doc tree for direct, standalone CLI
 invocation, so wrapping them as tools would just offer a way to misuse internals the
-product itself drives automatically.
+product itself drives automatically. The same applies to a broader RF/EM-solver sweep
+done later (E100/S400/S500/S600/S610.exe, AFSfor3DEM.exe, CIE.exe, PdcMesh.exe/
+PdcSolver.exe, VFandEnforcement.exe, RootNodeSpice.exe) — every one either hung on
+`-help` with no output (GUI/internal-only) or crashed outright when probed standalone,
+and none appear in the shipped doc tree.
+
+4. **Utility solvers** (`utility_solvers.py`): two genuinely standalone, self-documenting
+   CLI tools found during that same sweep that are NOT internal workers —
+   `abcd.exe` (confirmed live via its own `-help`: Touchstone S-parameter
+   cascading/de-embedding) and `bem2d3.exe` (confirmed live via its own `-help`: a 2D
+   static field solver for transmission-line impedance/delay over x-hatched ground,
+   for rigid-flex designs).
 """
 
 from sigrity_mcp.domains.extraction import (  # noqa: F401
     clarity3d_tools,
     t2b_tools,
     translators,
+    utility_solvers,
     xtractim_tools,
 )

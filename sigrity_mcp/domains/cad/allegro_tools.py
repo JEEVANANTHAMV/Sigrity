@@ -7,15 +7,15 @@ board and replays `script.scr`'s lines against Allegro's `Command:` prompt. A
 board loaded, a real SKILL query (`axlCurrentDesign`) executed and its result written to
 a file, then a clean process exit, all within ~20 seconds.
 
-What is NOT yet confirmed: an actual database *mutation* call (`axlDBCreateNet`) did not
-complete within two minutes in the same session shape that the query call completed in
-under twenty seconds — cause unconfirmed (a hidden confirmation dialog, a genuinely slow
-first-mutation cost, or something else). So while this module implements the documented
-`axl*` creation API (net/component/board-outline/stackup/DRC), per-tool docstrings below
-flag creation calls specifically as unverified, distinct from the confirmed session/query
-mechanics themselves. Treat `allegro_run_session`'s `board_file` load and any read-only
-SKILL query as reliable; treat any `axlDBCreate*`/`axlSaveDesign`/`axlDRCUpdate` call as
-best-effort until independently confirmed.
+UPDATE: the mutation call (`axlDBCreateNet`, via `allegro_create_net`) was re-tested
+after the user resolved a machine-wide licensing issue, and now completes cleanly in
+~5.6 seconds against a real board (returncode 0) — the earlier ">2 minutes, never
+finished" result really was a license/queue-related block, not a bug in the SKILL call
+or session mechanics. Only `allegro_create_net` was independently re-confirmed this way;
+`allegro_create_component`/`allegro_create_board_outline`/`allegro_create_stackup`/
+`allegro_save_design`/`allegro_run_drc` share the same session mechanics and `axl*` API
+family but were not each individually re-run — likely also fixed, but still flagged
+per-tool as unverified below until confirmed one by one.
 
 Usage pattern: start_allegro_session -> compose tools -> allegro_run_session(session_id,
 board_file). Note `board_file` is supplied at RUN time, not composition time — Allegro
@@ -55,11 +55,12 @@ async def start_allegro_session() -> dict:
 
 @mcp.tool
 async def allegro_create_net(session_id: str, net_name: str, net_type: Optional[_NET_TYPES] = None) -> dict:
-    """Create a net in the open Allegro board (UNVERIFIED live — see module docstring).
+    """Create a net in the open Allegro board (CONFIRMED LIVE — see module docstring).
 
-    Appends `skill (axlDBCreateNet {net_name})`. `net_type` is accepted for future use
-    but not yet wired to a specific SKILL property call — pass it for documentation
-    purposes only until this is confirmed against a real board.
+    Appends `skill (axlDBCreateNet {net_name})`. Confirmed against a real board:
+    completed cleanly in ~5.6s (returncode 0), after an earlier license-related block was
+    resolved. `net_type` is accepted for future use but not yet wired to a specific
+    SKILL property call — pass it for documentation purposes only.
     """
     tcl_sessions.add_line(session_id, _skill_line(f"(axlDBCreateNet {skill_str(net_name)})"))
     return {"session_id": session_id, "net_name": net_name, "net_type": net_type}
