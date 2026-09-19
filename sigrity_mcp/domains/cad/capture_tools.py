@@ -29,7 +29,7 @@ from __future__ import annotations
 from typing import Optional
 
 from sigrity_mcp.core.tclscript import tcl_str
-from sigrity_mcp.core.tclsession import run_session, tcl_sessions
+from sigrity_mcp.core.tclsession import clear_stale_design_lock, run_session, tcl_sessions
 from sigrity_mcp.mcp_app import mcp
 
 
@@ -44,7 +44,15 @@ async def start_capture_session(project_file: str) -> dict:
     since `Open` is a Capture-specific proc rather than a standard Tcl command and its
     argument-parsing conventions are not independently confirmed to accept brace/quote
     quoting the way genuine Tcl commands do).
+    Also removes a stale `<project_file>.lck` sibling file if one exists — a live-caught
+    real cause of some of this tool's documented non-determinism: a batch run that was
+    killed rather than exiting cleanly leaves its lock behind, and the next open then
+    blocks on a modal "already open/locked" dialog with no console output at all
+    (indistinguishable from a hang until a human clicks through it). This alone may not
+    fully explain every non-deterministic run documented in this module's docstring, but
+    removes one confirmed, reproducible cause of it.
     """
+    clear_stale_design_lock(project_file)
     session = tcl_sessions.create("capture")
     tcl_sessions.add_line(session.session_id, f"Open {str(project_file).replace(chr(92), '/')}")
     return {"session_id": session.session_id, "project_file": project_file}

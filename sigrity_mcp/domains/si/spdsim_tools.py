@@ -4,6 +4,17 @@ Confirmed (doc/spd2k_ug, doc/speedem_ug, zero Tcl hits in either): SPDSIM has no
 API at all — it's driven entirely by CLI switches against a `.spd` project file
 authored in SPDGEN (SPDGEN itself is GUI-only; no batch/Tcl automation is documented
 for it, so it isn't wrapped here).
+
+CONFIRMED BLOCKED live, root cause narrowed (see `core.tool_status`): both this
+module's `-b` flag AND the alternate `-as`/`-spice -run` flags documented in
+`doc/psi_ug/ch10_tcl_re_Calling_SPDSIM_in_PowerSI_Commands.html` (a page titled
+"Invoke Subprocesses") fail identically — `"Skip license fetch ...."` followed by
+`"Failed to open the file"` — against two different real sample `.spd` files (one
+legacy, one modern). That doc page's own framing strongly suggests SPDSIM.exe is
+designed to run only as a genuine child process of a live PowerSI Tcl session (via
+`sigrity::do exec "...spdsim.exe" -as "file.spd" &`), not as an independently launched
+standalone process — this module's direct `submit_job` invocation may be
+structurally the wrong approach, not just missing a flag.
 """
 
 from __future__ import annotations

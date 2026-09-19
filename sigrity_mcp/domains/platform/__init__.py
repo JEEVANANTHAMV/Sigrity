@@ -16,6 +16,7 @@ now-confirmed reason.
 
 from sigrity_mcp.domains.platform import (  # noqa: F401
     amm_tools,
+    file_tools,
     install_tools,
     job_tools,
     license_tools,

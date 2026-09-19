@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from sigrity_mcp.core.errors import SigrityError
 from sigrity_mcp.core.tclscript import TclScript
@@ -29,6 +30,31 @@ from sigrity_mcp.core.tclscript import TclScript
 
 class SessionNotFoundError(SigrityError):
     """Raised when a session_id does not correspond to a known open script session."""
+
+
+def clear_stale_design_lock(design_path: str) -> bool:
+    """Remove a stale `<design_path>.lck` sibling file, if one exists, before opening a design.
+
+    ROOT CAUSE FIX for a real, reproducible failure mode caught live: Allegro/Capture
+    both write a `.lck` file next to a design while it's open; if the process that
+    created it is killed (a hung batch job, a forcibly-terminated session — this
+    happens routinely with headless automation, unlike normal interactive use) rather
+    than exiting cleanly, that `.lck` file is orphaned. The NEXT batch launch against
+    that same design path then hits a real modal "this design appears to be open/
+    locked, override?" dialog — which blocks forever with no console output at all
+    (previously misdiagnosed as a license-fetch hang or generic timeout, since a
+    headless batch job has no way to click through it). Since every caller here always
+    owns a private, already-copied working file (never a design another live process
+    could legitimately still have open), removing a stale lock before launch is safe
+    and prevents the dialog outright rather than requiring a human to click past it.
+    Returns True if a lock file was found and removed (worth logging/surfacing to the
+    caller), False if there was nothing to clean up.
+    """
+    lock_path = Path(f"{design_path}.lck")
+    if lock_path.is_file():
+        lock_path.unlink()
+        return True
+    return False
 
 
 @dataclass

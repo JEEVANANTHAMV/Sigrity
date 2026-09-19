@@ -28,7 +28,7 @@ from __future__ import annotations
 from typing import Literal, Optional
 
 from sigrity_mcp.core.skillscript import skill_path, skill_str
-from sigrity_mcp.core.tclsession import run_session, tcl_sessions
+from sigrity_mcp.core.tclsession import clear_stale_design_lock, run_session, tcl_sessions
 from sigrity_mcp.mcp_app import mcp
 
 _NET_TYPES = Literal["Signal", "Power", "Ground"]
@@ -161,11 +161,18 @@ async def allegro_run_session(session_id: str, board_file: str) -> dict:
     Appends a bare `quit` line (confirmed to cleanly exit Allegro afterward — not a SKILL
     call, a native Allegro command-prompt command) before running
     `allegro.exe -s <macro.scr> <board_file>`.
+    Before launching, removes a stale `<board_file>.lck` sibling file if one exists —
+    confirmed live to be a real cause of indefinite hangs (a modal "design is locked,
+    override?" dialog with zero console output, previously misdiagnosed as a license or
+    generic timeout issue): if a prior batch job against this same board path was
+    killed rather than exiting cleanly, its lock file is orphaned and blocks the next
+    launch until a human clicks through it — see clear_stale_design_lock's docstring.
     Returns a job_id immediately; poll it with get_job_status/wait_for_job. Allegro can
     take 15-20+ seconds just to load a real board before your script's lines even start
     running, so don't assume "still running" after a short wait means something is wrong.
     """
     tcl_sessions.add_line(session_id, "quit")
+    clear_stale_design_lock(board_file)
     record = await run_session(
         session_id,
         tool="allegro",

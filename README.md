@@ -17,11 +17,25 @@ machine), and live runs against them — never web research.
 
 This suite also automates a second, sibling Cadence product line on the same machine —
 **Allegro/OrCAD SPB 22.1** (`C:\Cadence\SPB_22.1`) — for CAD creation (PCB layout,
-schematic capture, DRC, placement, manufacturing output, library/model checking) via
-SKILL, Tcl, and standalone CLI tools respectively, closing the loop from blank design
-through simulated signoff.
+schematic capture, DRC, placement, **headless SPECCTRA autorouting**, manufacturing
+output, Constraint Manager, SKILL-scripted trace/via/padstack/component-placement
+authoring, PSpice batch simulation) via SKILL, Tcl, and standalone CLI tools
+respectively, closing the loop from blank design through simulated signoff.
 
-**139 MCP tools across 7 domains**, one Python package.
+**159 MCP tools across 7 domains**, one Python package.
+
+**Research discipline note**: this README has gone through two passes. The first
+built and tested the original 114→139 tools. A second pass re-examined several of the
+first pass's own "no automation surface found" conclusions after a fresh, differently
+worded search of the exact same local doc tree and SKILL function reference — and found
+three of them were wrong (general PCB autorouting, Constraint Manager scripting, and
+PSpice batch simulation are all real and confirmed working; see "Known gaps" below for
+what changed and why). The lesson generalized here: a "not found" conclusion is only as
+good as the search terms used to reach it — grepping for the wrong substring
+(`axl*Constraint*` instead of the real `axlCNS*` convention) silently produced a false
+negative that looked identical to a genuine absence. Every correction below was
+re-verified live on this machine before being written down, the same bar as everything
+else in this file.
 
 ## The domains
 
@@ -31,8 +45,8 @@ through simulated signoff.
 | 2 | Signal Integrity & Power-Aware | `sigrity_mcp/domains/si/` | PowerSI, SPDSIM, BroadbandSPICE |
 | 3 | Interconnect Extraction & Modeling | `sigrity_mcp/domains/extraction/` | Layout translators (Gds2Spd, Oasis2Spd, Ndd2Spd, Pads2Spd, Rif2Spd, Dsn2Spd, SPDLinks), Clarity3D, XtractIM, T2B, plus two standalone utility solvers (Touchstone de-embedding, 2D x-hatch field solver) |
 | 4 | In-Design Analysis (Sigrity Aurora) | `sigrity_mcp/domains/aurora/` | Honestly scoped — see below |
-| 5 | Unified Framework (Sigrity X Platform) | `sigrity_mcp/domains/platform/` | FlexNet license status, install introspection, AMM model-library tools, the pipeline orchestrator, and the job/session control shared by every other domain |
-| 6 | CAD Creation (Allegro/OrCAD) | `sigrity_mcp/domains/cad/` | Allegro PCB layout (SKILL), OrCAD Capture schematic (Tcl), plus real batch DRC, auto-placement, drill-route/via-fanout routing, manufacturing export (IPC-2581/IPC-356/STEP/Gerber), IBIS/die-abstract checking, design-data extraction, and license-gated schematic/netlist interchange |
+| 5 | Unified Framework (Sigrity X Platform) | `sigrity_mcp/domains/platform/` | FlexNet license status, install introspection, AMM model-library tools, the pipeline orchestrator, generic file copy/move/delete utilities, and the job/session control shared by every other domain |
+| 6 | CAD Creation (Allegro/OrCAD) | `sigrity_mcp/domains/cad/` | Allegro PCB layout (SKILL) — including SKILL-scripted trace/via/padstack/component-placement authoring and Constraint Manager scripting, OrCAD Capture schematic (Tcl), real batch DRC, auto-placement, drill-route/via-fanout routing, **headless SPECCTRA full-board autorouting**, manufacturing export (IPC-2581/IPC-356/STEP/Gerber), IBIS/die-abstract checking, design-data extraction, PSpice batch simulation, and license-gated schematic/netlist interchange |
 | 7 | Thermal (Celsius) | `sigrity_mcp/domains/thermal/` | Celsius3D (electrothermal/stress), CelsiusCFD, Celsius2D — a previously completely-unwrapped Sigrity product line, added and confirmed live this pass |
 
 ### A note on Domain 4 (Aurora)
@@ -144,6 +158,141 @@ nothing beyond a reporting-only example script).
   design that hasn't been saved to native `.spd` form first), then proceed normally.
   Confirmed live producing a real 237KB `.spd` file and reaching `begin simulation`.
 
+### Domain 6, continued — corrections from a follow-up research pass
+
+A later pass re-examined several of this domain's own earlier "no automation surface
+found" conclusions with differently-worded searches of the exact same local doc tree
+and SKILL function reference, and found three of them wrong:
+
+- **General trace autorouting IS automatable** — `spif_specctra_tools.py`. Not via
+  `apr.exe`/`placeroute.exe` (still correctly GUI-only), but via Allegro's real SPECCTRA
+  router bridge: `spif_batch.exe -o` exports a `.brd` to a SPECCTRA `.dsn`, then
+  `specctra.exe -nog -do <script>.do -quit` runs a genuine headless autoroute. **Confirmed
+  live twice**: Cadence's own shipped tutorial design routed 100% connected, 0
+  conflicts; this suite's own real sample board (75 nets, 163 connections) also routed
+  100% connected, 0 conflicts, producing a real `.ses` session file — both runs
+  verified through the actual MCP tool wrapper, not just raw CLI. The reverse step,
+  `spif_batch.exe -i` (importing the routed session back into the `.brd`), is
+  **confirmed broken** on this machine — it crashes with `ERROR(SPMHDB-238): The design
+  is corrupted...` every time, root cause not yet isolated. Treat export+autoroute as
+  reliable and import as a known, open issue.
+- **Constraint Manager IS SKILL-scriptable** — `allegro_constraint_tools.py`. The
+  original conclusion ("no `axl*Constraint*` API found") only failed because it
+  searched for the wrong substring — the real naming convention is `axlCNS*`/`axlCns*`
+  (~60 real, individually documented functions in
+  `share/pcb/examples/skill/DOC/FUNCS/`, confirmed present by filename). Wraps spacing
+  rules (`axlCNSSetSpacing`), physical rules (`axlCNSSetPhysical`), electrical
+  constraint sets (`axlCNSEcsetCreate`), and net-level constraint queries
+  (`axlCnsNetFlattened`).
+- **PSpice batch simulation IS real** — `pspice_tools.py`. `pspice.exe`/`pspiceaa.exe`
+  are still correctly GUI-only, but a separate, dedicated executable, `psp_cmd.exe`,
+  confirmed live: headless, real diagnostics, no hang — ran a real shipped OrCAD PSpice
+  sample and failed only on that sample's own missing `.include` path, not a tool
+  problem.
+
+A fourth new module, **`allegro_geometry_tools.py`**, closes a real gap the
+Constraint-Manager correction exposed while investigating: this suite had no way to
+create an actual trace, a standalone via, a real padstack, or place a component at an
+explicit coordinate — only `allegro_create_component` (an unplaced placeholder). All
+confirmed real via their own SKILL doc pages: `axlDBCreatePath` (trace), `axlDBCreateVia`,
+`axlDBCreatePadStack` (simplified single-pad case only — the real signature takes
+complex nested defstructs), `axlDBCreateModuleInstance` (placement at an explicit
+coordinate/rotation — a distinct, lower-level API from `axlDBCreateComponent`),
+`axlDBAssignNet`, `axlGetModuleInstanceLocation`.
+
+All four new modules are `built_untested` except the confirmed-live SPECCTRA
+export+autoroute steps above — every function signature was independently verified
+real via its own local doc page, not guessed and not taken on faith from any external
+source, but (aside from the SPECCTRA bridge) not yet each individually exercised live
+against a real board.
+
+Also added this pass: **`copy_file`/`move_file`/`delete_file`** (Domain 5,
+`platform/file_tools.py`) — plain filesystem utilities, added because the multi-model
+eval (see below) repeatedly hit task prompts that needed to stage a read-only sample
+file into a scratch location first, and this suite had no way to do that.
+
+### Domain 6, further — this pass's fixes: two real corrections, one closed investigation, and a suite-wide reliability root cause
+
+**`allegro_assign_net` was wrongly marked `known_blocked` — corrected to `confirmed_live`.**
+The original finding (net reassignment ran for minutes, no change landed on disk) turned
+out to be a self-inflicted test artifact: several diagnostic Allegro sessions were fired
+off in overlapping succession, competing for a single license seat — the same class of
+false negative as the original `axlDBCreateNet` block this README already documents
+elsewhere. Re-tested cleanly, one launch at a time, three ways: a hand-written SKILL
+macro, the exact unmodified production tool functions
+(`allegro_assign_net`/`allegro_save_design`/`allegro_run_session`), and an independent
+re-read of the saved board with `report.exe` (bypassing SKILL entirely) both before
+(pristine board: `N00885,R1.2 R4.1 U1.1 U3.3`) and after
+(`GND,...R1.2...` / `N00885,R4.1 U1.1 U3.3`) — R1.2 genuinely moved nets on disk.
+
+**Gerber export is now real, not just diagnosed as broken.** The missing piece behind
+`gbplot.exe`'s confirmed-wrong `.brd`-direct invocation was authoring artwork film
+records at all — normally done interactively via Allegro's Artwork Control Form. The
+real SKILL equivalent, `axlFilmCreate`, is now wrapped as `allegro_create_film`
+(`allegro_geometry_tools.py`); the real Gerber generator itself, `artwork.exe`
+(confirmed via its own full `-help` banner — "Generates Gerber films from Allegro
+designs" — but never previously registered in this suite), is wrapped as
+`run_allegro_generate_artwork`. Confirmed live three times, including once through the
+exact unmodified production tool chain (`allegro_create_film` → `allegro_save_design` →
+`allegro_run_session` → `run_allegro_generate_artwork`): defining `ETCH/TOP`/
+`ETCH/BOTTOM` films on the real sample board produced genuine `TOP.art`/`BOTTOM.art`
+files in real RS274X Gerber format (`G04 File Format: Gerber RS274X`, real layer/
+offset/rotation records). `run_allegro_gerber_plot` (`gbplot.exe`) is corrected to take
+the resulting `.art` file — its real, documented role is converting an existing
+artwork file to legacy pen-plotter `.plt`/`.ctl` format, a separate, optional step most
+Gerber/RS274X consumers don't need at all.
+
+**Zrouter (via/pin-escape fanout routing): investigation exhausted, confirmed genuinely
+GUI-only.** Demoted from `built_untested` to `known_blocked`, and `run_allegro_zrouter`
+now refuses to launch anything rather than fabricate success. Three distinct paths were
+tried: (1) bare standalone `zrouter.exe` — confirmed live to hang indefinitely on its
+own modal GUI form; (2) the native `zrouter <control_file>` command inside a batch
+Allegro session (the same mechanism `auto_route` uses) — confirmed live to return
+cleanly but do *nothing* (no `Zrouter.log`, no via, no board change) — a dangerous
+false-positive rather than a working path; (3) `doc/zcoms/zchap.html`'s own "Running
+zrouter" section resolves why — typing `zrouter` only *opens* the dialog; the
+connections-file/grid/via values must be typed into GUI fields and Run clicked
+manually, with no command-line or SKILL equivalent anywhere in the doc tree or the
+~840-file SKILL function reference. The Connections Control File's real grammar was
+still confirmed and documented (see `allegro_placement_tools.py`'s module docstring)
+for anyone driving the manual GUI workflow.
+
+**Library/footprint authoring tools, live-tested**: `allegro_create_trace` and
+`allegro_create_simple_padstack` are now `confirmed_live` — run against the real sample
+board with SKILL return-value capture (results piped through `outfile`/`fprintf` to a
+file, since job logs otherwise only show Allegro's startup banner), both
+`axlDBCreatePath`/`axlDBCreatePadStack` returned real dbids, not nil.
+`allegro_place_module_instance` is confirmed *correctly implemented* but hit a real
+board-content precondition, not a wrapper bug: `axlDBCreateModuleInstance` returned nil
+for a footprint name (`CAP300`) real components on the board already use, because
+`axlGetParam("library:CAP300")` also returns nil on this board/library-path
+configuration — the same "board-authoring gap, not a code bug" class of finding as
+`allegro_placement`'s "No Package Keepin" result elsewhere in this README.
+
+**A suite-wide reliability root cause, found from a live user report of a real modal
+dialog.** While re-running this suite's own diagnostic scripts, a genuine "overwrite
+existing design?" GUI popup appeared and needed a manual click — which led to
+root-causing a failure mode that had previously been misdiagnosed (in this README, more
+than once) as a license-fetch delay or a generic timeout: Allegro/Capture both write a
+`<design>.lck` file next to an open design; if the process that created it is killed
+rather than exiting cleanly (routine for headless batch automation — a hung job gets
+cancelled, a test script gets interrupted), that lock is orphaned, and the *next* batch
+launch against that same design path blocks forever on a modal "already open/locked,
+override?" dialog with **zero console output** — indistinguishable from a hang or a
+license delay until a human clicks through it. Fixed via `clear_stale_design_lock()`
+(`core/tclsession.py`), now called automatically by `allegro_run_session` and
+`start_capture_session` before every launch; a new `check_design_lock` tool
+(`platform/file_tools.py`) lets a caller check this specific condition on a
+suspiciously-stuck job instead of guessing. Proven live: a fake stale lock was planted
+next to a fresh board copy, and the real production `allegro_run_session` tool cleared
+it and completed in 5.3s instead of hanging. Re-testing Capture specifically with this
+fix in place (3 clean runs, fresh project-directory copy each time) showed it helps but
+does not fully explain Capture's documented non-determinism — one run still hung the
+full 90s wait with an empty log, and the other two "succeeded" in a suspicious 0.1s with
+a completely empty log (too fast for real work, matching this suite's previously-
+documented "exits immediately with no output" failure mode) — see `capture`'s note in
+`core/tool_status.py` for the full result. Capture remains `known_blocked`.
+
 ### Domain 7 (Thermal / Celsius) — new this pass, confirmed live
 
 Before this pass, Cadence's whole Celsius electrothermal/thermal-stress product line
@@ -225,7 +374,7 @@ existing documented exclusion of `AFSmodule.exe`/`HexMesh.exe`/etc. — none are
 - **`sigrity_mcp/domains/platform/pipeline_tools.py`** (`run_tool_pipeline`) — runs a
   declarative list of `{tool, args, save_as}` steps as one MCP call, with
   `${step_name.field}` placeholders auto-resolved from earlier steps' results. Exists
-  because 139 individual tools is a lot of surface area for a caller to sequence
+  because 156 individual tools is a lot of surface area for a caller to sequence
   correctly by hand — confirmed live driving a full 6-step PowerSI flow in one call,
   and it's what the multi-model evaluation below relies on most.
 - **`sigrity_mcp/core/tool_status.py`** — a hand-curated `confirmed_live` /
@@ -312,6 +461,26 @@ several genuine, previously-undocumented facts, this pass and before:
 8. **`SigritySuiteCon.exe` is a Google Test (`gtest`) binary**, not a Chromium-embedded
    GUI shell as an earlier pass of this research speculated — corrected in
    `platform/__init__.py`. Still correctly unwrapped either way.
+9. **Three "no automation surface" conclusions from earlier in this same research were
+   wrong, found by a differently-worded search of the same local files**: general PCB
+   autorouting (real, via Allegro's SPECCTRA bridge — 100% routed on two separate real
+   designs), Allegro Constraint Manager scripting (real, ~60 documented `axlCNS*` SKILL
+   functions — the earlier search grepped the wrong substring), and PSpice batch
+   simulation (real, via the separate `psp_cmd.exe`, distinct from the GUI-only
+   `pspice.exe`). See the Domain 6 write-up and Known Gaps sections for full detail —
+   this is the clearest evidence in this whole project that a "not found" conclusion is
+   only as strong as the search that produced it.
+10. **A whole class of previously-reported "hangs"/"license delays" was actually a
+   different, fixable bug: an orphaned `.lck` file from a killed batch job blocking the
+   next launch on an interactive "override?" dialog with zero console output.** Found
+   this pass from a live user report of a real modal popup appearing while re-running
+   this suite's own diagnostic scripts. This directly explains — and now fixes — the
+   exact symptom behind the `allegro_assign_net` false-negative corrected above, and
+   plausibly contributed to some of Capture's documented non-determinism (though not
+   all of it — see Domain 6 write-up). Fixed via `clear_stale_design_lock()`, called
+   automatically before every `allegro_run_session`/`start_capture_session` launch, and
+   proven live (a planted fake stale lock was auto-cleared, job completed in 5.3s
+   instead of hanging) — not merely theorized.
 
 **What this does and doesn't prove:** the tools listed `confirmed_live` in
 `core/tool_status.py` were each individually exercised against a real license and a
@@ -324,10 +493,13 @@ Everything marked `known_blocked` has a specific, documented, non-code-fixable r
 
 ## Known gaps
 
-Grouped by what would actually fix them — some need a license grant, some need a
-missing third-party dependency installed, and some have no automation surface at all on
-this Cadence release, confirmed by exhausting the doc tree and every plausible CLI
-probe (not just "we didn't get to it yet").
+Grouped by what would actually fix them. Every item below was independently confirmed
+on this machine (either "yes, real, here's the working invocation" or "no, exhausted
+the doc tree and live probes, here's the evidence") — nothing here is a guess, and
+nothing is carried over unquestioned from an earlier pass's conclusion (see the
+"Research discipline note" near the top of this file for why that distinction matters:
+a second pass found three of the first pass's own "no automation surface" conclusions
+were wrong).
 
 **Needs a Cadence license grant** (the tool itself is real, confirmed CLI, and fails
 specifically with a license-selection message before doing any work):
@@ -335,37 +507,90 @@ specifically with a license-selection message before doing any work):
   schematic/netlist ⇄ XML/DML translators. Fails with `"No Product License selected...
   Translation cancelled"`.
 
-**Needs a third-party dependency this machine doesn't have** (not a Sigrity/Allegro
-license issue at all — these tools' own Sigrity license fetch succeeds or isn't even
-reached):
+**Needs a third-party dependency this machine doesn't have** — not a Sigrity/Allegro
+license issue (these tools' own Cadence license fetch succeeds or isn't even reached);
+listing what to install so these can be re-verified once available:
 - `T2B.exe` full IBIS-from-SPICE conversion needs a working **HSpice** (or
   Cadence-integrated equivalent) install — T2B itself runs fine and dispatches real
-  jobs to it.
+  jobs to it, every one aborts for lack of a SPICE engine.
 - `AmLibGen.exe` (AMM library generation from a spreadsheet) needs a working
   **Microsoft Excel** COM automation path on this machine to read legacy `.xls` files —
-  fails with `[ERROR] Init excel failed`, not a license error.
+  fails with `[ERROR] Init excel failed`, not a license error. (A native `.xlsx` source
+  might sidestep this if AmLibGen supports one — untested.)
 
-**No automation surface found anywhere (GUI-only or undiscoverable), confirmed by
-exhausting the local doc tree + live `-help` probes — not fabricated, not attempted**:
-- General trace *autorouting* in Allegro (`apr.exe`/`placeroute.exe`) — only
-  auto-*placement* (`placement.exe`) and narrower drill-route/via-fanout routing
-  (`ncroute.exe`/`zrouter.exe`) have a confirmed batch CLI.
-- PSpice circuit simulation (`pspice.exe`/`pspiceaa.exe`).
-- Allegro library authoring GUIs: `padstack_editor.exe`, `symboleditor.exe`/
-  `symbolcreator.exe`, `dfa_dlg.exe` (DFA).
-- Allegro Constraint Manager scripted CSV/XML import (no `axl*Constraint*` SKILL API
-  found).
-- Sigrity Aurora (Domain 4) — see above, exhaustively documented as GUI-only.
+**Genuinely no automation surface found anywhere (GUI-only or undiscoverable),
+confirmed by exhausting the local doc tree + live `-help` probes** — this list shrank
+by three items after a broader search found real surfaces for them; what remains here
+was checked the same rigorous way and came up empty for real:
+- `apr.exe`/`placeroute.exe` themselves (the interactive autorouting *GUI tools*) — no
+  batch CLI; use the real automation path instead: `spif_specctra_tools.py`'s
+  SPECCTRA bridge (see "Corrections" below) — though note its own round-trip-import
+  limitation.
+- Allegro library authoring *GUI* tools specifically: `padstack_editor.exe`,
+  `symboleditor.exe`/`symbolcreator.exe`, `dfa_dlg.exe` (DFA) — no batch CLI for these
+  exe's themselves; use the real automation path instead: `allegro_geometry_tools.py`'s
+  SKILL-scripted padstack/trace/via/placement authoring.
+- **`zrouter` (via/pin-escape fanout routing)** — investigation exhausted this pass;
+  see the Domain 6 write-up above for the three dead-end paths tried. Genuinely
+  dialog-only: no command-line, batch-dispatch, or SKILL equivalent found anywhere.
+  `run_allegro_zrouter` now refuses to run rather than hang or fabricate success.
+- Sigrity Aurora (Domain 4) — see above, exhaustively documented as GUI-only, six
+  checks, zero CLI/SKILL surface for any of them.
 - `CelsiusStudio.exe`'s own setup/authoring GUI — Celsius3D/CelsiusCFD/Celsius2D's
   batch mode (Domain 7) can *run* an already-built project, not construct one from
   bare geometry via CLI/Tcl.
+- `pdnsim.exe`, `apd.exe` (GUI half of the license-blocked Package Designer bridge),
+  `orcad.exe`/`orcadx.exe` (redundant GUI entry points into Capture).
 
-**Unconfirmed shape, real and license-fetching, just needs the right input to test
-end-to-end** (not blocked on license or a missing dependency — needs either a sample
-file this machine doesn't have, or a correctly-shaped project reference this pass
-didn't isolate):
-- `checkplus.exe` (Domain 6) — needs the right CDS project-registration reference, not
-  a raw path.
+**Corrections — real automation surfaces found on a follow-up pass, previously
+wrongly written off as GUI-only/nonexistent** (see the Domain 6 write-up above for full
+detail and evidence):
+- **General trace autorouting** — real, via `spif_specctra_tools.py`'s SPECCTRA bridge.
+  Export+autoroute confirmed live multiple times, directly and via both LLM endpoints
+  (100% connected, 0 conflicts). The reverse import step (`spif_batch -i`) is confirmed
+  to crash on this machine (`ERROR(SPMHDB-238)`, real crash-dump file) — and so does
+  Allegro's own native `auto_route` Command:-prompt command (the officially documented
+  single-command alternative that's supposed to drive the whole round-trip
+  internally), tried specifically as a possible fix and found to also fail with a
+  crash-style return code. Both attempts at closing this loop are now exhausted; the
+  round-trip-import gap is real and currently unresolved by any path found.
+- **Allegro Constraint Manager** — real, ~60 documented `axlCNS*`/`axlCns*` SKILL
+  functions. `allegro_set_spacing_constraint`/`allegro_set_physical_constraint`
+  (spacing/physical rules) and `allegro_create_via` are now **confirmed_live**: 3
+  independent live runs (1 direct + 2 separate LLM-driven runs against both endpoints)
+  all completed cleanly with no hang. `allegro_assign_net` was originally reported here
+  as not taking effect when tested by reassigning a real pin and re-reading the board
+  with `report.exe` — RE-TESTED this pass (see the Domain 6 write-up above for the full
+  root cause and evidence) and **promoted to `confirmed_live`**: the original result was
+  a test artifact (overlapping diagnostic sessions competing for one license seat), not
+  a real defect — a clean re-test reassigning R1.2 to GND genuinely persisted to disk.
+- **PSpice batch simulation** — real, via `psp_cmd.exe` (`pspice_tools.py`), distinct
+  from the still-correctly-GUI-only `pspice.exe`/`pspiceaa.exe`.
+
+**Wrapped but confirmed to need more work** (tried live, real and specific root cause
+identified — not "we didn't get to it"):
+- `SPDSIM.exe` — tried both this suite's original `-b` flag and the alternate `-as`
+  flag documented for calling SPDSIM from *inside* PowerSI. Both fail identically
+  (`"Skip license fetch"` then `"Failed to open the file"`) against two different real
+  sample files. The documentation itself frames SPDSIM as something PowerSI's Tcl
+  `exec` spawns as a child process, not a tool meant to run standalone — likely needs
+  re-architecting as a `sigrity::do exec` call from inside a PowerSI session rather
+  than its own direct process launch.
+- `abcd.exe` — tried against three different real Touchstone file combinations
+  (two 4-port files cascaded: segfault; single/paired 2-port files: silent no-op, zero
+  diagnostic output either way). Confirmed real via `-help`, but every real invocation
+  either crashed or did nothing — demoted to `known_blocked`.
+- `checkplus.exe` — SCOPE CORRECTION: its own doc chapter is titled "Setting Up
+  Allegro **Design Entry HDL** Rules Checker" — it's a rules checker for a different,
+  legacy Cadence *schematic* tool (DE-HDL/Concept-HDL), not for Allegro PCB `.brd`
+  layouts at all. Likely not applicable to this suite's Capture-based flow regardless
+  of what reference format `-proj` needs.
+- `run_allegro_gerber_plot` — FIXED this pass (see the Domain 6 write-up above): the
+  missing "artwork" generation step is now wrapped (`allegro_create_film` +
+  `run_allegro_generate_artwork`, confirmed live producing real RS274X Gerber output),
+  and this tool itself is corrected to take the resulting `.art` file instead of a
+  `.brd` directly. `gbplot.exe` itself (the legacy pen-plotter-format converter) was not
+  independently re-run against a real `.art` file this pass — still `built_untested`.
 - `designextractor.exe` (Domain 6) — needs a populated `.cpm`/`.sdax` project (none
   exists on this machine; only unfilled templates).
 - `diacheck.exe`/`diacompare.exe` (Domain 6) — no die-abstract sample file was found to
@@ -375,6 +600,8 @@ didn't isolate):
 - `SPDSIM.exe` — a real shipped sample failed with `"Failed to open the file"` despite
   matching the original byte-for-byte; root cause (legacy text-format `.spd`, a
   working-directory quirk, or something else) not isolated.
+- `spif_batch.exe -i` (session import) — see "Corrections" above; confirmed to crash,
+  not merely untested.
 
 ## Multi-model end-to-end evaluation
 
@@ -456,6 +683,7 @@ python -m uv run python scripts/smoke_brd_bridge.py    # real .brd -> PowerSI ->
 python -m uv run python scripts/smoke_new_cad_tools.py # real batch_drc/placement/ncroute/manufacturing-export/checkplus/ibischk run against a real sample board
 python -m uv run python scripts/smoke_capture_retest.py          # re-verifies Capture's batch invocation is still unreliable (not license-related)
 python -m uv run python scripts/smoke_allegro_mutation_retest.py # re-verifies allegro_create_net now completes live
+python -m uv run python scripts/smoke_specctra_bridge.py         # real spif_batch export + specctra headless autoroute, through the actual MCP tools
 python -m uv run python scripts/test_llm_e2e.py "<prompt>"   # real LLM-driven MCP tool-calling test, single task
 python -m uv run python scripts/eval_e2e.py             # multi-task, multi-endpoint evaluation with metrics
 ```

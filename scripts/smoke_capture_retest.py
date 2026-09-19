@@ -20,13 +20,13 @@ async def main():
     result = await capture_run_session(session["session_id"])
     job_id = result["job_id"]
     print("command:", result["command"])
-    status = await job_manager.wait(job_id, timeout=60)
+    status = await job_manager.wait(job_id, timeout=300)
     print("final state:", status.state, "returncode:", status.returncode)
     log_path = Path(status.job_dir) / "run.log"
     if log_path.exists():
         print("log:\n", log_path.read_text(errors="replace"))
     if status.state == "running":
-        print("STILL RUNNING after 60s -- killing job")
+        print("STILL RUNNING after 300s -- killing job")
         job_manager.cancel(job_id)
 
 

@@ -49,23 +49,54 @@ against real `-help`/doc text, never fabricate a flag" discipline as
 
 Confirmed GUI-only or with no documented/discoverable batch surface anywhere in the
 shipped doc tree (deliberately NOT wrapped, to avoid fabricating a capability that
-doesn't exist): `apr.exe`/`placeroute.exe` (interactive autorouting), `pspice.exe`/
-`pspiceaa.exe` (circuit simulation), `padstack_editor.exe`, `symboleditor.exe`/
-`symbolcreator.exe` (library authoring), `dfa_dlg.exe`, `pdnsim.exe`, `apd.exe` (the GUI
-half of the license-blocked Package Designer bridge), `orcad.exe`/`orcadx.exe`
-(redundant GUI entry points into Capture). Allegro's Constraint Manager has no SKILL API
-for scripted CSV/XML constraint import either (a full grep of the shipped SKILL function
-reference for `axl*Constraint*` found nothing beyond a reporting-only example script).
+doesn't exist): `apr.exe`/`placeroute.exe` themselves (interactive autorouting UI —
+see `spif_specctra_tools.py` below for the real headless alternative), `padstack_editor.exe`,
+`symboleditor.exe`/`symbolcreator.exe` (library authoring GUIs — see
+`allegro_geometry_tools.py` for the real SKILL-scriptable alternative), `dfa_dlg.exe`,
+`pdnsim.exe`, `apd.exe` (the GUI half of the license-blocked Package Designer bridge),
+`orcad.exe`/`orcadx.exe` (redundant GUI entry points into Capture).
+
+**Three corrections from a follow-up research pass** — each of these was previously
+(wrongly) written off, until a broader/differently-worded search of the same local doc
+tree and SKILL function reference turned up a real, confirmed automation surface:
+
+- **`spif_specctra_tools.py`** — general trace *autorouting* IS automatable, just not
+  via `apr.exe`/`placeroute.exe` directly: Allegro ships a genuine SPECCTRA-router
+  bridge (`spif_batch.exe` + `specctra.exe -nog -do <script>.do -quit`), confirmed live
+  producing a 100%-routed, 0-conflict result on both a Cadence tutorial design and this
+  suite's own real sample board. The reverse import step
+  (`spif_batch.exe -i <board> <session.ses>`) is confirmed to crash on this machine —
+  see that module's docstring for the honest, not-yet-fully-working caveat.
+- **`allegro_constraint_tools.py`** — Allegro's Constraint Manager IS SKILL-scriptable:
+  the earlier "no `axl*Constraint*` API found" conclusion only failed because it
+  searched for the wrong substring. The real naming convention is `axlCNS*`/`axlCns*`
+  (~60 real documented functions in `share/pcb/examples/skill/DOC/FUNCS/`) — spacing
+  rules, physical rules, electrical constraint sets (ecsets), and net-level constraint
+  queries are wrapped here.
+- **`allegro_geometry_tools.py`** and **`pspice_tools.py`** — real, SKILL-scriptable
+  trace/via/padstack/module-placement/net-assignment (a genuine alternative to
+  "GUI-only" library/placement authoring) and a genuine headless PSpice batch simulator
+  (`psp_cmd.exe`, distinct from the GUI-only `pspice.exe`/`pspiceaa.exe`) were both found
+  the same way.
+
+All four new modules are `built_untested`: every function signature was independently
+confirmed real via its own local doc page (not guessed, not taken on faith from
+external claims), but most were not yet each individually exercised live against a real
+board on this machine — see `core.tool_status` and each module's own docstring.
 """
 
 from sigrity_mcp.domains.cad import (  # noqa: F401
     allegro_batch_tools,
+    allegro_constraint_tools,
     allegro_drc_tools,
     allegro_extraction_tools,
+    allegro_geometry_tools,
     allegro_library_tools,
     allegro_manufacturing_tools,
     allegro_placement_tools,
     allegro_tools,
     capture_tools,
     interchange_tools,
+    pspice_tools,
+    spif_specctra_tools,
 )

@@ -58,16 +58,17 @@ TOOL_STATUS: dict[str, ToolStatus] = {
     "ibischk5": "built_untested",
     "ibischk6": "confirmed_live",
     "allegro_checkplus": "known_blocked",
-    "allegro_designextractor": "known_blocked",
-    "allegro_zrouter": "built_untested",
+    "allegro_artwork": "confirmed_live",
     "allegro_gbplot": "built_untested",
+    "allegro_designextractor": "known_blocked",
+    "allegro_zrouter": "known_blocked",
     "allegro_diacheck": "built_untested",
     "allegro_diacompare": "built_untested",
     "con2xml": "known_blocked",
     "cap2xml": "known_blocked",
     "dml2con": "known_blocked",
     "apd2con": "known_blocked",
-    "abcd": "built_untested",
+    "abcd": "known_blocked",
     "bem2d3": "built_untested",
     "xcitepi": "confirmed_live",
     "optimizepi": "confirmed_live",
@@ -75,7 +76,15 @@ TOOL_STATUS: dict[str, ToolStatus] = {
     "dsn2spd": "confirmed_live",
     "spdsim": "known_blocked",
     "t2b": "known_blocked",
+    "spif_batch": "confirmed_live",
+    "specctra": "confirmed_live",
+    "psp_cmd": "confirmed_live",
 }
+# NOTE: allegro_constraint_tools.py's and allegro_geometry_tools.py's individual SKILL
+# calls all execute through the single "allegro" logical tool above (same session/
+# process mechanics) — their own per-call reliability is finer-grained than this
+# executable-keyed dict models, so it's documented in the "allegro" note below instead
+# of as separate top-level entries here.
 
 # Free-text detail for any status worth explaining beyond STATUS_DESCRIPTIONS' generic
 # wording — mainly for known_blocked entries, so a caller knows what to actually do.
@@ -108,8 +117,60 @@ TOOL_STATUS_NOTES: dict[str, str] = {
     "`allegro_create_board_outline`/`allegro_create_stackup`/`allegro_save_design`/"
     "`allegro_run_drc` use the same session mechanics and the same axl* API family but "
     "were not each individually re-run -- reasonable to expect they now also work, but "
-    "still technically unverified individually.",
-    "capture": "Initially hit the same-looking 'Product Choices' dialog as allegro; "
+    "still technically unverified individually. FURTHER RESULTS from "
+    "allegro_constraint_tools.py/allegro_geometry_tools.py, tested both directly and "
+    "via two independent LLM-driven runs (both configured endpoints): "
+    "`allegro_set_spacing_constraint`/`allegro_set_physical_constraint` "
+    "(axlCNSSetSpacing/axlCNSSetPhysical) and `allegro_create_via` (axlDBCreateVia) all "
+    "ran cleanly to completion (returncode 0, no hang) in every one of 3 independent "
+    "live runs (1 direct + 2 LLM-driven) when combined with axlSaveDesign in the same "
+    "session -- promoted to confirmed_live for the session-mechanics/no-hang claim "
+    "(whether the constraint/via values landed exactly as specified was not separately "
+    "verified by reading the modified board back, only that the session ran and exited "
+    "cleanly). `allegro_assign_net` (axlDBAssignNet via a `(car (axlSelectByName ...))` "
+    "resolver) was PREVIOUSLY (wrongly) reported here as known_blocked, based on a test "
+    "where the session ran for several minutes with no save landing on disk. RE-TESTED "
+    "this pass, run cleanly one Allegro launch at a time (the earlier long-running "
+    "symptom turned out to be a self-inflicted artifact of firing off several "
+    "overlapping diagnostic sessions at once, competing for a limited license seat -- "
+    "not a bug in the SKILL call itself, the same class of false negative as the "
+    "original axlDBCreateNet block): three independent live confirmations against fresh "
+    "copies of the real sample board -- (1) a hand-written SKILL macro resolving "
+    "R1.2/GND via axlSelectByName and calling axlDBAssignNet directly, (2) the exact "
+    "production allegro_assign_net/allegro_save_design/allegro_run_session tool "
+    "functions unmodified, and (3) independently re-reading the saved board with "
+    "report.exe (bypassing SKILL entirely) both before (pristine board: "
+    "'N00885,R1.2 R4.1 U1.1 U3.3') and after ('GND,...R1.2...' / 'N00885,R4.1 U1.1 U3.3' "
+    "-- R1.2 genuinely moved nets on disk). PROMOTED to confirmed_live -- net "
+    "reassignment via this tool is real and does persist. Also tested: Allegro's native "
+    "`auto_route` Command:-prompt command "
+    "(not SKILL -- the officially documented single-command SPECCTRA round-trip driver, "
+    "`doc/algroroute/chap12.html`) as a possible fix for spif_batch -i's crash -- it "
+    "also failed, with a crash-style negative return code, so this is not a working "
+    "alternative either.",
+    "capture": "FOLLOW-UP THIS PASS: a live user report of a real modal 'overwrite?' "
+    "dialog needing a manual click, while re-running one of this suite's own diagnostic "
+    "scripts, led to root-causing a genuine, previously-misdiagnosed failure mode: a "
+    "`.lck` file left behind by a prior batch job that was killed (rather than exiting "
+    "cleanly) causes the NEXT launch against that same design path to block forever on "
+    "an interactive 'already open/locked, override?' dialog with zero console output — "
+    "this was previously misread as a generic hang or license-fetch delay. Fixed via "
+    "`clear_stale_design_lock`, now called automatically in `start_capture_session` "
+    "(and `allegro_run_session`) before launch — proven live for Allegro: a planted "
+    "fake stale lock was auto-cleared and the job completed in 5.3s instead of hanging. "
+    "RE-TESTED Capture specifically with this fix in place, 3 clean runs in a row "
+    "(fresh project-directory copy per run, to fully rule out lock confusion between "
+    "runs): still genuinely non-deterministic — run 1 hung the full 90s wait with an "
+    "empty log (had to be killed), runs 2 and 3 both reported 'succeeded' but in a "
+    "suspicious 0.1s with a completely empty run.log, which is far too fast for a real "
+    "open+script+close+exit cycle and matches this module's previously-documented "
+    "'exits immediately with no output' failure mode rather than confirming real work "
+    "happened. CONCLUSION: the stale-lock fix is real and directly proven for Allegro, "
+    "and may explain some fraction of Capture's past non-determinism, but does NOT "
+    "fully resolve it — something else about Capture's batch invocation remains broken "
+    "or unconfirmed. Remains known_blocked; do not treat a fast 'succeeded' state alone "
+    "as evidence the script's actual content (place parts, save, etc.) ran — check for "
+    "real output/log content, not just the return code. Initially hit the same-looking 'Product Choices' dialog as allegro; "
     "after the user's fix, a bare `Capture.exe` launch (no arguments) now opens cleanly. "
     "However, the batch-script invocation (`-product=<name> script.tcl`) remains "
     "unreliable: repeated attempts inconsistently opened Capture's own default/tutorial "
@@ -124,7 +185,17 @@ TOOL_STATUS_NOTES: dict[str, str] = {
     "Open+Save+Close+Exit macro: the process launched (confirmed correct argv) but was "
     "still running with an empty log after 60s and had to be force-killed -- this rules "
     "out licensing as the cause definitively; the batch-invocation unreliability is a "
-    "separate, still-unresolved issue.",
+    "separate, still-unresolved issue. RE-TESTED AGAIN with a full 5-minute wait "
+    "(instead of 60s) specifically to allow time for a possible one-time approval "
+    "dialog to be clicked through manually -- result was inconsistent across repeated "
+    "attempts: one run completed cleanly in ~3.2s (open+save+close+exit, returncode 0), "
+    "but the very next fresh attempt hung with an empty log for the full 5 minutes "
+    "and had to be killed again. This confirms the original 'inconsistent behavior' "
+    "characterization precisely -- it is not a simple one-time dialog that, once "
+    "accepted, permanently fixes every subsequent run (unlike allegro.exe's product-"
+    "chooser dialog, which really was one-time). Treat capture_run_session as "
+    "genuinely non-deterministic on this machine, not reliably blocked or reliably "
+    "working.",
     "allegro_batch": "The multiplexer's own -help and '<program> -help' output is fine "
     "(genuinely headless, no dialog), but actually dispatching a sub-program through it "
     "is unreliable: `allegro_batch dbdoctor -check_only <real .brd>` failed immediately "
@@ -176,6 +247,22 @@ TOOL_STATUS_NOTES: dict[str, str] = {
     "against a board that already has a Package Keepin defined.",
     "allegro_ncroute": "Confirmed live against a real .brd sample: `ncroute.exe -o "
     "<out> <board>` exited 0 with 'Program completed. Done.'",
+    "allegro_zrouter": "INVESTIGATION EXHAUSTED this pass, CONFIRMED genuinely GUI-only "
+    "-- demoted from built_untested to known_blocked, and `run_allegro_zrouter` now "
+    "refuses to run rather than fabricate success. Three paths tried: (1) bare standalone "
+    "`zrouter.exe` (the tool's original design) confirmed live to hang indefinitely -- "
+    "it opens a modal GUI form with no CLI usage text, had to be killed; (2) the native "
+    "`zrouter <control_file>` Command:-prompt command inside a batch Allegro session "
+    "(the same mechanism auto_route uses) confirmed live to return cleanly (rc=0) but do "
+    "NOTHING -- no Zrouter.log, no via created, board file unchanged -- a dangerous "
+    "false-positive, not a working path; (3) `doc/zcoms/zchap.html`'s own \"Running "
+    "zrouter\" section resolves why: it documents a strictly 5-step interactive GUI "
+    "workflow (typing `zrouter` only OPENS the dialog; the connections-file/grid/via "
+    "values must be typed into dialog fields and Run clicked manually) with no "
+    "command-line or SKILL equivalent anywhere in the doc tree or the ~840-file SKILL "
+    "function reference. A real Connections Control File grammar WAS confirmed and "
+    "authored from that same doc section (see allegro_placement_tools.py's module "
+    "docstring) but there is no way to feed it to zrouter non-interactively.",
     "allegro_ipc2581_out": "Confirmed live against a real .brd sample: `ipc2581_out.exe "
     "-o <out> <board>` exited 0 with 'a2ipc2581 complete.'",
     "allegro_ipc356_out": "Confirmed live against a real .brd sample: `ipc356_out.exe "
@@ -208,6 +295,34 @@ TOOL_STATUS_NOTES: dict[str, str] = {
     "bem2d3": "Confirmed via `bem2d3.exe -help`'s full self-printed usage banner (real "
     "flag names/semantics, tool's own banner still calls itself 'BEM2D2' internally), "
     "but not run against a real geometry input file on this machine.",
+    "spif_batch": "MAJOR CORRECTION to earlier research, which wrongly concluded no "
+    "general trace-autorouting automation surface exists on this installation. "
+    "`spif_batch.exe -o <board> <dsn>` (Allegro -> SPECCTRA .dsn export) is confirmed "
+    "live: a real ~85KB .dsn was produced from a real sample board. `spif_batch.exe -i "
+    "<board> <session.ses>` (importing a routed session back into Allegro) is "
+    "confirmed BROKEN on this machine: it crashes every time with `ERROR(SPMHDB-238): "
+    "The design is corrupted...` plus a real crash-dump file, reproduced identically "
+    "in multiple directories/filenames — root cause not isolated (the error text's own "
+    "stated cause, an ASCII-mode cross-platform copy, did not occur here). Treat the "
+    "export direction as reliable and the import direction as known_blocked until this "
+    "is root-caused. See spif_specctra_tools.py's module docstring.",
+    "specctra": "MAJOR CORRECTION to earlier research (see spif_batch's note): "
+    "`specctra.exe <dsn> -nog -do <script>.do -quit` (Cadence's real, fully headless, "
+    "SPECCTRA-based PCB autorouter) is confirmed live TWICE — against Cadence's own "
+    "shipped tutorial design (100% connected, 0 conflicts) and against this suite's own "
+    "real sample board (75 nets, 163 connections, 100% connected, 0 conflicts, real "
+    ".ses session file written), both via the actual MCP tool wrapper "
+    "(run_specctra_autoroute), not just raw CLI. Note it returns a nonzero exit code "
+    "(confirmed: 4) even on a fully successful route — read final.sts/route.sts for "
+    "real completion statistics rather than trusting the return code alone.",
+    "psp_cmd": "MAJOR CORRECTION to earlier research, which classified PSpice as "
+    "GUI-only after `pspice.exe`/`pspiceaa.exe` both hung on `-help`. `psp_cmd.exe` is "
+    "a separate, dedicated batch-simulation executable in the same tools/bin, "
+    "confirmed live: a bare invocation prints 'Missing circuit file argument' and "
+    "exits immediately (no hang), and running it against a real shipped OrCAD PSpice "
+    "sample genuinely loaded and attempted simulation, failing only on that sample's "
+    "own portability issue (a missing .include file from the original authoring "
+    "machine) with a specific, readable diagnostic.",
     "xcitepi": "Confirmed live end-to-end against a real Cadence sample "
     "(share/PostInstallationCheck/xcitepi/demo_decap.tcl + demo_decap.gds): "
     "`XcitePI.exe -b -tcl demo_decap.tcl` exited 0 and produced a real SPICE netlist "
@@ -241,15 +356,71 @@ TOOL_STATUS_NOTES: dict[str, str] = {
     "installed/working on this machine. This is confirmed NOT a Cadence Sigrity license "
     "problem (T2B itself ran fine, no license-fetch failure) — it needs a working "
     "HSpice (or Cadence-integrated equivalent) install to actually produce output.",
-    "spdsim": "Attempted live against a real Cadence sample "
-    "(share/PostInstallationCheck/spdsim/ESD_testcase0.spd, a legacy SPEED2000-format "
-    "text .spd): `SPDSIM.exe -b ESD_testcase0.spd` printed 'Skip license fetch' then "
-    "'Failed to open the file ESD_testcase0.spd' despite the file existing at that exact "
-    "path with the same byte size as the shipped original. Root cause not isolated — "
-    "possibly this legacy text-format .spd needs a newer/converted form SPDSIM expects, "
-    "or a working-directory/permissions quirk. Not a license issue ('Skip license "
-    "fetch' suggests it didn't even get that far, or skipped it deliberately for this "
-    "call shape) — needs further investigation with a different sample file.",
+    "spdsim": "ROOT CAUSE FURTHER NARROWED: tried both the original `-b` flag AND the "
+    "`-as`/`-spice -run` flags documented in `doc/psi_ug/"
+    "ch10_tcl_re_Calling_SPDSIM_in_PowerSI_Commands.html` (a page titled 'Invoke "
+    "Subprocesses', describing SPDSIM as something PowerSI's own Tcl `exec` command "
+    "launches) — both flag styles produced the identical 'Skip license fetch' then "
+    "'Failed to open the file' failure, against TWO different real samples (the legacy "
+    "PostInstallationCheck ESD_testcase0.spd AND a modern PowerSI 3D-EM sample, "
+    "diff_via.spd). The consistent 'Skip license fetch' message (never seen on any "
+    "other confirmed-working tool in this suite) plus the doc page's own framing "
+    "strongly suggests SPDSIM.exe is designed to run only as a genuine child process "
+    "spawned by a live PowerSI Tcl session (inheriting some license/IPC context a "
+    "freshly-launched standalone process doesn't have) — not really an independently "
+    "callable batch tool despite living in tools/bin and accepting CLI flags. A real "
+    "fix would mean driving it via `sigrity::do exec \"...spdsim.exe\" -as \"file.spd\" "
+    "&` INSIDE a PowerSI Tcl session (powersi_tools.py) rather than as its own "
+    "submit_job call — not yet implemented.",
+    "abcd": "ATTEMPTED LIVE against three different real Touchstone file combinations "
+    "(two 4-port .s4p files cascaded — segfaulted, exit 139; a single 2-port capacitor "
+    ".s2p with -tsfile alone — silent no-op, no output, no error; two 2-port capacitor "
+    ".s2p files cascaded via -lefttsfile/-righttsfile, both relative and absolute "
+    "-filepath — also silent no-op). Demoted from built_untested to known_blocked: "
+    "confirmed real via -help, but every real invocation tried either crashed or did "
+    "nothing, with zero diagnostic output either way — root cause not isolated, "
+    "possibly a frequency-grid/port-count compatibility requirement between the files "
+    "that isn't obvious from the tool's own error reporting (which in this case is "
+    "simply absent).",
+    "allegro_checkplus": "SCOPE CORRECTION: `doc/checkplus/chap2.html`'s own title is "
+    "'Setting Up Allegro Design Entry HDL Rules Checker' — checkplus is a rules "
+    "checker for Design Entry HDL / Concept-HDL (a separate, legacy Cadence SCHEMATIC "
+    "tool), not for Allegro PCB `.brd` physical layouts at all. Its `-proj` argument is "
+    "a DE-HDL project reference, not anything resolvable from a `.brd` or a plain "
+    "directory path — this fully explains the earlier 'Project File does not exist' "
+    "result and means this tool is likely not applicable to a Capture-based (not "
+    "DE-HDL-based) design flow at all, independent of the project-reference-format "
+    "question.",
+    "allegro_gbplot": "ROOT CAUSE FOUND AND FIXED this pass: `doc/gcoms/gchap.html` "
+    "documents the real syntax as `gbplot artwork_file_name [penplot_file_name] "
+    "[-version]` — it takes an ALREADY-GENERATED Gerber `.art` artwork file, not a "
+    "`.brd` directly (confirmed live: passing a `.brd`, as `run_allegro_gerber_plot` "
+    "originally did, fails immediately with 'gbplot: Error opening parameter file.'). "
+    "`run_allegro_gerber_plot` is now corrected to take an `artwork_file` argument (the "
+    ".art output of `run_allegro_generate_artwork`, see `allegro_artwork` below) instead "
+    "of a board file. Upgraded from known_blocked to built_untested — the fix is "
+    "confirmed correct per the doc's own syntax, but gbplot itself (a legacy "
+    "pen-plotter-format converter, not needed for standard Gerber/RS274X consumers) "
+    "was not independently re-run against a real .art file this pass.",
+    "allegro_artwork": "NEW this pass, CONFIRMED LIVE end-to-end — this is the real fix "
+    "for Gerber export, which `allegro_gbplot` alone could never provide (see its own "
+    "note). `artwork.exe` has a full, real `-help` usage banner ('Generates Gerber "
+    "films from Allegro designs'); `-l <board>` lists film records already defined. The "
+    "missing piece was authoring those film records at all — Allegro's Artwork Control "
+    "Form normally does this interactively, but the real documented SKILL equivalent, "
+    "`axlFilmCreate` (now wrapped as `allegro_create_film` in allegro_geometry_tools.py), "
+    "does it headlessly. Full pipeline confirmed live THREE times against fresh copies "
+    "of the real sample board, including once through the exact unmodified production "
+    "tool functions (allegro_create_film -> allegro_save_design -> allegro_run_session "
+    "-> run_allegro_generate_artwork): defining ETCH/TOP and ETCH/BOTTOM films, saving, "
+    "then running `artwork.exe <board>` produced real `TOP.art` (12225 bytes) and "
+    "`BOTTOM.art` (6052 bytes) files in genuine RS274X Gerber format (verified file "
+    "content: 'G04 File Format: Gerber RS274X', real layer/offset/rotation records). "
+    "NOTE: artwork.exe exits 1 ('ARTWORK had warnings') even on this fully successful "
+    "run — the warnings ('Can't open parameter file ... using default values', "
+    "'Photoplot outline rectangle not found; using drawing extents') are the tool "
+    "falling back to sane defaults, not errors — read photoplot.log/check for the "
+    "actual .art files before treating a nonzero exit as failure.",
 }
 
 

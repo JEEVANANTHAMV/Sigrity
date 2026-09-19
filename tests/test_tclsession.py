@@ -9,6 +9,7 @@ from sigrity_mcp.core.tclsession import (
     ScriptSessionManager,
     TclSessionManager,
     SessionNotFoundError,
+    clear_stale_design_lock,
     run_session,
 )
 from sigrity_mcp.core.jobs import JobManager
@@ -86,6 +87,27 @@ async def test_run_session_writes_script_and_launches_job(tmp_path, monkeypatch)
 async def test_run_session_unknown_id_raises():
     with pytest.raises(SessionNotFoundError):
         await run_session("nope", tool="powersi")
+
+
+def test_clear_stale_design_lock_removes_existing_lock(tmp_path):
+    board = tmp_path / "board.brd"
+    board.write_text("fake")
+    lock = tmp_path / "board.brd.lck"
+    lock.write_text("locked by pid 1234")
+
+    removed = clear_stale_design_lock(str(board))
+
+    assert removed is True
+    assert not lock.exists()
+
+
+def test_clear_stale_design_lock_noop_when_absent(tmp_path):
+    board = tmp_path / "board.brd"
+    board.write_text("fake")
+
+    removed = clear_stale_design_lock(str(board))
+
+    assert removed is False
 
 
 def test_tcl_session_is_alias_for_script_session():

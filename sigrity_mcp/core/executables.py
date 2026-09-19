@@ -44,6 +44,10 @@ CAD_EXECUTABLES: dict[str, str] = {
     "allegro_ipc2581_out": "ipc2581_out.exe",
     "allegro_ipc356_out": "ipc356_out.exe",
     "allegro_step_out": "step_out.exe",
+    # artwork.exe is the real Gerber-film generator (confirmed live via its own -help
+    # banner and a real run producing genuine RS274X .art files) -- the piece
+    # run_allegro_gerber_plot was missing; see allegro_manufacturing_tools.py.
+    "allegro_artwork": "artwork.exe",
     "allegro_gbplot": "gbplot.exe",
     # --- Library / model checking (confirmed live CLI, see allegro_library_tools.py) ---
     "ibischk3": "ibischk3.exe",
@@ -60,6 +64,12 @@ CAD_EXECUTABLES: dict[str, str] = {
     "cap2xml": "cap2xml.exe",
     "dml2con": "dml2con.exe",
     "apd2con": "apd2con.exe",
+    # --- SPECCTRA/SPIF autorouting bridge (confirmed live headless autorouting —
+    # see spif_specctra_tools.py) ---
+    "spif_batch": "spif_batch.exe",
+    "specctra": "specctra.exe",
+    # --- PSpice batch simulation (confirmed live CLI, see pspice_tools.py) ---
+    "psp_cmd": "psp_cmd.exe",
 }
 
 # logical name -> exe filename under SIGRITY_HOME/tools/bin
