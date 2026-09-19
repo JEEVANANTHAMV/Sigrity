@@ -28,6 +28,12 @@ ENDPOINTS = [
 
 MAX_TURNS = 25
 TOOL_TIMEOUT_SECONDS = 180
+# See the identical constant in scripts/eval_pcb_challenge.py for why this exists: a
+# sibling eval run saw both endpoints independently blow through the model's context
+# window (one hit 76.8M characters) with no single tool result capped before being
+# appended to conversation history. This run didn't hit it, but the same unbounded
+# accumulation risk applies here too.
+MAX_TOOL_RESULT_CHARS = 20_000
 
 SYSTEM_PROMPT = (
     "You control a Cadence Sigrity + Allegro/OrCAD automation suite through MCP tools. "
@@ -118,9 +124,19 @@ async def run_task(endpoint, task_name, user_prompt):
                         rec["ok"] = False
                         rec["error"] = error_text
                     rec["result_preview"] = payload[:300]
+                    rec["result_chars"] = len(payload)
                     tool_calls.append(rec)
                     print(f"  [{endpoint['name']}/{task_name} turn {turn}] {name}({args}) -> {payload[:200]}")
-                    messages.append({"role": "tool", "tool_call_id": tc.id, "content": payload})
+                    sent_payload = payload
+                    if len(payload) > MAX_TOOL_RESULT_CHARS:
+                        half = MAX_TOOL_RESULT_CHARS // 2
+                        sent_payload = (
+                            payload[:half]
+                            + f"\n...[TRUNCATED: {len(payload)} total chars, "
+                            f"{len(payload) - MAX_TOOL_RESULT_CHARS} omitted]...\n"
+                            + payload[-half:]
+                        )
+                    messages.append({"role": "tool", "tool_call_id": tc.id, "content": sent_payload})
     except Exception as exc:
         error = f"{type(exc).__name__}: {exc}"
     finally:
