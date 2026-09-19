@@ -159,6 +159,13 @@ async def run_challenge(endpoint: dict) -> dict:
                 {"role": "system", "content": build_system_prompt(tag)},
                 {"role": "user", "content": TASK_PROMPT},
             ]
+            # ANTI-LOOP GUARD, added after a real failure this harness caught: one run saw
+            # a model call copy_file with IDENTICAL source==destination args 10+ times in a
+            # row, hitting the same SameFileError every time, burning its entire remaining
+            # turn budget without ever trying something different. Track the last few
+            # (name, args) signatures that failed; once the same one fails 3 times in a
+            # row, inject an explicit corrective nudge instead of silently letting it repeat.
+            recent_failed_signatures: list[tuple[str, str]] = []
             for turn in range(MAX_TURNS):
                 turns_used = turn + 1
                 try:
@@ -208,6 +215,27 @@ async def run_challenge(endpoint: dict) -> dict:
                             + payload[-half:]
                         )
                     messages.append({"role": "tool", "tool_call_id": tc.id, "content": sent_payload})
+
+                    signature = (name, json.dumps(args, sort_keys=True))
+                    if rec["ok"]:
+                        recent_failed_signatures.clear()
+                    else:
+                        recent_failed_signatures.append(signature)
+                        if len(recent_failed_signatures) >= 3 and len(set(recent_failed_signatures[-3:])) == 1:
+                            nudge = (
+                                f"You have now called {name} with the exact same arguments "
+                                "3 times in a row and it failed identically every time -- "
+                                "repeating it again will not produce a different result. "
+                                "STOP retrying this exact call. Either: (a) the file/result "
+                                "you wanted already exists at that destination, so move on "
+                                "to the next step instead of re-copying it, or (b) change "
+                                "your approach (different arguments, a different tool, or "
+                                "report this specific step as blocked in your summary) "
+                                "rather than repeating the identical failing call again."
+                            )
+                            messages.append({"role": "user", "content": nudge})
+                            print(f"[{tag}] ANTI-LOOP GUARD triggered for {name} at turn {turn}")
+                            recent_failed_signatures.clear()
     except Exception as exc:
         error = f"HARNESS_ERROR: {type(exc).__name__}: {exc}"
         print(f"[{tag}] {error}")
