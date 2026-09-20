@@ -18,6 +18,28 @@ opens directly via start_powersi_session, auto-translated by PowerSI's built-in
 "BRDExtractor". Call powersi_save_document right after opening a non-`.spd` design and
 before adding any other steps — PowerSI refuses to simulate a design that hasn't been
 saved to native SPD form first.
+
+This bridge is NOT limited to `.brd` — PowerSI's `sigrity::open document` goes through
+Sigrity's built-in "SPDIF Translator" (documented in
+doc/Translators_UG/Introduction_to_Sigrity_Translators.html as available inside every
+Layout Workbench tool via Tools > Options > Edit Options > Translator, keyed off file
+extension, not a separate standalone exe), which covers far more than the six dedicated
+`*2Spd.exe` translators wrapped in `sigrity_mcp/domains/extraction/translators.py`:
+Altium (`.pcbdoc`), IPC-2581 (`.xml`), DXF (`.dxf`), ODB++ (`.tgz`/`.tar`/`.gz`/`.zip`/
+`.7z`), and IEEE 2401 M-Format, in addition to Allegro. CONFIRMED LIVE this pass against
+two of these, both through this exact tool pair (`start_powersi_session` +
+`powersi_save_document`), no other code involved: a real 130KB DXF sample
+(share/Translators/Samples/dxf2spd/demo.dxf) produced a genuine 640KB `.spd` (log:
+"File [...demo.dxf] is loaded." / "File [demo_out.spd] is saved."), and a real 55MB
+Altium `.PcbDoc` sample (share/Translators/Samples/altium/demo1.PcbDoc) produced a
+genuine ~19MB `.spd` the same way. IPC-2581 (tried against a real 229MB sample) is
+plausible but unconfirmed — the process was genuinely still parsing (1.6GB RAM, not a
+stalled dialog) when the test was cut off at 90s rather than let run unbounded; expect
+this format to need a longer `powersi_run_session` timeout on a real file this size,
+not necessarily to be broken. So: for "import a foreign PCB/schematic layout for
+Sigrity analysis," this pair of tools IS the general answer — reach for a dedicated
+`translate_*_to_spd` tool in `translators.py` only for the formats it doesn't cover
+(GDSII, OASIS, NDD, PADS, RIF, Cadvance, Zuken).
 """
 
 from __future__ import annotations

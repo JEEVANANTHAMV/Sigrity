@@ -6,6 +6,18 @@ is driven purely by CLI switches in batch mode (`-b`). None of them expose a `si
 Tcl automation surface; a translation run is submitted as a plain background job the
 same way SPDSIM/BroadbandSPICE are in Domain 2.
 
+These six (plus SPDLinks) are dedicated standalone-exe translators, but they are NOT the
+only import path into `.spd` — Sigrity ships a built-in "SPDIF Translator" inside every
+Layout Workbench tool (PowerSI, PowerDC, ...), not a separate exe, documented in
+doc/Translators_UG/Introduction_to_Sigrity_Translators.html, that additionally covers
+Altium (`.pcbdoc`), IPC-2581 (`.xml`), DXF (`.dxf`), ODB++ archives, and Allegro
+`.brd`/`.mcm`/etc. Reached via `sigrity::open document` inside a PowerSI/PowerDC session
+(`start_powersi_session` + `powersi_save_document` in `sigrity_mcp/domains/si/
+powersi_tools.py` — see that module's docstring for full live-test evidence: confirmed
+against real DXF and Altium samples, producing valid multi-KB/multi-MB `.spd` files).
+Reach for a dedicated `translate_*_to_spd` tool below only for a format this built-in
+translator doesn't cover (GDSII, OASIS, NDD, PADS, RIF, Cadvance, Zuken CR5000/CR8000).
+
 Documented gotcha that applies to every tool below: passing `-log <log_file>` replays a
 previously recorded run's stored settings, and those stored values **silently override**
 any explicit format/map/tech arguments given alongside it on the same command line. So
