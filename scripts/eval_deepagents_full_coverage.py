@@ -21,6 +21,22 @@ gets executed concurrently by langgraph's own ToolNode — mitigated with an exp
 system-prompt instruction, not a hard guarantee; a same-turn multi-Allegro-call license
 collision, if it happens, is itself a real finding worth reporting, not a harness bug.
 
+CRITICAL fix, found via a live first run: `MultiServerMCPClient.get_tools()` (the
+straightforward API) opens a BRAND-NEW stdio connection to a FRESH server subprocess for
+EVERY SINGLE tool call, not once for the whole run. This directly broke every
+session-based tool in this suite (`start_allegro_session`/`start_capture_session`/
+`start_powersi_session`/... followed by further calls against that session_id) with a
+spurious `SessionNotFoundError` ("No open script session... it may have already been
+run/closed, or never created") — the session really was created, just inside a different,
+already-exited server process than the one the next call landed in. It also broke every
+`wait_for_job` call after a `run_*`/`*_run_session` with a spurious `JobStillRunningError`
+("...running in a process this server instance is not tracking (likely a previous server
+run)") for the same reason. Neither is a real product defect — `core/tclsession.py` and
+`core/jobs.py` are correctly designed around ONE long-lived server process (exactly how
+`mcp.json` runs it), and this harness's job is to match that, not fight it. Fixed by
+opening exactly ONE persistent `client.session(...)` for the entire run and loading tools
+against it once (`load_mcp_tools(session)`) instead of `client.get_tools()`.
+
 13 tasks are used instead of 165 (one per tool), each grouping a real, already-verified
 sample file/board with a whole tool-domain cluster (the exact "point at an already-
 staged real file" lesson this project's own eval scripts already learned the hard way).
@@ -53,6 +69,7 @@ os.environ["no_proxy"] = _combined_no_proxy
 
 from langchain_core.messages import AIMessage, ToolMessage  # noqa: E402
 from langchain_mcp_adapters.client import MultiServerMCPClient  # noqa: E402
+from langchain_mcp_adapters.tools import load_mcp_tools  # noqa: E402
 from langchain_openai import ChatOpenAI  # noqa: E402
 
 from deepagents import create_deep_agent  # noqa: E402
@@ -66,8 +83,21 @@ ENDPOINTS = [
     {"name": "node-11", "base_url": "http://172.16.34.11:8000/v1", "model": "qwen3-max"},
 ]
 
-PER_TASK_TIMEOUT_SECONDS = 600
-RECURSION_LIMIT = 60
+PER_TASK_TIMEOUT_SECONDS = 1200
+# Found live: qwen3-max, given all 165 tool schemas plus a compound multi-step task, can
+# spend several minutes of continuous token generation on a single reasoning turn before
+# ever emitting its first tool call (confirmed via raw token-level streaming -- this is
+# real, sustained generation, not a stalled connection). 1200s gives that legitimate
+# slow-reasoning behavior room to finish; a task that still can't produce a first tool
+# call inside 20 minutes is itself a real, reportable finding, not a harness bug to hide.
+RECURSION_LIMIT = 200
+# Found live: every task naming more than ~10 target tools hit GraphRecursionError at
+# the original limit of 60 -- each real tool call this suite's own job-polling pattern
+# needs (run_* -> wait_for_job -> tail_job_log -> list_job_files -> read_job_output_file,
+# repeated per sub-task) burns 2 graph steps per LLM turn, so a 10-sub-task compound
+# task can genuinely need 100+ steps. This is a harness config error, not evidence the
+# underlying tools don't work -- the tasks that stayed under 60 (platform/licensing,
+# file/job tools, sourcing) all completed cleanly with zero tool errors.
 OUTPUT_ROOT = f"{REPO_ROOT}/runs/eval_deepagents_full_coverage"
 
 CONNECTIONS = {
@@ -103,7 +133,10 @@ def build_system_prompt(tag: str, task_id: str) -> str:
         f"ALL of them MUST stay under {work_dir}/ (that literal Windows path, passed as a "
         "plain string argument to whichever real tool needs it, e.g. copy_file's "
         "destination) -- never write into any other directory, and never modify a "
-        "source/sample file in place, always copy_file it first. If this task is purely "
+        "source/sample file in place, always copy_file it first. Always pass "
+        "overwrite=True to copy_file/move_file (this work dir may already contain files "
+        "from an earlier attempt at this same task) so a pre-existing destination file "
+        "is not treated as a fatal error. If this task is purely "
         "read-only (no file paths involved), ignore this paragraph. Long-running operations run as "
         "background jobs -- a run_*/*_run_session tool returns a job_id immediately; use "
         "wait_for_job or get_job_status to track it, with a generous timeout_seconds "
@@ -540,17 +573,39 @@ async def run_task(agent, tag: str, task: dict) -> dict:
         )
     print(
         f"[{tag}] {task_id}: {result_record['status']} in {result_record.get('duration_s')}s, "
-        f"{len(result_record.get('tools_called', []))} distinct tools called"
+        f"{len(result_record.get('tools_called', []))} distinct tools called",
+        flush=True,
     )
     return result_record
 
 
+async def run_task_with_fresh_session(model, tag: str, task: dict) -> dict:
+    """Open ONE persistent MCP session scoped to exactly this one task, not the whole run.
+
+    A session-per-whole-run turned out to have its own failure mode, found live: after a
+    task times out (its agent.ainvoke() call gets cancelled by asyncio.wait_for), cleanly
+    tearing down that SAME session on the next `async with` exit can throw
+    (anyio.BrokenResourceError -- a cancelled in-flight stdio read/write leaves the pipe
+    half-written), which killed the entire remaining run. Scoping one fresh session per
+    task bounds that blast radius to just this one task's own connection, and the
+    try/except below means even a teardown failure only costs this one task, not the rest.
+    """
+    client = MultiServerMCPClient(CONNECTIONS)
+    try:
+        async with client.session("sigrity") as session:
+            mcp_tools = await load_mcp_tools(session)
+            agent = create_deep_agent(model=model, tools=mcp_tools)
+            return await run_task(agent, tag, task)
+    except Exception as exc:  # noqa: BLE001 - a session setup/teardown failure is still just one task's result
+        print(f"[{tag}] {task['id']}: session-level harness_error: {type(exc).__name__}: {exc}", flush=True)
+        return {
+            "task_id": task["id"], "endpoint": tag, "target_tools": task["target_tools"],
+            "status": "harness_error", "error": f"MCP session setup/teardown: {type(exc).__name__}: {exc}",
+        }
+
+
 async def main():
     Path(OUTPUT_ROOT).mkdir(parents=True, exist_ok=True)
-    client = MultiServerMCPClient(CONNECTIONS)
-    mcp_tools = await client.get_tools()
-    print(f"Loaded {len(mcp_tools)} real MCP tools from the production server.")
-
     all_results = []
     for endpoint in ENDPOINTS:
         tag = endpoint["name"]
@@ -558,18 +613,17 @@ async def main():
             model=endpoint["model"],
             base_url=endpoint["base_url"],
             api_key="not-needed",
-            timeout=280.0,
-            max_retries=1,
+            timeout=1100.0,
+            max_retries=0,
         )
-        agent = create_deep_agent(model=model, tools=mcp_tools)
-        print(f"\n=== Endpoint {tag} ({endpoint['base_url']}) — {len(TASKS)} tasks ===")
+        print(f"\n=== Endpoint {tag} ({endpoint['base_url']}) — {len(TASKS)} tasks ===", flush=True)
         for task in TASKS:
-            record = await run_task(agent, tag, task)
+            record = await run_task_with_fresh_session(model, tag, task)
             all_results.append(record)
             out_path = Path(OUTPUT_ROOT) / "report.json"
             out_path.write_text(json.dumps(all_results, indent=2, default=str), encoding="utf-8")
 
-    print(f"\n=== DONE. {len(all_results)} runs. Full report: {OUTPUT_ROOT}/report.json ===")
+    print(f"\n=== DONE. {len(all_results)} runs. Full report: {OUTPUT_ROOT}/report.json ===", flush=True)
 
 
 if __name__ == "__main__":
