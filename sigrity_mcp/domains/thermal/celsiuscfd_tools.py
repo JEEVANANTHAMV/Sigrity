@@ -28,9 +28,25 @@ anywhere in the shipped doc tree beyond this confirmed sequence.
 
 from __future__ import annotations
 
+import pathlib
+import shutil
+
 from sigrity_mcp.core.tclscript import tcl_path
 from sigrity_mcp.core.tclsession import run_session, tcl_sessions
 from sigrity_mcp.mcp_app import mcp
+
+
+def _clear_prior_celsius_results(project_file: str) -> None:
+    """Remove any existing result folders matching <case>_* to prevent modal overwrite prompts."""
+    try:
+        p = pathlib.Path(project_file)
+        if p.parent.exists():
+            stem = p.stem
+            for item in p.parent.glob(f"{stem}_*"):
+                if item.is_dir() and item.name.endswith(("_SS_W", "_Result", "_CFD", "_EC", "_Results")):
+                    shutil.rmtree(item, ignore_errors=True)
+    except Exception:
+        pass
 
 
 @mcp.tool
@@ -66,7 +82,7 @@ async def celsiuscfd_set_solver_cpu_percentage(session_id: str, cpu_percentage: 
 
 
 @mcp.tool
-async def celsiuscfd_run_session(session_id: str, project_file: str) -> dict:
+async def celsiuscfd_run_session(session_id: str, project_file: str, clean_prior_results: bool = True) -> dict:
     """Write out the session's accumulated Tcl macro and launch CelsiusCFD against it as a background job.
 
     `project_file` must be the same `.3dth` path passed to start_celsiuscfd_session.
@@ -74,10 +90,13 @@ async def celsiuscfd_run_session(session_id: str, project_file: str) -> dict:
     simulation -fileName {<project_file>}`, then `sigrity::close exe`, matching the
     confirmed working sample exactly, then runs `CelsiusCFD.exe -tcl <macro.tcl>` (no
     `-b` flag needed — confirmed live without it).
-    Returns a job_id immediately; poll it with get_job_status/wait_for_job/tail_job_log —
-    CFD solves are typically slower than Celsius3D's structural/thermal-stress solve;
-    pass a generous wait_for_job timeout.
+    When `clean_prior_results` is True (default), prior CFD output directories
+    are cleared before launching to prevent interactive overwrite dialogs.
+    Returns a job_id immediately; poll it with get_job_status/wait_for_job/tail_job_log.
     """
+    if clean_prior_results:
+        _clear_prior_celsius_results(project_file)
+
     path = tcl_path(project_file)
     tcl_sessions.add_line(session_id, f"sigrity::begin simulation -fileName {path}")
     tcl_sessions.add_line(session_id, f"sigrity::end simulation -fileName {path}")
