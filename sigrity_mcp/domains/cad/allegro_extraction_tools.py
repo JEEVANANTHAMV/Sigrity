@@ -59,3 +59,121 @@ async def run_allegro_design_extractor(
         args.append("-c")
     record = await submit_job(tool="allegro_designextractor", build_args=args)
     return {"job_id": record.job_id, "state": record.state, "job_dir": record.job_dir, "command": record.command}
+
+
+EXTRACTION_TEMPLATES: dict[str, str] = {
+    "bom": (
+        "COMPONENTS\n"
+        "REFDES\n"
+        "DEVICE\n"
+        "VALUE\n"
+        "TOLERANCE\n"
+        "CLASS\n"
+        "PACKAGE\n"
+        "END\n"
+    ),
+    "nets": (
+        "NETS\n"
+        "NET_NAME\n"
+        "PIN_NUMBER\n"
+        "REFDES\n"
+        "PIN_NAME\n"
+        "END\n"
+    ),
+    "components": (
+        "COMPONENTS\n"
+        "REFDES\n"
+        "COMP_DEVICE_TYPE\n"
+        "COMP_PACKAGE\n"
+        "COMP_LOCATION_X\n"
+        "COMP_LOCATION_Y\n"
+        "COMP_ROTATION\n"
+        "COMP_MIRRORED\n"
+        "END\n"
+    ),
+    "pins": (
+        "PINS\n"
+        "PIN_NAME\n"
+        "PIN_NUMBER\n"
+        "REFDES\n"
+        "NET_NAME\n"
+        "PIN_X\n"
+        "PIN_Y\n"
+        "PIN_ROTATION\n"
+        "END\n"
+    ),
+    "testpoints": (
+        "TESTPOINTS\n"
+        "TESTPOINT_NAME\n"
+        "TESTPOINT_GRID\n"
+        "TESTPOINT_LOCATION_X\n"
+        "TESTPOINT_LOCATION_Y\n"
+        "NET_NAME\n"
+        "END\n"
+    ),
+    "drc": (
+        "DRC\n"
+        "DRC_ERROR_NAME\n"
+        "DRC_LOCATION_X\n"
+        "DRC_LOCATION_Y\n"
+        "DRC_LAYER\n"
+        "DRC_VIOLATION_DETAILS\n"
+        "END\n"
+    ),
+}
+
+
+@mcp.tool
+async def run_allegro_extracta(
+    board_file: str,
+    view_type: str = "bom",
+    custom_command_content: Optional[str] = None,
+    custom_command_file: Optional[str] = None,
+    output_file: Optional[str] = None,
+) -> dict:
+    """Extract design database information from an Allegro .brd file using native extracta.exe.
+
+    Runs `extracta.exe <board_file> <command_file> <output_file>`.
+    extracta is Cadence Allegro's standard headless command-line extraction engine for dumping
+    BOMs, components, nets, pins, test points, DRC errors, and geometry without requiring
+    an interactive GUI or SKILL session.
+
+    `view_type`: One of 'bom', 'nets', 'components', 'pins', 'testpoints', 'drc', or 'custom'.
+    `custom_command_content`: Control file lines to execute when view_type is 'custom'.
+    `custom_command_file`: Path to an existing .txt/.view command file.
+    `output_file`: Destination file path. If omitted, defaults to <board>_<view_type>.txt.
+    """
+    import os
+    from sigrity_mcp.core.config import settings
+
+    if not output_file:
+        base, _ = os.path.splitext(board_file)
+        output_file = f"{base}_{view_type}.txt"
+
+    cmd_file_path = custom_command_file
+    if not cmd_file_path:
+        if view_type in EXTRACTION_TEMPLATES:
+            content = EXTRACTION_TEMPLATES[view_type]
+        elif custom_command_content:
+            content = custom_command_content
+        else:
+            raise ValueError(f"Unknown view_type '{view_type}' and no custom_command_content or custom_command_file provided.")
+
+        # Create command file in output directory or cwd
+        out_dir = os.path.dirname(output_file) or str(settings.runs_dir)
+        os.makedirs(out_dir, exist_ok=True)
+        cmd_file_path = os.path.join(out_dir, f"extract_{view_type}.txt")
+        with open(cmd_file_path, "w", encoding="utf-8") as f:
+            f.write(content)
+
+    args = [board_file, cmd_file_path, output_file]
+    record = await submit_job(tool="allegro_extracta", build_args=args)
+    return {
+        "job_id": record.job_id,
+        "state": record.state,
+        "job_dir": record.job_dir,
+        "command": record.command,
+        "output_file": output_file,
+        "command_file": cmd_file_path,
+    }
+

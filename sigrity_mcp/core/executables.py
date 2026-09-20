@@ -58,6 +58,7 @@ CAD_EXECUTABLES: dict[str, str] = {
     "allegro_diacompare": "diacompare.exe",
     # --- Design data extraction (confirmed live CLI, see allegro_extraction_tools.py) ---
     "allegro_designextractor": "designextractor.exe",
+    "allegro_extracta": "extracta.exe",
     # --- Interchange translators (real CLI, confirmed license-gated on this machine —
     # see interchange_tools.py and core.tool_status) ---
     "con2xml": "con2xml.exe",
