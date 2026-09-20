@@ -22,4 +22,6 @@ from sigrity_mcp.domains.platform import (  # noqa: F401
     license_tools,
     pipeline_tools,
     session_tools,
+    sharepoint_sync_tools,
 )
+
