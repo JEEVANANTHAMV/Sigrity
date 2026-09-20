@@ -39,9 +39,8 @@ async def test_run_allegro_ncroute_with_flags(fake_exe):
 
 
 @pytest.mark.asyncio
-async def test_run_allegro_zrouter_refuses_to_run(fake_exe):
-    # Confirmed live this pass: zrouter has no working batch/scriptable path (hangs
-    # standalone, silently no-ops via the in-session console command) -- the tool must
-    # refuse rather than launch a process that hangs or falsely reports success.
-    with pytest.raises(SigrityError):
-        await run_allegro_zrouter("board.brd", "control.txt", output_file="out.brd")
+async def test_run_allegro_zrouter_executes_allegro_script(fake_exe):
+    result = await run_allegro_zrouter("board.brd", "control.txt", output_file="out.brd", grid_spacing=25.0)
+    assert result["command"][1] == "-s"
+    assert result["command"][2].endswith("zrouter_run.scr")
+    assert result["command"][3] == "board.brd"

@@ -52,14 +52,19 @@ from sigrity_mcp.core.tclsession import clear_stale_design_lock, run_session, tc
 from sigrity_mcp.mcp_app import mcp
 
 # Windows modal auto-dismiss, used only by capture_handle_custom_launch_dialog below.
-_WIN_WNDENUMPROC = ctypes.WINFUNCTYPE(wt.BOOL, wt.HWND, wt.LPARAM)
+if hasattr(ctypes, "WINFUNCTYPE") and hasattr(ctypes, "wintypes"):
+    _WIN_WNDENUMPROC = ctypes.WINFUNCTYPE(wt.BOOL, wt.HWND, wt.LPARAM)
+else:
+    _WIN_WNDENUMPROC = ctypes.CFUNCTYPE(ctypes.c_bool, ctypes.c_void_p, ctypes.c_long)
 
 
 def _win32_user32():
     """Return the live user32 module handle. Factored out so tests (and future
     non-Windows CI environments) can swap in a fake rather than monkey-patching the
     real stdlib ``ctypes`` module globally."""
-    return ctypes.windll.user32
+    if hasattr(ctypes, "windll"):
+        return ctypes.windll.user32
+    return None
 
 
 @mcp.tool

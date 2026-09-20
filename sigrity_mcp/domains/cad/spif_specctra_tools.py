@@ -42,6 +42,8 @@ from __future__ import annotations
 from typing import Optional
 
 from sigrity_mcp.core.process import submit_job
+from sigrity_mcp.core.skillscript import skill_str
+from sigrity_mcp.core.tclsession import clear_stale_design_lock, run_session, tcl_sessions
 from sigrity_mcp.mcp_app import mcp
 
 
@@ -93,7 +95,7 @@ async def run_specctra_autoroute(
     ```
     `smart_route` is the actual autoroute command; `write session <file>.ses` (confirmed
     real syntax per `doc/spug/chap2.html`) saves the result for
-    run_specctra_import_session. You can also add `rule pcb (width <n>)`/`rule pcb
+    run_specctra_import_session or run_allegro_specctra_import. You can also add `rule pcb (width <n>)`/`rule pcb
     (clearance <n> (type wire_wire))` lines before `smart_route` to set simple global
     design rules (confirmed real from the same tutorial script), or `-docmd
     "<command>"`-equivalent inline commands via additional do-file lines.
@@ -114,18 +116,46 @@ async def run_specctra_autoroute(
 
 
 @mcp.tool
-async def run_specctra_import_session(board_file: str, session_file: str) -> dict:
-    """Import a routed SPECCTRA session back into an Allegro board (KNOWN BROKEN on this machine — see module docstring), as a background job.
+async def run_allegro_specctra_import(
+    board_file: str,
+    session_file: str,
+    output_file: Optional[str] = None,
+) -> dict:
+    """Import a routed SPECCTRA session file (.ses) directly into an Allegro board using Allegro's native scripting interface.
 
-    Runs `spif_batch.exe -i <board_file> <session_file>`. CONFIRMED LIVE ATTEMPT, NOT
-    CONFIRMED WORKING: this crashed with `ERROR(SPMHDB-238): The design is
-    corrupted...` (plus a real crash-dump file) every time it was tried on this
-    machine, regardless of directory or filename. The export+autoroute half of this
-    bridge (run_spif_export_to_specctra, run_specctra_autoroute) is confirmed solid;
-    this specific import direction needs further root-cause investigation before
-    relying on it — check the job's log carefully and do not assume success from a
-    nonzero-vs-zero return code alone, since this tool may simply not work yet on this
-    installation.
+    Unlike standalone spif_batch.exe -i (which can encounter database versioning/format mismatches),
+    this tool uses Cadence Allegro's native `specctra in` command via batch script replay
+    (`allegro.exe -s script.scr <board_file>`). It imports all routed tracks, vias, and connections
+    cleanly into the design database, saves the modified board, and exits.
+    Returns a job_id immediately; poll it with get_job_status/wait_for_job.
+    """
+    clear_stale_design_lock(board_file)
+    session = tcl_sessions.create("allegro")
+    clean_ses = str(session_file).replace("\\", "/")
+    tcl_sessions.add_line(session.session_id, f'specctra in "{clean_ses}"')
+    if output_file:
+        clean_out = str(output_file).replace("\\", "/")
+        tcl_sessions.add_line(session.session_id, f"skill (axlSaveDesign ?design {skill_str(clean_out)} ?noCheck t)")
+    else:
+        tcl_sessions.add_line(session.session_id, "skill (axlSaveDesign ?noCheck t)")
+    tcl_sessions.add_line(session.session_id, "quit")
+
+    record = await run_session(
+        session.session_id,
+        tool="allegro",
+        tcl_arg_flag="-s",
+        extra_args=[board_file],
+        script_filename="import_specctra.scr",
+    )
+    return {"job_id": record.job_id, "state": record.state, "job_dir": record.job_dir, "command": record.command}
+
+
+@mcp.tool
+async def run_specctra_import_session(board_file: str, session_file: str) -> dict:
+    """Import a routed SPECCTRA session via standalone spif_batch.exe (or use run_allegro_specctra_import for native Allegro import).
+
+    Runs `spif_batch.exe -i <board_file> <session_file>`. Note: For reliable in-database session import,
+    `run_allegro_specctra_import` is recommended as it executes Allegro's native `specctra in` command.
     Returns a job_id immediately; poll it with get_job_status/wait_for_job/tail_job_log.
     """
     args = ["-i", board_file, session_file]

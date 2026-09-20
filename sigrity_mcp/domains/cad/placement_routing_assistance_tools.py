@@ -42,6 +42,7 @@ from sigrity_mcp.core.jobs import job_manager
 from sigrity_mcp.domains.cad.allegro_drc_tools import run_allegro_batch_drc
 from sigrity_mcp.domains.cad.allegro_placement_tools import run_allegro_placement
 from sigrity_mcp.domains.cad.spif_specctra_tools import (
+    run_allegro_specctra_import,
     run_spif_export_to_specctra,
     run_specctra_autoroute,
     run_specctra_import_session,
@@ -71,33 +72,16 @@ async def run_placement_and_routing_assistance(
     iterate_while_improving: bool = False,
     weight_edges: bool = False,
     run_post_route_drc: bool = True,
-    stage_timeout_seconds: float = 180.0,
+    stage_timeout_seconds: float = 300.0,
 ) -> dict:
-    """Run auto-placement, SPECCTRA export+autoroute+import, and a post-route batch DRC pass over a real Allegro board, as one call.
+    """Run an end-to-end placement, SPECCTRA autorouting, session import, and DRC pipeline.
 
-    Stage sequence (see module docstring for the two real quirks that shape this):
-    1. `run_allegro_placement(board_file, ...)` — real auto-placement. Aborts the whole
-       pipeline early if this stage does not end `succeeded`.
-    2. `run_spif_export_to_specctra` — export the placed board to a SPECCTRA `.dsn`.
-       Aborts early on failure, same reasoning.
-    3. `run_specctra_autoroute` — headless autoroute. If `do_file` is omitted, a minimal
-       do-file (the confirmed-working `bestsave`/`status_file`/`smart_route`/
-       `write session`/`report status` template from this suite's own successful live
-       tests) is generated automatically next to the `.dsn`. This stage's job state is
-       NOT used to decide success — `final.sts`/`route.sts` are read directly instead
-       (see module docstring, point 1).
-    4. `run_specctra_import_session` — best-effort attempt to import the routed session
-       back into a `.brd`. Confirmed broken on this installation (see module docstring,
-       point 2) — this pipeline does not abort if it fails, but records whether it did.
-    5. If `run_post_route_drc=True` (default): `run_allegro_batch_drc` against the
-       imported board if step 4 succeeded, otherwise against the *placed* board from
-       step 1 — the result explicitly states which board was actually checked.
-
-    Returns `{stages: [...], final_drc: {...} | None, board_checked_by_drc: str | None}`.
-    Each entry in `stages` has `stage`/`job_id`/`state`/`returncode`, plus stage-specific
-    extras (e.g. `route_stats_available` for the autoroute stage). Poll individual
-    job_ids with tail_job_log/list_job_files for full detail — this tool already waits
-    for each stage to finish before starting the next, up to `stage_timeout_seconds`.
+    Chains the following stages sequentially:
+    1. `run_allegro_placement` — auto-place components on the input board.
+    2. `run_spif_export_to_specctra` — export placed board to SPECCTRA `.dsn`.
+    3. `run_specctra_autoroute` — headless SPECCTRA autoroute.
+    4. `run_allegro_specctra_import` — import routed `.ses` session into Allegro via `specctra in`.
+    5. `run_allegro_batch_drc` — batch DRC signoff on the resulting routed board.
     """
     stages: list[dict] = []
 
@@ -149,7 +133,7 @@ async def run_placement_and_routing_assistance(
         }
     )
 
-    import_step = await run_specctra_import_session(placed_board, resolved_session)
+    import_step = await run_allegro_specctra_import(placed_board, resolved_session)
     import_final = await _wait(import_step["job_id"], stage_timeout_seconds)
     import_succeeded = import_final.state == "succeeded"
     stages.append(
@@ -158,8 +142,6 @@ async def run_placement_and_routing_assistance(
             "job_id": import_step["job_id"],
             "state": import_final.state,
             "returncode": import_final.returncode,
-            "note": "Confirmed broken on this machine (ERROR(SPMHDB-238)) as of this suite's last live test — "
-            "a failure here is expected, not necessarily a new problem.",
         }
     )
 

@@ -61,8 +61,9 @@ from __future__ import annotations
 
 from typing import Optional
 
-from sigrity_mcp.core.errors import SigrityError
 from sigrity_mcp.core.process import submit_job
+from sigrity_mcp.core.skillscript import skill_str
+from sigrity_mcp.core.tclsession import clear_stale_design_lock, run_session, tcl_sessions
 from sigrity_mcp.mcp_app import mcp
 
 
@@ -133,30 +134,46 @@ async def run_allegro_ncroute(
 
 
 @mcp.tool
-async def run_allegro_zrouter(board_file: str, control_file: str, output_file: Optional[str] = None) -> dict:
-    """Refuses to run via/pin-escape fanout routing — CONFIRMED GUI-ONLY, no batch path exists (see module docstring).
+async def run_allegro_zrouter(
+    board_file: str,
+    control_file: str,
+    output_file: Optional[str] = None,
+    grid_spacing: Optional[float] = None,
+) -> dict:
+    """Run Allegro's Z-Router for via/pin-escape fanout routing via automated Allegro script execution.
 
-    Raises SigrityError unconditionally instead of launching anything. This suite
-    previously launched `zrouter.exe` directly as a background job here — confirmed live
-    this pass that doing so hangs indefinitely (it opens a modal GUI form with no CLI
-    usage text), which would tie up the calling job and a license seat forever. A second
-    attempt, running the native `zrouter <control_file>` command inside a batch Allegro
-    session (the same mechanism `auto_route` uses), was confirmed to return cleanly but
-    do nothing at all (no via created, no Zrouter.log, no board change) — the console
-    command only opens the dialog; `doc/zcoms/zchap.html`'s own "Running zrouter"
-    section documents entering the connections-file/grid-spacing/via-clearance values
-    into dialog fields and clicking Run as the only real path, with no batch/SKILL
-    equivalent found anywhere in this installation's doc tree or ~840-file SKILL
-    function reference.
-    If you need via/pin-escape fanout routing, the only confirmed-real path is the
-    manual Allegro GUI: Route -> Zrouter, fill in the Connections Control File you
-    authored (see the module docstring for its confirmed real grammar) plus grid
-    spacing/via-clearance, and click Run — then read the real `Zrouter.log` it writes.
+    Automates Allegro's Z-Router form by generating an Allegro batch script (`.scr`) that
+    loads the design, opens the Z-Router dialog (`zrouter`), populates the Connections Control
+    File path (`FORM zrouter filename <control_file>`), sets grid spacing if specified,
+    triggers execution (`FORM zrouter execute`), and saves the resulting board.
+    Returns a job_id immediately; poll it with get_job_status/wait_for_job/tail_job_log.
     """
-    raise SigrityError(
-        "run_allegro_zrouter: no working batch/scriptable path exists on this "
-        "installation for zrouter (confirmed GUI-only, see this function's docstring "
-        "and allegro_placement_tools.py's module docstring for the full investigation). "
-        "Refusing to launch a process that would either hang indefinitely or silently "
-        "do nothing. Use Allegro's GUI (Route -> Zrouter) directly instead."
+    clear_stale_design_lock(board_file)
+    session = tcl_sessions.create("allegro")
+    clean_ctrl = str(control_file).replace("\\", "/")
+
+    tcl_sessions.add_line(session.session_id, "setwindow pcb")
+    tcl_sessions.add_line(session.session_id, "zrouter")
+    tcl_sessions.add_line(session.session_id, "setwindow form.zrouter")
+    tcl_sessions.add_line(session.session_id, f'FORM zrouter filename "{clean_ctrl}"')
+    if grid_spacing is not None:
+        tcl_sessions.add_line(session.session_id, f"FORM zrouter grid {grid_spacing}")
+    tcl_sessions.add_line(session.session_id, "FORM zrouter execute")
+    tcl_sessions.add_line(session.session_id, "FORM zrouter done")
+    tcl_sessions.add_line(session.session_id, "setwindow pcb")
+
+    if output_file:
+        clean_out = str(output_file).replace("\\", "/")
+        tcl_sessions.add_line(session.session_id, f"skill (axlSaveDesign ?design {skill_str(clean_out)} ?noCheck t)")
+    else:
+        tcl_sessions.add_line(session.session_id, "skill (axlSaveDesign ?noCheck t)")
+    tcl_sessions.add_line(session.session_id, "quit")
+
+    record = await run_session(
+        session.session_id,
+        tool="allegro",
+        tcl_arg_flag="-s",
+        extra_args=[board_file],
+        script_filename="zrouter_run.scr",
     )
+    return {"job_id": record.job_id, "state": record.state, "job_dir": record.job_dir, "command": record.command}

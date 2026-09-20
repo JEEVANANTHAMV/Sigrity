@@ -81,7 +81,7 @@ async def test_pipeline_continues_past_nonzero_autoroute_exit_and_reports_import
     monkeypatch.setattr(prat, "run_allegro_placement", fake_placement)
     monkeypatch.setattr(prat, "run_spif_export_to_specctra", fake_export)
     monkeypatch.setattr(prat, "run_specctra_autoroute", fake_autoroute)
-    monkeypatch.setattr(prat, "run_specctra_import_session", fake_import)
+    monkeypatch.setattr(prat, "run_allegro_specctra_import", fake_import)
     monkeypatch.setattr(prat, "run_allegro_batch_drc", fake_drc)
     monkeypatch.setattr(prat.job_manager, "wait", fake_wait)
 

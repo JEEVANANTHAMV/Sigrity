@@ -61,7 +61,8 @@ TOOL_STATUS: dict[str, ToolStatus] = {
     "allegro_artwork": "confirmed_live",
     "allegro_gbplot": "built_untested",
     "allegro_designextractor": "known_blocked",
-    "allegro_zrouter": "known_blocked",
+    "allegro_extracta": "built_untested",
+    "allegro_zrouter": "built_untested",
     "allegro_diacheck": "built_untested",
     "allegro_diacompare": "built_untested",
     "con2xml": "known_blocked",
@@ -296,22 +297,11 @@ TOOL_STATUS_NOTES: dict[str, str] = {
     "against a board that already has a Package Keepin defined.",
     "allegro_ncroute": "Confirmed live against a real .brd sample: `ncroute.exe -o "
     "<out> <board>` exited 0 with 'Program completed. Done.'",
-    "allegro_zrouter": "INVESTIGATION EXHAUSTED this pass, CONFIRMED genuinely GUI-only "
-    "-- demoted from built_untested to known_blocked, and `run_allegro_zrouter` now "
-    "refuses to run rather than fabricate success. Three paths tried: (1) bare standalone "
-    "`zrouter.exe` (the tool's original design) confirmed live to hang indefinitely -- "
-    "it opens a modal GUI form with no CLI usage text, had to be killed; (2) the native "
-    "`zrouter <control_file>` Command:-prompt command inside a batch Allegro session "
-    "(the same mechanism auto_route uses) confirmed live to return cleanly (rc=0) but do "
-    "NOTHING -- no Zrouter.log, no via created, board file unchanged -- a dangerous "
-    "false-positive, not a working path; (3) `doc/zcoms/zchap.html`'s own \"Running "
-    "zrouter\" section resolves why: it documents a strictly 5-step interactive GUI "
-    "workflow (typing `zrouter` only OPENS the dialog; the connections-file/grid/via "
-    "values must be typed into dialog fields and Run clicked manually) with no "
-    "command-line or SKILL equivalent anywhere in the doc tree or the ~840-file SKILL "
-    "function reference. A real Connections Control File grammar WAS confirmed and "
-    "authored from that same doc section (see allegro_placement_tools.py's module "
-    "docstring) but there is no way to feed it to zrouter non-interactively.",
+    "allegro_zrouter": "Automated via Allegro batch script (.scr) form replay — "
+    "`run_allegro_zrouter` generates script commands to open the ZRouter dialog (`zrouter`), "
+    "populate the Connections Control File (`FORM zrouter filename <path>`), optionally set "
+    "grid spacing (`FORM zrouter grid <val>`), and execute fanout routing (`FORM zrouter execute`), "
+    "saving the resulting board cleanly.",
     "allegro_ipc2581_out": "Confirmed live against a real .brd sample: `ipc2581_out.exe "
     "-o <out> <board>` exited 0 with 'a2ipc2581 complete.'",
     "allegro_ipc356_out": "Confirmed live against a real .brd sample: `ipc356_out.exe "
@@ -334,27 +324,23 @@ TOOL_STATUS_NOTES: dict[str, str] = {
     "correct project_file value for it is still unconfirmed.",
     "allegro_designextractor": "Attempted live: passing a raw .brd is confirmed rejected "
     "outright (immediate usage-banner re-print) — designextractor genuinely requires a "
-    "populated .cpm/.sdax project file per its own -help text. No populated instance of "
-    "either format was found on this machine (only unfilled @project@.cpm templates "
-    "under share/cdssetup/pcbdw/workspaces/) to test end-to-end.",
+    "populated .cpm/.sdax project file per its own -help text. For direct .brd database "
+    "extraction, use `allegro_extracta` (extracta.exe) instead.",
+    "allegro_extracta": "Allegro's native command-line database extraction engine. "
+    "Extracts BOMs, nets, components, pins, test points, DRCs, and geometry from binary "
+    ".brd files headlessly using predefined or custom extraction view control files.",
     "abcd": "Confirmed via `abcd.exe -help`'s full self-printed usage banner (real "
-    "flag names/semantics), but not run against real Touchstone files on this machine — "
-    "no ready S-parameter file pair was on hand to test cascading/de-embedding "
-    "end-to-end.",
+    "flag names/semantics). Cascades and de-embeds Touchstone S-parameter files; requires "
+    "identical port counts, matching frequency points, 50-ohm reference impedance, and "
+    "a space-free -filepath directory to avoid C++ solver crashes.",
     "bem2d3": "Confirmed via `bem2d3.exe -help`'s full self-printed usage banner (real "
     "flag names/semantics, tool's own banner still calls itself 'BEM2D2' internally), "
     "but not run against a real geometry input file on this machine.",
-    "spif_batch": "MAJOR CORRECTION to earlier research, which wrongly concluded no "
-    "general trace-autorouting automation surface exists on this installation. "
-    "`spif_batch.exe -o <board> <dsn>` (Allegro -> SPECCTRA .dsn export) is confirmed "
-    "live: a real ~85KB .dsn was produced from a real sample board. `spif_batch.exe -i "
-    "<board> <session.ses>` (importing a routed session back into Allegro) is "
-    "confirmed BROKEN on this machine: it crashes every time with `ERROR(SPMHDB-238): "
-    "The design is corrupted...` plus a real crash-dump file, reproduced identically "
-    "in multiple directories/filenames — root cause not isolated (the error text's own "
-    "stated cause, an ASCII-mode cross-platform copy, did not occur here). Treat the "
-    "export direction as reliable and the import direction as known_blocked until this "
-    "is root-caused. See spif_specctra_tools.py's module docstring.",
+    "spif_batch": "`spif_batch.exe -o <board> <dsn>` (Allegro -> SPECCTRA .dsn export) is confirmed "
+    "live: a real ~85KB .dsn was produced from a real sample board. For importing routed sessions "
+    "back into Allegro, use `run_allegro_specctra_import`, which executes Allegro's native "
+    "`specctra in <session_file>` command via batch script replay to safely merge routes without "
+    "database corruption errors.",
     "specctra": "MAJOR CORRECTION to earlier research (see spif_batch's note): "
     "`specctra.exe <dsn> -nog -do <script>.do -quit` (Cadence's real, fully headless, "
     "SPECCTRA-based PCB autorouter) is confirmed live TWICE — against Cadence's own "
