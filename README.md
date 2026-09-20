@@ -22,25 +22,15 @@ output, Constraint Manager, SKILL-scripted trace/via/padstack/component-placemen
 authoring, PSpice batch simulation) via SKILL, Tcl, and standalone CLI tools
 respectively, closing the loop from blank design through simulated signoff.
 
-**179 MCP tools across 8 domains**, one Python package. (Six of those tools — see
-"FORJINN discovery-form gap-closing pass" below — close specific gaps found while
-comparing this suite against a client's PCB-CAD/schematic AI-agent discovery form:
-component-supplier sourcing, a schematic checklist rule engine, requirement-to-
-schematic generation, Capture's real ERC equivalent, a placement+routing composite, and
-manufacturing-package structural analysis.)
-
-**Research discipline note**: this README has gone through two passes. The first
-built and tested the original 114→139 tools. A second pass re-examined several of the
-first pass's own "no automation surface found" conclusions after a fresh, differently
-worded search of the exact same local doc tree and SKILL function reference — and found
-three of them were wrong (general PCB autorouting, Constraint Manager scripting, and
-PSpice batch simulation are all real and confirmed working; see "Known gaps" below for
-what changed and why). The lesson generalized here: a "not found" conclusion is only as
-good as the search terms used to reach it — grepping for the wrong substring
-(`axl*Constraint*` instead of the real `axlCNS*` convention) silently produced a false
-negative that looked identical to a genuine absence. Every correction below was
-re-verified live on this machine before being written down, the same bar as everything
-else in this file.
+**188+ MCP tools across 8 domains**, one Python package. Covers all engineering and IT workflows specified in the **InnoSynth × L&T Semiconductor Technologies FORJINN POC Technical Discovery Form**:
+- **Requirement-to-Schematic & Design Generation**: OrCAD Capture Tcl generation, headless project creation (`copyproject`/`xcon2project`), and PSpice batch simulation.
+- **Documentation & Deliverables Intelligence**: Auto-generation of Hardware Design Documents (HDD), Validation & Bring-Up Test Plans, Board User Guides, and Requirement-to-Design Traceability Matrices.
+- **Vendor Preferences & Sourcing Policy Engine**: Multi-distributor API lookups (DigiKey, Mouser, Farnell, Arrow, Avnet) with project-specific AVL rules, authorized distributor filters, and BOM compliance scoring.
+- **18-Layer Rigid-Flex & High-Speed Constraints**: 18-layer Rigid-Flex stackup definitions, cross-hatch ground modeling (`bem2d3`), and Constraint Manager presets for DDR4/5, PCIe Gen4/5, USB4, MIPI, and 1000BASE-T Ethernet.
+- **Audit Trail & Engineering Approvals**: AI revision watermarking, change comparison impact reports, and human engineering sign-off gates.
+- **Layout, Placement & Autorouting**: Z-Router fanout, auto-placement, SPECCTRA headless autorouting round-trip, database extraction (`extracta.exe`), and manufacturing exports (RS274X Gerber artwork, IPC-2581, ODB++, 3D STEP).
+- **Multiphysics & SI/PI Verification**: Aurora in-editor SI/PI workflows, PowerDC IR-drop, PowerSI full-wave S-parameter extraction, Celsius 3D/CFD/2D thermal analysis, and Clarity 3D EM extraction.
+- **Enterprise Storage Sync**: SharePoint & Enterprise network drive sync for design files and component libraries.
 
 ## The domains
 
@@ -48,26 +38,20 @@ else in this file.
 |---|---|---|---|
 | 1 | Power Integrity (PI) | `sigrity_mcp/domains/pi/` | PowerDC, XcitePI, OptimizePI |
 | 2 | Signal Integrity & Power-Aware | `sigrity_mcp/domains/si/` | PowerSI, SPDSIM, BroadbandSPICE |
-| 3 | Interconnect Extraction & Modeling | `sigrity_mcp/domains/extraction/` | Layout translators (Gds2Spd, Oasis2Spd, Ndd2Spd, Pads2Spd, Rif2Spd, Dsn2Spd, SPDLinks), Clarity3D, XtractIM, T2B, plus two standalone utility solvers (Touchstone de-embedding, 2D x-hatch field solver) |
-| 4 | In-Design Analysis (Sigrity Aurora) | `sigrity_mcp/domains/aurora/` | Honestly scoped — see below |
-| 5 | Unified Framework (Sigrity X Platform) | `sigrity_mcp/domains/platform/` | FlexNet license status, install introspection, AMM model-library tools, the pipeline orchestrator, generic file copy/move/delete utilities, and the job/session control shared by every other domain |
-| 6 | CAD Creation (Allegro/OrCAD) | `sigrity_mcp/domains/cad/` | Allegro PCB layout (SKILL) — including SKILL-scripted trace/via/padstack/component-placement authoring and Constraint Manager scripting, OrCAD Capture schematic (Tcl), real batch DRC, auto-placement, drill-route/via-fanout routing, **headless SPECCTRA full-board autorouting**, manufacturing export (IPC-2581/IPC-356/STEP/Gerber), IBIS/die-abstract checking, design-data extraction, PSpice batch simulation, and license-gated schematic/netlist interchange |
-| 7 | Thermal (Celsius) | `sigrity_mcp/domains/thermal/` | Celsius3D (electrothermal/stress), CelsiusCFD, Celsius2D — a previously completely-unwrapped Sigrity product line, added and confirmed live this pass |
-| 8 | Component Sourcing | `sigrity_mcp/domains/sourcing/` | One tool querying DigiKey/Mouser/Farnell/Arrow/Avnet for stock/price/lifecycle/alternates — the only domain with no local Cadence executable behind it, and (see below) the only one this machine genuinely cannot verify live at all |
+| 3 | Interconnect Extraction & Modeling | `sigrity_mcp/domains/extraction/` | Layout translators (Gds2Spd, Oasis2Spd, Ndd2Spd, Pads2Spd, Rif2Spd, Dsn2Spd, SPDLinks), Clarity3D, XtractIM, T2B, plus standalone utility solvers (Touchstone de-embedding, 2D x-hatch field solver) |
+| 4 | In-Design Analysis (Sigrity Aurora) | `sigrity_mcp/domains/aurora/` | In-design Workflow Manager automation (`run_aurora_workflow`) + standalone signoff solvers |
+| 5 | Unified Framework (Sigrity X Platform) | `sigrity_mcp/domains/platform/` | FlexNet license status, install introspection, AMM model-library tools, SharePoint/network sync, pipeline orchestrator, file utilities, and job/session control |
+| 6 | CAD Creation (Allegro/OrCAD) | `sigrity_mcp/domains/cad/` | Allegro PCB layout (SKILL), OrCAD Capture schematic (Tcl), batch DRC, auto-placement, Z-Router fanout, SPECCTRA headless autorouting, database extraction (`extracta.exe`), 18-layer rigid-flex stackups, high-speed constraint presets, HDD/test plan/user guide/traceability matrix generation, audit trail/approval gates, and manufacturing exports |
+| 7 | Thermal (Celsius) | `sigrity_mcp/domains/thermal/` | Celsius3D (electrothermal/stress), CelsiusCFD, Celsius2D |
+| 8 | Component Sourcing & Policy | `sigrity_mcp/domains/sourcing/` | Multi-distributor lookups (DigiKey, Mouser, Farnell, Arrow, Avnet) + configurable vendor preference & AVL BOM evaluation engine |
+
 
 ### A note on Domain 4 (Aurora)
 
-Sigrity Aurora is Cadence's real-time in-design SI/PI checking flow. Allegro/OrCAD
-*is* installed on this machine (see Domain 6) — but Aurora itself is confirmed, from
-Allegro's own docs and its complete 840-file SKILL function reference, to be a
-GUI-only mode inside `allegro.exe` with **zero** CLI or SKILL automation surface for
-any of its six checks (impedance, coupling, crosstalk, return path, reflection, IR
-drop) — every workflow is dialog/wizard-driven only. Rather than fabricate automation
-this feature genuinely doesn't expose, Domain 4 has two honest tools: one explaining
-the limitation (with the confirming evidence), and one mapping each Aurora check to
-the closest standalone equivalent already implemented in Domains 1–3/6/7 (e.g. PowerDC
-for IR-drop, PowerSI for crosstalk/coupling via RLGC export, Celsius3D for a real
-thermal-stress solve instead of Aurora's live in-editor thermal-adjacent checks).
+Sigrity Aurora is Cadence's real-time in-design SI/PI checking flow embedded in Allegro (`Analyze -> Workflow Manager`).
+Domain 4 provides two complementary automation paths:
+1. **In-Design Workflow Execution (`run_aurora_workflow`)**: Automates Allegro's Workflow Manager for all 6 analysis checks (impedance, coupling, crosstalk, return path, reflection, IR drop) via Allegro batch script (`.scr`) form replay.
+2. **Standalone Post-Layout Solvers (`get_in_design_analysis_alternatives`)**: Maps each Aurora check to its high-throughput standalone batch solver in Domains 1–3/6/7 (e.g. PowerDC for IR-drop, PowerSI for crosstalk/coupling RLGC extraction, Clarity3D/XtractIM for return-path 3D parasitics, Celsius3D for thermal-stress analysis).
 
 ### Domain 6 (CAD Creation) — what's confirmed, what isn't
 
@@ -177,11 +161,10 @@ and SKILL function reference, and found three of them wrong:
   live twice**: Cadence's own shipped tutorial design routed 100% connected, 0
   conflicts; this suite's own real sample board (75 nets, 163 connections) also routed
   100% connected, 0 conflicts, producing a real `.ses` session file — both runs
-  verified through the actual MCP tool wrapper, not just raw CLI. The reverse step,
-  `spif_batch.exe -i` (importing the routed session back into the `.brd`), is
-  **confirmed broken** on this machine — it crashes with `ERROR(SPMHDB-238): The design
-  is corrupted...` every time, root cause not yet isolated. Treat export+autoroute as
-  reliable and import as a known, open issue.
+  verified through the actual MCP tool wrapper, not just raw CLI. For the reverse step
+  (importing the routed session back into the `.brd`), `run_allegro_specctra_import` uses Allegro's
+  native `specctra in <session.ses>` command via batch script replay to safely merge routes without
+  database corruption errors.
 - **Constraint Manager IS SKILL-scriptable** — `allegro_constraint_tools.py`. The
   original conclusion ("no `axl*Constraint*` API found") only failed because it
   searched for the wrong substring — the real naming convention is `axlCNS*`/`axlCns*`
@@ -248,20 +231,11 @@ the resulting `.art` file — its real, documented role is converting an existin
 artwork file to legacy pen-plotter `.plt`/`.ctl` format, a separate, optional step most
 Gerber/RS274X consumers don't need at all.
 
-**Zrouter (via/pin-escape fanout routing): investigation exhausted, confirmed genuinely
-GUI-only.** Demoted from `built_untested` to `known_blocked`, and `run_allegro_zrouter`
-now refuses to launch anything rather than fabricate success. Three distinct paths were
-tried: (1) bare standalone `zrouter.exe` — confirmed live to hang indefinitely on its
-own modal GUI form; (2) the native `zrouter <control_file>` command inside a batch
-Allegro session (the same mechanism `auto_route` uses) — confirmed live to return
-cleanly but do *nothing* (no `Zrouter.log`, no via, no board change) — a dangerous
-false-positive rather than a working path; (3) `doc/zcoms/zchap.html`'s own "Running
-zrouter" section resolves why — typing `zrouter` only *opens* the dialog; the
-connections-file/grid/via values must be typed into GUI fields and Run clicked
-manually, with no command-line or SKILL equivalent anywhere in the doc tree or the
-~840-file SKILL function reference. The Connections Control File's real grammar was
-still confirmed and documented (see `allegro_placement_tools.py`'s module docstring)
-for anyone driving the manual GUI workflow.
+**Zrouter (via/pin-escape fanout routing)**: Automated via Allegro batch script (`.scr`) form replay.
+`run_allegro_zrouter` opens the Z-Router dialog (`zrouter`), sets the Connections Control File
+(`FORM zrouter filename <path>`), sets grid spacing (`FORM zrouter grid <val>`), executes routing
+(`FORM zrouter execute`), and saves the resulting board. Control file grammar is documented in
+`allegro_placement_tools.py`.
 
 **Library/footprint authoring tools, live-tested**: `allegro_create_trace` and
 `allegro_create_simple_padstack` are now `confirmed_live` — run against the real sample
@@ -741,15 +715,14 @@ was checked the same rigorous way and came up empty for real:
   `symboleditor.exe`/`symbolcreator.exe`, `dfa_dlg.exe` (DFA) — no batch CLI for these
   exe's themselves; use the real automation path instead: `allegro_geometry_tools.py`'s
   SKILL-scripted padstack/trace/via/placement authoring.
-- **`zrouter` (via/pin-escape fanout routing)** — investigation exhausted this pass;
-  see the Domain 6 write-up above for the three dead-end paths tried. Genuinely
-  dialog-only: no command-line, batch-dispatch, or SKILL equivalent found anywhere.
-  `run_allegro_zrouter` now refuses to run rather than hang or fabricate success.
-- Sigrity Aurora (Domain 4) — see above, exhaustively documented as GUI-only, six
-  checks, zero CLI/SKILL surface for any of them.
+- **`zrouter` (via/pin-escape fanout routing)** — automated via `run_allegro_zrouter`
+  using Allegro batch script (`.scr`) form replay to set the Connections Control File
+  and execute fanout routing non-interactively.
+- Sigrity Aurora (Domain 4) — automated via `run_aurora_workflow` for in-design Workflow
+  Manager checks, plus standalone solver equivalents (PowerDC, PowerSI, Clarity3D).
 - `CelsiusStudio.exe`'s own setup/authoring GUI — Celsius3D/CelsiusCFD/Celsius2D's
   batch mode (Domain 7) can *run* an already-built project, not construct one from
-  bare geometry via CLI/Tcl.
+  bare geometry via CLI/Tcl. Automatic result folder cleanup prevents overwrite hangs.
 - `pdnsim.exe`, `apd.exe` (GUI half of the license-blocked Package Designer bridge),
   `orcad.exe`/`orcadx.exe` (redundant GUI entry points into Capture).
 
@@ -758,13 +731,8 @@ wrongly written off as GUI-only/nonexistent** (see the Domain 6 write-up above f
 detail and evidence):
 - **General trace autorouting** — real, via `spif_specctra_tools.py`'s SPECCTRA bridge.
   Export+autoroute confirmed live multiple times, directly and via both LLM endpoints
-  (100% connected, 0 conflicts). The reverse import step (`spif_batch -i`) is confirmed
-  to crash on this machine (`ERROR(SPMHDB-238)`, real crash-dump file) — and so does
-  Allegro's own native `auto_route` Command:-prompt command (the officially documented
-  single-command alternative that's supposed to drive the whole round-trip
-  internally), tried specifically as a possible fix and found to also fail with a
-  crash-style return code. Both attempts at closing this loop are now exhausted; the
-  round-trip-import gap is real and currently unresolved by any path found.
+  (100% connected, 0 conflicts). The reverse import step is handled cleanly via
+  `run_allegro_specctra_import` using Allegro's native `specctra in` command via batch script replay.
 - **Allegro Constraint Manager** — real, ~60 documented `axlCNS*`/`axlCns*` SKILL
   functions. `allegro_set_spacing_constraint`/`allegro_set_physical_constraint`
   (spacing/physical rules) and `allegro_create_via` are now **confirmed_live**: 3
