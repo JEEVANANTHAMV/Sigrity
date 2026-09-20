@@ -70,6 +70,25 @@ CAD_EXECUTABLES: dict[str, str] = {
     "specctra": "specctra.exe",
     # --- PSpice batch simulation (confirmed live CLI, see pspice_tools.py) ---
     "psp_cmd": "psp_cmd.exe",
+    # --- Mechanical/DXF import-export & blank-board creation (confirmed live CLI, see
+    # allegro_import_tools.py) ---
+    "dxf2a": "dxf2a.exe",
+    "a2dxf": "a2dxf.exe",
+    # --- Mechanical ECAD/MCAD & manufacturing import-export (confirmed live CLI unless
+    # noted, see allegro_manufacturing_tools.py) ---
+    "ipc2581_in": "ipc2581_in.exe",
+    "idf_out": "idf_out.exe",
+    "idx_out": "idx_out.exe",
+    "idf_in": "idf_in.exe",  # built_untested -- no sample .emn/.bdf/.out found on this machine
+    "idx_in": "idx_in.exe",  # built_untested -- no sample .idx found on this machine
+    "brd2dml": "brd2dml.exe",
+    "pdf_out": "pdf_out.exe",
+    # --- Design/project creation (confirmed live CLI, see allegro_project_tools.py) ---
+    "copyproject": "copyproject.exe",
+    "xcon2project": "xcon2project.exe",
+    "generate_sim_variant": "generate_sim_variant.exe",
+    # --- Library/symbol authoring (confirmed live CLI, see allegro_library_tools.py) ---
+    "create_sym": "create_sym.exe",
 }
 
 # logical name -> exe filename under SIGRITY_HOME/tools/bin

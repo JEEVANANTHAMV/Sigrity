@@ -79,6 +79,19 @@ TOOL_STATUS: dict[str, ToolStatus] = {
     "spif_batch": "confirmed_live",
     "specctra": "confirmed_live",
     "psp_cmd": "confirmed_live",
+    "dxf2a": "confirmed_live",
+    "a2dxf": "confirmed_live",
+    "ipc2581_in": "confirmed_live",
+    "idf_out": "confirmed_live",
+    "idx_out": "confirmed_live",
+    "idf_in": "built_untested",
+    "idx_in": "built_untested",
+    "brd2dml": "confirmed_live",
+    "pdf_out": "confirmed_live",
+    "copyproject": "confirmed_live",
+    "xcon2project": "confirmed_live",
+    "generate_sim_variant": "confirmed_live",
+    "create_sym": "confirmed_live",
 }
 # NOTE: allegro_constraint_tools.py's and allegro_geometry_tools.py's individual SKILL
 # calls all execute through the single "allegro" logical tool above (same session/
@@ -212,7 +225,26 @@ TOOL_STATUS_NOTES: dict[str, str] = {
     "accepted, permanently fixes every subsequent run (unlike allegro.exe's product-"
     "chooser dialog, which really was one-time). Treat capture_run_session as "
     "genuinely non-deterministic on this machine, not reliably blocked or reliably "
-    "working.",
+    "working. RE-TESTED THIS PASS, further narrowed the root cause to a specific "
+    "machine-level defect: the hang reproduces with a *different*, simpler shipped "
+    "sample project (FullAdder.opj, pure schematic, no PCB data) using ONLY the minimal "
+    "Open+Close+Exit script (no placement at all) -- identical 0-byte log, no .lck file "
+    "ever written into the project directory (i.e. the `Open <project>` step itself never "
+    "completes, before any Part/Wire/Pin command has a chance to run), 100% CPU spin, and "
+    "*zero* windows for the entire hang (checked live via EnumWindows, so it is not hidden "
+    "behind a modal dialog of any kind, including the 'Capture Custom Launch' recovery "
+    "dialog -- that specific dialog was separately traced to a genuine *prior*-session "
+    "crash dump (ACCESS_VIOLATION in orPrmWebCompIE64.dll, see C:\\temp-builder\\Capture*/"
+    "errorlog.xml), not the current hang itself; it is now auto-dismissed by "
+    "capture_handle_custom_launch_dialog as a separate defensive guard for that distinct "
+    "failure mode). Meanwhile `Capture.exe -version` alone returns cleanly in ~0.1s with no "
+    "other Capture instance running -- so Capture.exe is not fully broken, but its project-"
+    "opening code path (the first thing any real automation script does) hangs "
+    "deterministically, with no CLI flag or documented workaround found in the local doc "
+    "tree, and no reproducible fix available to this suite's Python wrapper layer; "
+    "actually authoring schematics end-to-end on this machine would require a "
+    "Cadence-level patch/reinstall or a working `syscap.exe` batch mode (see "
+    "domains/cad/__init__.py's noted, not-yet-implemented lead).",
     "allegro_batch": "The multiplexer's own -help and '<program> -help' output is fine "
     "(genuinely headless, no dialog), but actually dispatching a sub-program through it "
     "is unreliable: `allegro_batch dbdoctor -check_only <real .brd>` failed immediately "
@@ -419,6 +451,104 @@ TOOL_STATUS_NOTES: dict[str, str] = {
     "confirmed correct per the doc's own syntax, but gbplot itself (a legacy "
     "pen-plotter-format converter, not needed for standard Gerber/RS274X consumers) "
     "was not independently re-run against a real .art file this pass.",
+    "dxf2a": "CONFIRMED LIVE, and the answer to a real, previously-open gap: this suite "
+    "had NO way to create a brand-new Allegro `.brd` from scratch before this. dxf2a's "
+    "own `-help` banner documents its default (no `-g`) mode as \"new design, only\". "
+    "Live-tested against Cadence's own shipped tutorial sample "
+    "(doc/wb_tut/examples/Module_1/flag.dxf + flag_l.cnv): `dxf2a.exe -u MILS -a 2 "
+    "flag_l.cnv flag.dxf out.brd` produced a real 203456-byte .brd. Independently "
+    "verified (bypassing dxf2a/SKILL entirely): re-opened that exact file with "
+    "report.exe (already confirmed_live elsewhere) and got a real summary — 2 routing "
+    "layers, drawing extents matching the DXF outline's real geometry, 'DRC State: UP TO "
+    "DATE'. Two confirmed quirks: (1) exits with returncode 1 even on this fully "
+    "successful run (log ends 'dxf2a complete.') — same nonzero-on-success pattern as "
+    "allegro_dbdoctor/artwork.exe/specctra elsewhere in this suite, don't trust job "
+    "state alone; (2) flag syntax is confirmed SPACE-separated (`-u MILS`, `-a 2`) — the "
+    "attached form (`-uMILS`, `-a2`) was live-tested and rejected outright with 'ERROR: "
+    "Invalid program arguments.'. The sample flag_l.cnv also mapped a DXF layer to a "
+    "class ('CONDUCTOR') a fresh empty design's default class table didn't recognize, "
+    "producing repeated 'ERROR: Invalid class CONDUCTOR.' lines — dxf2a still completed "
+    "and wrote a valid board regardless, but a caller should check the log for these "
+    "before assuming every layer landed as mapped.",
+    "ipc2581_in": "CONFIRMED LIVE — the import direction of the already-wrapped "
+    "ipc2581_out. `-help` banner: \"Utility to import IPC2581 data to Allegro.\" Live-"
+    "tested against the real shipped sample share/Translators/Samples/ipc2581/demo2.xml "
+    "(3.4MB): produced a genuine 200KB .brd (basic import) and, with -x -g (import layer "
+    "stackup + layer features), a fuller 1.58MB .brd -- both independently confirmed "
+    "valid boards by re-reading with report.exe (real layer/DRC data). One real, "
+    "readable warning surfaced (\"Layer stackup import failed.\") on the -x -g run -- not "
+    "a crash, a genuine partial-import diagnostic to surface to the caller.",
+    "idf_out": "CONFIRMED LIVE: `idf_out.exe <brd>` (bare form, all defaults) ran "
+    "against a real sample board with zero preconditions and produced real "
+    "<design_name>.bdf/.ldf output files (log: \"IDF out complete.\").",
+    "idx_out": "CONFIRMED LIVE: `idx_out.exe <brd>` (bare form) ran against a real "
+    "sample board with zero preconditions and produced a real 758KB .idx file (log: "
+    "\"idx_out complete.\", genuine ProSTEP EDMD XML content confirmed by reading it).",
+    "idf_in": "Real, fully self-documenting -help banner confirmed "
+    "(`idf_in [-d <name_type>] <idf_file> [-o <output_design>] [-i <input_design>] "
+    "[-p|-m|-f] [-a <accuracy>]`) -- explicitly supports creating a brand-new .brd from "
+    "IDF mechanical data when -i is omitted (\"Default: <drawing_name>.brd\"), the same "
+    "class of finding as dxf2a. Not live-tested: no real .emn/.bdf/.out (PTC/IDF/SDRC) "
+    "sample file was found anywhere on this machine to test against.",
+    "idx_in": "Real, fully self-documenting -help banner confirmed "
+    "(`idx_in <idx_file> [-i <input_design>] [-o <output_design>]`), including a worked "
+    "example. Not live-tested: no real .idx sample file was found on this machine.",
+    "brd2dml": "CONFIRMED LIVE: `brd2dml.exe <brd>` (bare form) ran against a real "
+    "sample board and produced a real 51KB .dml file with genuine "
+    "`(Library (BoardModel (PinMap ...)))` DML content (verified by reading it).",
+    "pdf_out": "CONFIRMED LIVE: `pdf_out.exe <brd>` (bare form) ran against a real "
+    "sample board and produced a real 522KB PDF (verified real `%PDF-1.7` file-magic "
+    "header), log ending \"pdf_out complete.\".",
+    "copyproject": "CONFIRMED LIVE, independently verified twice (once via a live "
+    "sweep of previously-unregistered executables, once by directly re-running it): "
+    "`copyproject.exe -proj <source.cpm> -copytopath <dir> -newprojname <name> -newlib "
+    "<lib> -newdesign <design>` against the real shipped sample project "
+    "share/pcb/translators/altium_proj_template/altium_proj_template.cpm produced a "
+    "complete, freshly-timestamped new project: a real CPM file (plain text, correct "
+    "`design_name`/`design_library` fields), a full `worklib/<newdesign>/{sch_1,"
+    "packaged,physical,cfg_package}` tree with real schematic pages and even a physical "
+    "`.brd` placeholder, ending in \"SUCCESS(COPYPROJ-67): Copy Project Success.\" "
+    "IMPORTANT: the created project file is named EXACTLY the `-newprojname` value with "
+    "no `.cpm` extension appended automatically -- include the extension in "
+    "`new_project_name` yourself if you want one. This is the strongest \"create a new "
+    "schematic design from scratch\" finding in this whole pass -- it's flag-driven and "
+    "fully headless (no GUI), unlike Capture.exe's/syscap.exe's unconfirmed batch "
+    "reliability.",
+    "xcon2project": "CONFIRMED LIVE: `xcon2project.exe -xcon <path.xcon> -root <name> "
+    "-lib <libname> -refproj <ref.cpm> [-refcdslib <cds.lib>] [-output <dir>]` (note: "
+    "the tool's own usage banner appends \"(-refproj must be specified)\" despite "
+    "showing it in brackets -- treat it as required) run against a real populated "
+    "project (share/pcb/translators/altium_proj_template/, which has a genuine non-"
+    "template .cpm/cds.lib/.xcon) produced a real new project .cpm + cds.lib, log "
+    "showing real \"Packaging design '<root>'\" status.",
+    "generate_sim_variant": "CONFIRMED LIVE: genuinely creates a NEW derivative "
+    "Allegro design for SI what-if analysis (over/undersizing trace widths and/or "
+    "dielectric thicknesses from a master board) -- its own -help banner: \"Utility to "
+    "generate a variant design from the provided master.\" `generate_sim_variant -c "
+    "\"1.0\" -d \"1.0\" -o variant_out.brd <master.brd>` (percentage oversize on both "
+    "clines and dielectrics) against a real sample board produced a real, distinct "
+    "918KB new .brd -- independently confirmed valid (not a corrupt/stub copy) by "
+    "re-reading it with report.exe (81 packages, 191 drills, 163 connections, matching "
+    "the master's real content). NOTE from the tool's own -help: on-line DRC is "
+    "deliberately disabled in the resulting variant design (elements may legitimately "
+    "violate spacing against their oversized neighbors) -- don't re-enable/run DRC "
+    "against a variant expecting a clean result.",
+    "create_sym": "CONFIRMED LIVE, and a real correction to this suite's own earlier "
+    "\"library authoring is GUI-only\" conclusion (that conclusion was about "
+    "`symboleditor.exe`/`symbolcreator.exe`/`padstack_editor.exe`, which really are "
+    "GUI-only -- `create_sym.exe` is a separate, distinct exe a prior audit pass "
+    "missed). Its own -help: \"This is the command line version of File->Create "
+    "Symbol.\" Live-tested against a real shipped footprint source "
+    "(doc/lc_tut/tutorial_examples/Master_Library/Symbols/asp-134488-01.dra): "
+    "`create_sym -p mysym.dra mysym.psm` produced a real 2.9MB .psm, log ending \"'mysym' "
+    "saved to disk.\" -- independently re-verified with `dbdoctor.exe -check_only` "
+    "against the result (\"0 warnings, 0 errors detected\").",
+    "a2dxf": "CONFIRMED LIVE: run against this suite's own real routed sample board "
+    "(tools/capture/samples/PCB-Layout/Fault-Detector/allegro/"
+    "fault-detector_allegro_routed.brd) with a reused layer-conversion file, produced a "
+    "genuine valid 6464-byte DXF (real SECTION/HEADER/$ACADVER/ENTITIES/EOF structure, "
+    "confirmed by reading the file content directly), exit code 0, log ending 'a2dxf "
+    "complete.'.",
     "allegro_artwork": "NEW this pass, CONFIRMED LIVE end-to-end — this is the real fix "
     "for Gerber export, which `allegro_gbplot` alone could never provide (see its own "
     "note). `artwork.exe` has a full, real `-help` usage banner ('Generates Gerber "

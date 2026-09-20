@@ -102,6 +102,42 @@ or stronger caveats — see its own module docstring for specifics):
   exists on this installation for that; `dfa_dlg.exe` remains confirmed GUI-only).
 - `capture_check_design_rules` (added to `capture_tools.py` itself) — Capture's real
   ERC equivalent ("Design Rules Check", PCB menu, per its own confirmed doc entry).
+
+**`allegro_import_tools.py`, added this pass to close a real gap**: this suite had no
+way to create a brand-new `.brd` at all — every existing tool assumes a board already
+exists on disk. `allegro_import_dxf` (`dxf2a.exe`) is CONFIRMED LIVE to do exactly that:
+its own `-help` banner documents its default mode as "new design, only", and a live run
+against Cadence's own shipped `flag.dxf`/`flag_l.cnv` sample produced a real `.brd` that
+an independent tool (`report.exe`) then opened and correctly summarized. `allegro_export_dxf`
+(`a2dxf.exe`, the reverse direction) is likewise CONFIRMED LIVE against this suite's own
+real routed sample board, producing a valid DXF file. `allegro_new_blank_board` covers
+the DXF-less case with a plain template-file copy (Cadence's own shipped blank 2-layer
+board). See the module's own docstring for full live-test evidence and confirmed flag
+syntax (space-separated, not attached — attached form was live-tested and rejected).
+`convert_gerber.exe` and `EagleImport\\Eagle2Cp.exe` were also investigated this pass as
+candidate importers and confirmed to be interactive-stdin-prompt-only with no headless
+mode — not wrapped, documented as a known gap rather than silently skipped.
+
+**A promising, NOT-yet-implemented lead found this same pass, for whoever picks this up
+next**: `syscap.exe` (`Allegro System Capture` — a distinct, more modern schematic-
+capture product from the classic `Capture.exe`/OrCAD Capture already wrapped in
+`capture_tools.py`) has a real, extensively documented Tcl command reference
+(`doc/scap_tcl_comms/`, ~600 commands) including `newProject <name> <design_name>
+<project_path> sch composite` — a genuinely-documented, from-nothing "create a brand
+new schematic project" call (real worked example given in its own doc page, returns 0
+on success) — plus `createSchematicPage`, `addComponent`, `drawWire`, `saveDesign`,
+`openProject`. This would be a much more promising schematic-authoring path than
+`capture_tools.py`'s already-documented `known_blocked` Tcl batch reliability, IF
+`syscap.exe` has a working headless/batch launch mode. That launch mechanism is NOT
+confirmed: `syscap.exe -help`/`-tcl <script>` were both tried live this pass and
+neither produced a usable result — `-help` opened a GUI window with no console output
+(had to be killed) and `-tcl probe.tcl` exited immediately with no output at all
+(ambiguous: could mean the flag isn't recognized, or that it ran and produced no
+visible result for a `puts` call). Not wrapped here because that's not enough evidence
+to claim a working automation surface, per this suite's own discipline — but the Tcl
+vocabulary itself is real and worth revisiting if a documented `syscap.exe` CLI/batch
+invocation is found (check for an "Allegro System Capture" install/admin guide chapter
+this pass didn't locate).
 """
 
 from sigrity_mcp.domains.cad import (  # noqa: F401
@@ -110,9 +146,11 @@ from sigrity_mcp.domains.cad import (  # noqa: F401
     allegro_drc_tools,
     allegro_extraction_tools,
     allegro_geometry_tools,
+    allegro_import_tools,
     allegro_library_tools,
     allegro_manufacturing_tools,
     allegro_placement_tools,
+    allegro_project_tools,
     allegro_tools,
     capture_tools,
     interchange_tools,
