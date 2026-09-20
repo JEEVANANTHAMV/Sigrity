@@ -10,3 +10,4 @@ __pycache__/
 /GPUCache/
 *.jrl
 *.jrl,*
+.venv-eval/

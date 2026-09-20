@@ -83,6 +83,25 @@ All four new modules are `built_untested`: every function signature was independ
 confirmed real via its own local doc page (not guessed, not taken on faith from
 external claims), but most were not yet each individually exercised live against a real
 board on this machine — see `core.tool_status` and each module's own docstring.
+
+**Five more modules, added to close FORJINN discovery-form gaps** (each `built_untested`
+or stronger caveats — see its own module docstring for specifics):
+
+- `schematic_checklist_tools.py` — a rule engine (decoupling/pull-up-down/clocks/
+  resets/test-points) over real `report.exe -v net`/`-v bom` CSV output.
+- `schematic_generation_tools.py` — `generate_schematic_from_spec`, composing
+  `capture_tools.py`'s primitives into one requirement-to-schematic authoring call.
+  Inherits Capture's own documented `known_blocked` batch-reliability caveat — see its
+  docstring's "HONEST LIMITATION" section.
+- `placement_routing_assistance_tools.py` — one call chaining real placement,
+  SPECCTRA export+autoroute, the (confirmed-broken-on-this-machine) round-trip import,
+  and a post-route batch DRC pass — honestly scoped around both of those already-known
+  real quirks rather than papering over them.
+- `manufacturing_analysis_tools.py` — structural completeness/well-formedness checks
+  over Gerber/IPC-2581/IPC-356 outputs (not an electrical DFM check — no batch surface
+  exists on this installation for that; `dfa_dlg.exe` remains confirmed GUI-only).
+- `capture_check_design_rules` (added to `capture_tools.py` itself) — Capture's real
+  ERC equivalent ("Design Rules Check", PCB menu, per its own confirmed doc entry).
 """
 
 from sigrity_mcp.domains.cad import (  # noqa: F401
@@ -97,6 +116,10 @@ from sigrity_mcp.domains.cad import (  # noqa: F401
     allegro_tools,
     capture_tools,
     interchange_tools,
+    manufacturing_analysis_tools,
+    placement_routing_assistance_tools,
     pspice_tools,
+    schematic_checklist_tools,
+    schematic_generation_tools,
     spif_specctra_tools,
 )

@@ -121,6 +121,36 @@ async def capture_annotate(session_id: str) -> dict:
 
 
 @mcp.tool
+async def capture_check_design_rules(session_id: str) -> dict:
+    """Queue Capture's electrical/design rules check (ERC) for the open design.
+
+    Appends `Menu "PCB::Design Rules Check"`. Confirmed from
+    doc/cap_ref/Project_manager_command_reference.html's own "Design Rules Check
+    command" entry: "Available from: PCB menu" (distinct from Annotate/Create Netlist
+    above, which are both "Available from: Tools menu") — "Use this command to check a
+    design for violations of design rules... Design Rules Check uses the decision
+    matrix located in the ERC Matrix tab in the Design Rules Check dialog box." This is
+    genuinely Capture's ERC equivalent (electrical rule checking against a
+    user-configurable matrix), not merely a naming coincidence with Allegro's PCB-side
+    DRC.
+
+    UNCONFIRMED live, same caveat as every other capture_* tool: the exact `Menu
+    "PCB::Design Rules Check"` string is built by the same "<Available-from
+    menu>::<command name>" convention already confirmed working for
+    `Menu "Tools::Annotate"`/`Menu "Tools::Create Netlist"` above, but this specific
+    menu path itself was not independently found spelled out as a literal Tcl macro
+    line anywhere in the doc tree — treat it as a well-grounded inference, not a
+    transcribed example, until run live. The doc doesn't say ERC results are
+    scriptably readable afterward either; per the same page, violations are placed as
+    DRC markers on the schematic pages themselves ("Browse DRC Markers" on the Edit
+    menu) rather than written to a plain-text report — inspect the saved design (or a
+    netlist error log) rather than expecting a summary file back from this tool.
+    """
+    tcl_sessions.add_line(session_id, 'Menu "PCB::Design Rules Check"')
+    return {"session_id": session_id}
+
+
+@mcp.tool
 async def capture_create_netlist(session_id: str) -> dict:
     """Queue netlist creation for the open design, for handoff to PCB layout.
 

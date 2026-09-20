@@ -1,0 +1,15 @@
+{
+  "mcpServers": {
+    "sigrity": {
+      "command": "C:\\Users\\aicoe\\Desktop\\Sigrity\\.venv\\Scripts\\python.exe",
+      "args": ["C:\\Users\\aicoe\\Desktop\\Sigrity\\main.py"],
+      "env": {
+        "SIGRITY_HOME": "C:\\Cadence\\Sigrity2024.0",
+        "SIGRITY_LICENSE_MANAGER_HOME": "C:\\Cadence\\LicenseManager",
+        "SIGRITY_CADENCE_SPB_HOME": "C:\\Cadence\\SPB_22.1",
+        "SIGRITY_LICENSE_FILE": "5280@localhost",
+        "SIGRITY_WORKDIR": "C:\\Users\\aicoe\\Desktop\\Sigrity\\runs"
+      }
+    }
+  }
+}

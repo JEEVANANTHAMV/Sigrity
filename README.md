@@ -22,7 +22,12 @@ output, Constraint Manager, SKILL-scripted trace/via/padstack/component-placemen
 authoring, PSpice batch simulation) via SKILL, Tcl, and standalone CLI tools
 respectively, closing the loop from blank design through simulated signoff.
 
-**159 MCP tools across 7 domains**, one Python package.
+**165 MCP tools across 8 domains**, one Python package. (Six of those tools — see
+"FORJINN discovery-form gap-closing pass" below — close specific gaps found while
+comparing this suite against a client's PCB-CAD/schematic AI-agent discovery form:
+component-supplier sourcing, a schematic checklist rule engine, requirement-to-
+schematic generation, Capture's real ERC equivalent, a placement+routing composite, and
+manufacturing-package structural analysis.)
 
 **Research discipline note**: this README has gone through two passes. The first
 built and tested the original 114→139 tools. A second pass re-examined several of the
@@ -48,6 +53,7 @@ else in this file.
 | 5 | Unified Framework (Sigrity X Platform) | `sigrity_mcp/domains/platform/` | FlexNet license status, install introspection, AMM model-library tools, the pipeline orchestrator, generic file copy/move/delete utilities, and the job/session control shared by every other domain |
 | 6 | CAD Creation (Allegro/OrCAD) | `sigrity_mcp/domains/cad/` | Allegro PCB layout (SKILL) — including SKILL-scripted trace/via/padstack/component-placement authoring and Constraint Manager scripting, OrCAD Capture schematic (Tcl), real batch DRC, auto-placement, drill-route/via-fanout routing, **headless SPECCTRA full-board autorouting**, manufacturing export (IPC-2581/IPC-356/STEP/Gerber), IBIS/die-abstract checking, design-data extraction, PSpice batch simulation, and license-gated schematic/netlist interchange |
 | 7 | Thermal (Celsius) | `sigrity_mcp/domains/thermal/` | Celsius3D (electrothermal/stress), CelsiusCFD, Celsius2D — a previously completely-unwrapped Sigrity product line, added and confirmed live this pass |
+| 8 | Component Sourcing | `sigrity_mcp/domains/sourcing/` | One tool querying DigiKey/Mouser/Farnell/Arrow/Avnet for stock/price/lifecycle/alternates — the only domain with no local Cadence executable behind it, and (see below) the only one this machine genuinely cannot verify live at all |
 
 ### A note on Domain 4 (Aurora)
 
@@ -341,6 +347,84 @@ output; neither was run against a real data file (none was on hand) so both are
 PdcMesh/PdcSolver, VFandEnforcement, RootNodeSpice, MatMgr, LayoutWorkbench, PStarter)
 turned out to be internal solver-dispatch workers or GUI-only, consistent with the
 existing documented exclusion of `AFSmodule.exe`/`HexMesh.exe`/etc. — none are wrapped.
+
+## FORJINN discovery-form gap-closing pass
+
+A client's PCB-CAD/schematic AI-agent POC discovery form was compared against this
+suite's actual tool inventory. Of the gaps found, six were selected to build (the
+client's own document-intelligence needs — reading datasheets/HRS/PRDs and generating
+Word-format design documents/test plans/user guides — are explicitly out of scope here:
+the client already has separate systems for both); the client also explicitly descoped
+a vendor-preference/AVL rule engine on top of raw sourcing data. What follows is each
+addition and, honestly, how far it's actually been verified — several of these are
+`built_untested` for reasons specific to this pass, not just "not yet exercised":
+
+- **`lookup_component_sourcing`** (Domain 8, `sourcing/component_sourcing_tools.py`) —
+  one tool querying DigiKey, Mouser, Farnell/element14, Arrow, and Avnet concurrently
+  for stock/lead-time/price/lifecycle/alternates from a single part number. **The
+  weakest-verified tool in this entire suite**: every other `built_untested` tool here
+  was still built against a real local install and a real `-help`/doc page; this one is
+  built entirely from each vendor's public developer-portal documentation with **zero
+  live access** — this machine has no internet connectivity and no vendor API
+  credentials were available to configure. DigiKey/Mouser/Farnell's endpoint/auth shapes
+  are reasonably well-documented publicly; Arrow/Avnet's are explicitly flagged
+  lower-confidence in the code itself (`confidence_note` field). A vendor with no
+  credentials set reports `not_configured` rather than failing the call, so a partial
+  deployment (e.g. only a Mouser key available) still gets a real answer from that one
+  vendor. Needs real credentials and a real network path to confirm any of it.
+- **`run_schematic_checklist`** (Domain 6, `cad/schematic_checklist_tools.py`) — a rule
+  engine (decoupling caps, pull-up/pull-down resistors, clock-net floating checks,
+  reset-circuit presence, test-point coverage) over real `report.exe -v net`/`-v bom`
+  CSV output (`run_allegro_report`, already `confirmed_live`). Unlike the sourcing tool
+  above, this one's *parsing* is grounded in real report files this suite itself
+  produced on this machine and is covered by unit tests against that real CSV shape —
+  what's unverified is only whether the five heuristics themselves (REFDES-prefix/
+  net-name pattern matching) are precise enough for a real production board without
+  false positives; they are deliberately coarse and every finding says exactly what
+  pattern triggered it.
+- **`generate_schematic_from_spec`** (Domain 6, `cad/schematic_generation_tools.py`) —
+  composes `capture_tools.py`'s existing place-part/place-wire/place-pin/annotate/
+  netlist/save primitives into one call, taking a structured parts/wires/pins spec
+  (assumed already decided by the client's own document-intelligence system) and
+  authoring+saving the schematic in one shot. This directly implements the
+  requirement-to-schematic *authoring* half of the client's top-priority workflow — but
+  it inherits `capture_tools.py`'s own documented `known_blocked` status verbatim:
+  OrCAD Capture's batch invocation is genuinely non-deterministic on this machine (one
+  clean 3.2s run, then the next identical attempt hanging the full timeout with an
+  empty log — see `core/tool_status.py`'s `capture` note). Composing more calls into
+  one script does not fix that underlying reliability issue, it only removes the
+  sequencing burden from the caller — treat a `succeeded` result the same skeptical way
+  `capture_run_session` itself already warns to (check real log/file content, not just
+  the returncode) until Capture's batch reliability itself is root-caused on whatever
+  machine actually runs this in production.
+- **`capture_check_design_rules`** (added to `cad/capture_tools.py`) — Capture's real
+  ERC equivalent. Confirmed from `doc/cap_ref/Project_manager_command_reference.html`'s
+  own "Design Rules Check command" entry ("Available from: PCB menu" — distinct from
+  Annotate/Create Netlist, both "Tools menu" — "uses the decision matrix located in the
+  ERC Matrix tab"). The exact `Menu "PCB::Design Rules Check"` Tcl line is a
+  well-grounded inference from the same "<menu>::<command>" convention already
+  confirmed working for Annotate/Create Netlist, not an independently-found literal
+  example — unconfirmed live, same as every other `capture_*` tool.
+- **`run_placement_and_routing_assistance`** (Domain 6,
+  `cad/placement_routing_assistance_tools.py`) — one call chaining real auto-placement,
+  the real SPECCTRA export+autoroute bridge, a best-effort attempt at the round-trip
+  session import, and a final batch DRC pass. Built specifically around two already-
+  documented real quirks rather than papering over them: `specctra.exe` returns a
+  nonzero exit code (confirmed 4) even on a fully successful route, so this pipeline
+  does not gate on that job's pass/fail state; and `spif_batch -i` (the import step) is
+  confirmed broken on this machine (`ERROR(SPMHDB-238)`), so the final DRC pass targets
+  whichever board is actually real and on-disk and says explicitly, via a `caveat`
+  field, when that means it checked pre-routing placement state rather than the new
+  routing.
+- **`analyze_manufacturing_package`** (Domain 6, `cad/manufacturing_analysis_tools.py`)
+  — structural completeness/well-formedness checks over Gerber `.art`, IPC-2581, and
+  IPC-356 outputs, grounded in real signatures read from real files this suite already
+  produced (`G04 File Format:  Gerber RS274X` / `Layer:` lines; a real `<IPC-2581
+  xmlns="http://webstds.ipc.org/2581">` root; a real `IPC-D-356 Output File from
+  Allegro` header marker) — covered by unit tests against those exact fixtures. This is
+  explicitly a completeness/format gate, not an electrical DFM check: no batch/SKILL
+  automation surface exists on this installation for that (`dfa_dlg.exe` remains
+  confirmed GUI-only, unchanged from this suite's earlier research).
 
 ## Architecture
 

@@ -3,6 +3,7 @@ import pytest
 from sigrity_mcp.core.tclsession import tcl_sessions
 from sigrity_mcp.domains.cad.capture_tools import (
     capture_annotate,
+    capture_check_design_rules,
     capture_create_netlist,
     capture_place_part,
     capture_place_pin,
@@ -33,6 +34,7 @@ async def test_compose_tools_append_expected_tcl():
     await capture_place_pin(sid, 10, 10, "IN1")
     await capture_set_property(sid, "Value", "10k")
     await capture_annotate(sid)
+    await capture_check_design_rules(sid)
     await capture_create_netlist(sid)
     await capture_save(sid)
 
@@ -42,6 +44,7 @@ async def test_compose_tools_append_expected_tcl():
     assert 'PlacePin 10 10 {IN1} {Passive} FALSE' in script
     assert "SetProperty {Value} {10k}" in script
     assert 'Menu "Tools::Annotate"' in script
+    assert 'Menu "PCB::Design Rules Check"' in script
     assert 'Menu "Tools::Create Netlist"' in script
     assert 'Menu "File::Save"' in script
 
