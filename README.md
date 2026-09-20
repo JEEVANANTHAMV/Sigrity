@@ -22,7 +22,7 @@ output, Constraint Manager, SKILL-scripted trace/via/padstack/component-placemen
 authoring, PSpice batch simulation) via SKILL, Tcl, and standalone CLI tools
 respectively, closing the loop from blank design through simulated signoff.
 
-**165 MCP tools across 8 domains**, one Python package. (Six of those tools — see
+**179 MCP tools across 8 domains**, one Python package. (Six of those tools — see
 "FORJINN discovery-form gap-closing pass" below — close specific gaps found while
 comparing this suite against a client's PCB-CAD/schematic AI-agent discovery form:
 component-supplier sourcing, a schematic checklist rule engine, requirement-to-
@@ -298,6 +298,133 @@ full 90s wait with an empty log, and the other two "succeeded" in a suspicious 0
 a completely empty log (too fast for real work, matching this suite's previously-
 documented "exits immediately with no output" failure mode) — see `capture`'s note in
 `core/tool_status.py` for the full result. Capture remains `known_blocked`.
+
+### Domain 6, this pass — closing the "no way to create a .brd from scratch" gap
+
+Every existing CAD tool up to this point assumed a `.brd` already existed on disk —
+`allegro_run_session` takes it as `allegro.exe`'s own positional load argument, and
+`axlOpenDesign`'s own SKILL doc page confirms opening a name that doesn't exist on disk
+pops an interactive "Drawing Parameters" form with no scripted equivalent anywhere in
+the SKILL reference. New module **`allegro_import_tools.py`** closes this:
+
+- **`allegro_import_dxf`** (`dxf2a.exe`) — CONFIRMED LIVE. Its own `-help` banner
+  documents the no-`-g` mode as "new design, only": given a DXF mechanical outline plus
+  a Layer Conversion File, it writes a brand-new `.brd` from scratch, no GUI or existing
+  design required. Live-tested against Cadence's own shipped tutorial sample
+  (`doc/wb_tut/examples/Module_1/flag.dxf` + `flag_l.cnv`): produced a real 203,456-byte
+  `.brd`, independently re-verified by opening that exact file with `report.exe`
+  (bypassing dxf2a/SKILL entirely) — a real summary came back (2 routing layers, drawing
+  extents matching the DXF outline, `DRC State: UP TO DATE`). Also pass `update_existing=True`
+  to instead merge DXF data into an already-existing board (dxf2a's `-g`).
+- **`allegro_export_dxf`** (`a2dxf.exe`) — CONFIRMED LIVE, the reverse direction: run
+  against this suite's own real routed sample board, produced a genuine, valid 6,464-byte
+  DXF (verified real `SECTION`/`HEADER`/`$ACADVER`/`ENTITIES`/`EOF` structure).
+- **`allegro_new_blank_board`** — for when there's no DXF outline at all: a plain
+  filesystem copy of Cadence's own shipped blank 2-layer board template
+  (`share/cdssetup/ult/2layer.brd`), no Cadence process involved.
+
+Two confirmed quirks worth flagging for anyone extending this module: (1) `dxf2a.exe`
+exits with returncode 1 even on a fully successful run (same "nonzero exit on real
+success" pattern already documented for `allegro_dbdoctor`/`artwork.exe`/`specctra`) —
+read the job log for "dxf2a complete.", don't trust job state alone; (2) flag syntax is
+confirmed SPACE-separated (`-u MILS`, `-a 2`) — the attached form (`-uMILS`) was
+live-tested and rejected outright. A real failure mode was also found and fixed while
+building this: a caller-supplied relative path that doesn't resolve from the job's own
+per-run scratch directory sends dxf2a/a2dxf into an interactive re-prompt loop instead of
+failing cleanly, generating output fast enough to hit this suite's 200MB job-log
+watchdog within seconds (reproduced twice, ~205-209MB logs, while building this module)
+— both tools now resolve every path argument to absolute before launching to close off
+the most common cause.
+
+Also investigated and confirmed NOT automatable this pass: `convert_gerber.exe` (Gerber
+import) and `EagleImport\Eagle2Cp.exe` (Eagle import) are both real executables but both
+are interactive stdin-prompt loops with no discoverable non-interactive flag — documented
+as a known gap rather than silently skipped, matching this suite's treatment of `zrouter`.
+
+**A promising, not-yet-implemented lead for future work**: `syscap.exe` ("Allegro System
+Capture," a distinct, more modern schematic tool from the classic `Capture.exe`/OrCAD
+Capture already wrapped in `capture_tools.py`) has an extensively documented Tcl command
+reference (`doc/scap_tcl_comms/`, ~600 commands) including `newProject <name>
+<design_name> <project_path> sch composite` — a genuinely-documented, from-nothing
+"create a new schematic project" call (real worked example in its own doc page, returns
+0 on success), plus `createSchematicPage`/`addComponent`/`drawWire`/`saveDesign`. This
+would be a much more promising schematic-authoring path than `capture_tools.py`'s
+already-`known_blocked` Tcl batch reliability — IF `syscap.exe` has a working headless
+launch mode, which is NOT yet confirmed: both `-help` (opened a GUI window, no console
+output, had to be killed) and `-tcl <script>` (exited immediately with no output at all —
+ambiguous, not proof either way) were tried live this pass. Not wrapped without stronger
+evidence of a real batch invocation, per this suite's standing discipline against
+fabricating automation surfaces — but the Tcl vocabulary itself is real and worth
+revisiting if a documented `syscap.exe` CLI/batch flag turns up.
+
+**A real, previously-undocumented capability found while auditing Domain 3 (Extraction)
+for the same "are all import formats covered" question**: Sigrity's built-in "SPDIF
+Translator" (inside every Layout Workbench tool, not a separate exe — see
+`doc/Translators_UG/Introduction_to_Sigrity_Translators.html`) covers Altium
+(`.pcbdoc`), IPC-2581 (`.xml`), DXF (`.dxf`), ODB++ archives, and Allegro formats, on top
+of the six dedicated `*2Spd.exe` translators (`translators.py`) already wrapped. It's
+already reachable today through the existing `start_powersi_session`/
+`powersi_save_document` tool pair (the same bridge already documented for `.brd`) — no
+new code needed, just previously-missing documentation. CONFIRMED LIVE against two
+formats this pass: a real 130KB DXF sample produced a genuine 640KB `.spd`; a real 55MB
+Altium `.PcbDoc` sample produced a genuine ~19MB `.spd`. IPC-2581 (tried against a real
+229MB sample) is plausible but unconfirmed — the process was still genuinely parsing
+(1.6GB RAM, not a stalled dialog) when the test was cut off at 90s rather than left to
+run unbounded. An audit of the other 130 executables under Sigrity's own `tools/bin`
+turned up no other unwrapped `*2Spd`-style translator or `AmLibGen`-style
+project-creation exe — everything else checked was either an internal solver-engine/
+platform-plumbing binary or, for the two strongest candidates found
+(`rlgc2s.exe`/`s2rlgc.exe`, RLGC per-unit-length line data ⇄ Touchstone S-parameters), a
+real self-documenting solver utility that belongs alongside `abcd.exe`/`bem2d3.exe` in
+`utility_solvers.py` rather than a foreign-CAD-format importer.
+
+### Domain 6, this pass, continued — mechanical exchange, symbol authoring, and schematic-project creation
+
+A fresh sweep of every executable under `C:\Cadence\SPB_22.1\tools\bin` not yet
+registered in this suite (419 files, diffed against `CAD_EXECUTABLES`) turned up several
+more genuinely real, confirmed-live standalone CLIs, closing more "all imports should be
+supported" gaps and — most notably — a real answer to "create a new schematic project
+from scratch":
+
+- **`allegro_manufacturing_tools.py` gained mechanical ECAD/MCAD exchange and more
+  export formats**: `run_ipc2581_import` (`ipc2581_in.exe`, CONFIRMED LIVE — the import
+  direction of the already-wrapped IPC-2581 export; produced a real, valid new `.brd`
+  from a real IPC-2581 sample, independently re-verified with `report.exe`),
+  `run_idf_export`/`run_idx_export` (`idf_out.exe`/`idx_out.exe`, CONFIRMED LIVE —
+  mechanical outline/placement export to IDF and IDX/ProSTEP EDMD format, both run
+  bare against a real board with zero preconditions), `run_dml_export` (`brd2dml.exe`,
+  CONFIRMED LIVE — Allegro connectivity to Cadence's own DML boardmodel format), and
+  `run_pdf_export` (`pdf_out.exe`, CONFIRMED LIVE — direct Allegro-to-PDF, verified real
+  `%PDF-1.7` output). `run_idf_import`/`run_idx_import` are also wrapped
+  (`built_untested` — real, fully self-documenting `-help` banners confirmed, including
+  each one's own documented ability to create a brand-new `.brd` from mechanical data
+  the same way `dxf2a`/`ipc2581_in` do, but no real `.emn`/`.bdf`/`.idx` sample file was
+  found on this machine to run them against).
+- **`allegro_library_tools.py` gained `allegro_create_symbol`** (`create_sym.exe`,
+  CONFIRMED LIVE) — a real correction to this suite's own earlier "library authoring is
+  GUI-only" conclusion: that conclusion was specifically about `padstack_editor.exe`/
+  `symboleditor.exe`/`symbolcreator.exe` (which really are GUI-only, unchanged), but
+  `create_sym.exe` is a separate, distinct exe an earlier full-tools/bin audit pass
+  missed — its own `-help` banner: "This is the command line version of File->Create
+  Symbol." Live-tested against a real shipped footprint source, it produced a real 2.9MB
+  `.psm`, independently re-verified with `dbdoctor.exe -check_only` ("0 warnings, 0
+  errors detected").
+- **New module `allegro_project_tools.py`**, closing the "create a new schematic
+  project from scratch" gap this pass's System Capture investigation left open:
+  `allegro_copy_project` (`copyproject.exe`) is the single strongest finding of this
+  pass — CONFIRMED LIVE, independently verified twice, producing a complete, freshly-
+  timestamped new schematic project (real CPM file, full `worklib/<design>/{sch_1,
+  packaged,physical,cfg_package}` tree, real schematic pages, a physical `.brd`
+  placeholder) from a real template project, ending in "SUCCESS(COPYPROJ-67): Copy
+  Project Success." — genuinely headless, no GUI, unlike `capture_tools.py`'s/
+  `syscap.exe`'s unconfirmed batch reliability. `allegro_package_xcon_project`
+  (`xcon2project.exe`, CONFIRMED LIVE) is the sibling tool for packaging an existing
+  `.xcon` connectivity file into a new project. `allegro_generate_sim_variant`
+  (`generate_sim_variant.exe`, CONFIRMED LIVE) is a different kind of "create a new
+  design": generates a genuine derivative `.brd` with over/undersized trace widths
+  and/or dielectric thicknesses for SI what-if analysis — a live run produced a real,
+  distinct 918KB new board, independently confirmed valid via `report.exe`. Per the
+  tool's own docs, on-line DRC is deliberately disabled in the resulting variant design.
 
 ### Domain 7 (Thermal / Celsius) — new this pass, confirmed live
 
@@ -679,6 +806,20 @@ identified — not "we didn't get to it"):
   exists on this machine; only unfilled templates).
 - `diacheck.exe`/`diacompare.exe` (Domain 6) — no die-abstract sample file was found to
   test against.
+- More real, self-documenting Allegro CLIs found this pass but NOT wrapped (no sample
+  input file on this machine to confirm live, and lower priority than the ones that
+  were): `idf_in.exe`/`idx_in.exe` ARE wrapped despite this, since they're the direct
+  import-direction complement to the confirmed-live `idf_out`/`idx_out` — see
+  `allegro_manufacturing_tools.py`. Left unwrapped entirely: `stream_out.exe` (GDSII
+  Stream export — needs pre-defined artwork film records, the same precondition class
+  already solved for `gbplot`/`artwork.exe` via `allegro_create_film`, just not wired up
+  for this tool yet), `xda2def.exe`/`def2xda.exe` (bidirectional DEF/LEF exchange),
+  `mbs2lib.exe` (Mentor Board Station library import), `e2cconn.exe`/`e2csch.exe` (EDIF
+  import — genuinely NOT license-gated the way `con2xml`/`cap2xml` are, just untested),
+  `csv2block.exe` (Capture symbol-from-CSV-pinlist), and `dsxmltoschematic.exe` (creates
+  a new schematic project from an `.xcon`-style XML file — a real, likely-working
+  sibling to the now-wrapped `allegro_copy_project`/`allegro_package_xcon_project`, not
+  pursued this pass since those two already proved the underlying mechanism).
 - `abcd.exe`/`bem2d3.exe` (Domain 3) — no Touchstone/geometry sample file was found to
   test against.
 - `SPDSIM.exe` — a real shipped sample failed with `"Failed to open the file"` despite
@@ -768,6 +909,7 @@ python -m uv run python scripts/smoke_new_cad_tools.py # real batch_drc/placemen
 python -m uv run python scripts/smoke_capture_retest.py          # re-verifies Capture's batch invocation is still unreliable (not license-related)
 python -m uv run python scripts/smoke_allegro_mutation_retest.py # re-verifies allegro_create_net now completes live
 python -m uv run python scripts/smoke_specctra_bridge.py         # real spif_batch export + specctra headless autoroute, through the actual MCP tools
+python -m uv run python scripts/smoke_dxf_bridge.py               # real dxf2a new-board creation + a2dxf export + blank-template copy, through the actual MCP tools
 python -m uv run python scripts/test_llm_e2e.py "<prompt>"   # real LLM-driven MCP tool-calling test, single task
 python -m uv run python scripts/eval_e2e.py             # multi-task, multi-endpoint evaluation with metrics
 ```
