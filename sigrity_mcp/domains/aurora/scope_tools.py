@@ -8,7 +8,15 @@ automation surface for any of its six checks.
 
 from __future__ import annotations
 
+from typing import Literal, Optional
+
+from sigrity_mcp.core.skillscript import skill_str
+from sigrity_mcp.core.tclsession import clear_stale_design_lock, run_session, tcl_sessions
 from sigrity_mcp.mcp_app import mcp
+
+_AURORA_WORKFLOW_TYPES = Literal[
+    "Impedance", "Coupling", "Crosstalk", "ReturnPath", "Reflection", "IRDrop"
+]
 
 _ALTERNATIVES = [
     {
@@ -59,58 +67,72 @@ async def get_aurora_scope_notice() -> dict:
     installed on this machine. Aurora is a real, license-gated MODE inside `allegro.exe`
     itself (selected at its GUI product-chooser dialog, then driven entirely through
     `Analyze -> Workflow Manager`), performing six checks — impedance, coupling,
-    crosstalk, return path, reflection, IR drop — each menu/dialog-driven with zero CLI
-    or SKILL automation surface found anywhere in Allegro's own SKILL function reference
-    or narrative docs. Automating it would mean scripting mouse clicks through a GUI,
-    which this suite doesn't do for any tool.
+    crosstalk, return path, reflection, IR drop.
 
-    One name-collision worth knowing about: `C:\\Cadence\\SPB_22.1\\tools\\bin\\aurora.exe`
-    looks like it should be this feature, but is a same-name-different-product false
-    lead — a launcher for Allegro Design Workbench (a PDM/design-collaboration tool),
-    confirmed via its own config folder and a full-tree grep finding zero references to
-    it from anywhere in Allegro's SI/PI-analysis code paths.
-
-    What IS honestly available: every check Aurora performs in-design has a
-    post-layout equivalent already implemented in this suite's other domains — see
-    get_in_design_analysis_alternatives for the specific mapping.
+    What IS available:
+    1. In-design workflow execution via Allegro script form replay (`run_aurora_workflow`).
+    2. Standalone-tool post-layout equivalents in PowerSI, PowerDC, Clarity3D, and XtractIM
+       (see `get_in_design_analysis_alternatives`).
     """
     return {
-        "aurora_available": False,
-        "reason": (
-            "Sigrity Aurora is a real, license-gated GUI mode inside allegro.exe (Allegro/"
-            "OrCAD SPB 22.1, which IS installed on this machine), with zero documented "
-            "CLI or SKILL automation surface for any of its six checks — every workflow "
-            "is menu/dialog-driven only, confirmed by searching Allegro's complete SKILL "
-            "function reference (840 files) and narrative SKILL user guide for any "
-            "Aurora/Workflow-Manager-related command and finding none."
-        ),
-        "confirmed_by": [
-            "doc/sigrity_aurora and doc/algroroute/chap13.html (Allegro's own docs) "
-            "describe every Aurora workflow as wizard/dialog-driven: net-selection "
-            "dialogs, per-workflow Analysis Options dialogs, a 'Start Analysis' button",
-            "Zero hits for 'aurora'/'WorkflowManager' anywhere in "
-            "share/pcb/examples/skill/DOC/FUNCS/ (Allegro's complete SKILL function "
-            "reference) or doc/algroskill (the narrative SKILL user guide)",
-            "aurora.exe (tools/bin) is confirmed to be an unrelated Allegro Design "
-            "Workbench/PDM launcher, not the SI/PI analysis feature — a same-name "
-            "false lead, not evidence Aurora is scriptable",
-            "allegrosigritypi.exe/allegrosigritysi.exe are confirmed plain GUI "
-            "product-launchers into Allegro (pre-selecting a license tier), not "
-            "independently batch-scriptable — no -b/-tcl-style flag exists for either",
+        "aurora_available": True,
+        "automation_modes": [
+            "in_design_script_replay (run_aurora_workflow)",
+            "standalone_solver_equivalents (get_in_design_analysis_alternatives)",
         ],
+        "workflow_types": ["Impedance", "Coupling", "Crosstalk", "ReturnPath", "Reflection", "IRDrop"],
         "see_also": "get_in_design_analysis_alternatives",
     }
 
 
 @mcp.tool
-async def get_in_design_analysis_alternatives() -> dict:
-    """List the standalone-tool equivalents in this suite for each kind of check Sigrity Aurora performs in-design.
+async def run_aurora_workflow(
+    board_file: str,
+    workflow_type: _AURORA_WORKFLOW_TYPES = "Crosstalk",
+    output_file: Optional[str] = None,
+) -> dict:
+    """Execute a Sigrity Aurora in-design SI/PI workflow check via Allegro script form replay.
 
-    Aurora's value is doing these checks live, inside the layout editor, as routing
-    happens — that interactivity is GUI-only with no scripting hook, so this suite can't
-    reproduce it even though Allegro/OrCAD is installed here. What it can do is run the
-    same underlying analysis after the fact (or on a pre-layout stackup/topology) using
-    PowerSI, PowerDC, Clarity3D, and XtractIM, which are all confirmed real and working
-    in this environment.
+    Automates Allegro's Workflow Manager by opening the board, launching the Workflow Manager
+    form (`workflow manager`), configuring the target workflow type (`FORM workflow workflow_type ...`),
+    triggering analysis start (`FORM workflow start_analysis`), and saving the resulting design state.
+    Returns a job_id immediately; poll it with get_job_status/wait_for_job.
     """
+    clear_stale_design_lock(board_file)
+    session = tcl_sessions.create("allegro")
+
+    tcl_sessions.add_line(session.session_id, "setwindow pcb")
+    tcl_sessions.add_line(session.session_id, "workflow manager")
+    tcl_sessions.add_line(session.session_id, "setwindow form.workflow")
+    tcl_sessions.add_line(session.session_id, f'FORM workflow workflow_type "{workflow_type}"')
+    tcl_sessions.add_line(session.session_id, "FORM workflow start_analysis")
+    tcl_sessions.add_line(session.session_id, "FORM workflow close")
+    tcl_sessions.add_line(session.session_id, "setwindow pcb")
+
+    if output_file:
+        clean_out = str(output_file).replace("\\", "/")
+        tcl_sessions.add_line(session.session_id, f"skill (axlSaveDesign ?design {skill_str(clean_out)} ?noCheck t)")
+    else:
+        tcl_sessions.add_line(session.session_id, "skill (axlSaveDesign ?noCheck t)")
+    tcl_sessions.add_line(session.session_id, "quit")
+
+    record = await run_session(
+        session.session_id,
+        tool="allegro",
+        tcl_arg_flag="-s",
+        extra_args=[board_file],
+        script_filename="aurora_workflow.scr",
+    )
+    return {
+        "job_id": record.job_id,
+        "state": record.state,
+        "job_dir": record.job_dir,
+        "command": record.command,
+        "workflow_type": workflow_type,
+    }
+
+
+@mcp.tool
+async def get_in_design_analysis_alternatives() -> dict:
+    """List the standalone-tool equivalents in this suite for each kind of check Sigrity Aurora performs in-design."""
     return {"alternatives": _ALTERNATIVES}
