@@ -1,10 +1,17 @@
+from pathlib import Path
+
 import pytest
 
 from sigrity_mcp.domains.cad.allegro_library_tools import (
+    allegro_create_symbol,
     run_die_abstract_check,
     run_die_abstract_compare,
     run_ibis_check,
 )
+
+
+def _abs(name: str) -> str:
+    return str(Path(name).resolve())
 
 
 @pytest.mark.asyncio
@@ -39,3 +46,21 @@ async def test_run_die_abstract_check_with_flags(fake_exe):
 async def test_run_die_abstract_compare(fake_exe):
     result = await run_die_abstract_compare("golden.dia", "eco.dia", output_file="diff.txt")
     assert result["command"][1:] == ["golden.dia", "eco.dia", "diff.txt"]
+
+
+@pytest.mark.asyncio
+async def test_allegro_create_symbol_default_type(fake_exe):
+    result = await allegro_create_symbol("part.dra")
+    assert result["command"][1:] == [_abs("part.dra")]
+
+
+@pytest.mark.asyncio
+async def test_allegro_create_symbol_with_type_and_output(fake_exe):
+    result = await allegro_create_symbol("part.dra", output_symbol_file="part.psm", symbol_type="package")
+    assert result["command"][1:] == ["-p", _abs("part.dra"), _abs("part.psm")]
+
+
+@pytest.mark.asyncio
+async def test_allegro_create_symbol_mechanical_type(fake_exe):
+    result = await allegro_create_symbol("part.dra", symbol_type="mechanical")
+    assert result["command"][1:] == ["-m", _abs("part.dra")]

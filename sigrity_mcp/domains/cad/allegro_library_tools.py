@@ -12,12 +12,28 @@ Confirmed live on this machine:
 - `diacompare.exe -help`: `diacompare <golden_file> <eco_file> [output_file]
   [-nl][-ns][-np][-ni][-nd][-nr][-nb][-na][-nt][-nn][-nk][-id]` — compares two die-
   abstract files (an ECO diff).
+
+CORRECTION to this suite's own earlier "library authoring is GUI-only" conclusion
+(README/`domains/cad/__init__.py` previously named `padstack_editor.exe`/
+`symboleditor.exe`/`symbolcreator.exe` as the confirmed-GUI-only set — that finding
+still stands for those three specifically, but a fresh sweep of `tools/bin` found a
+distinct exe they don't cover): **`create_sym.exe`** — CONFIRMED LIVE, its own `-help`
+banner: "This is the command line version of File->Create Symbol." Compiles a `.dra`
+source into a real package/mechanical/format/pad-shape/thermal-flash symbol file.
+Live-tested against a real shipped footprint source
+(doc/lc_tut/tutorial_examples/Master_Library/Symbols/asp-134488-01.dra):
+`create_sym -p mysym.dra mysym.psm` produced a real 2.9MB `.psm`, independently
+re-verified with `dbdoctor.exe -check_only` ("0 warnings, 0 errors detected").
+`allegro_create_symbol` resolves its file-path arguments to absolute before building
+argv (see `core/paths.py`) — the same defensive fix applied everywhere else in this
+same Cadence CLI family after a demonstrated runaway-re-prompt-loop failure mode.
 """
 
 from __future__ import annotations
 
 from typing import Literal, Optional
 
+from sigrity_mcp.core.paths import resolve_path as _resolve
 from sigrity_mcp.core.process import submit_job
 from sigrity_mcp.mcp_app import mcp
 
@@ -87,4 +103,43 @@ async def run_die_abstract_compare(golden_file: str, eco_file: str, output_file:
     if output_file:
         args.append(output_file)
     record = await submit_job(tool="allegro_diacompare", build_args=args)
+    return {"job_id": record.job_id, "state": record.state, "job_dir": record.job_dir, "command": record.command}
+
+
+_SYMBOL_TYPES = Literal["mechanical", "package", "format", "pad_shape", "thermal_flash"]
+
+_SYMBOL_TYPE_FLAGS: dict[str, str] = {
+    "mechanical": "-m",
+    "package": "-p",
+    "format": "-f",
+    "pad_shape": "-s",
+    "thermal_flash": "-t",
+}
+
+
+@mcp.tool
+async def allegro_create_symbol(
+    dra_file: str, output_symbol_file: Optional[str] = None, symbol_type: Optional[_SYMBOL_TYPES] = None
+) -> dict:
+    """Compile a `.dra` source into an Allegro symbol — CONFIRMED LIVE (see module docstring).
+
+    Runs `create_sym.exe [-m|-p|-f|-s|-t] <dra_file> [<output_symbol_file>]` as a
+    background job — the command-line equivalent of Allegro's File > Create Symbol.
+    `symbol_type` selects which kind to compile: "mechanical" (.bsm), "package" (.psm),
+    "format" (.osm), "pad_shape" (.ssm), "thermal_flash" (.fsm). If omitted, create_sym
+    uses whatever default type is set inside the `.dra` file itself. If
+    `output_symbol_file` is omitted, create_sym derives a name from `dra_file` and the
+    selected type.
+    Returns a job_id immediately; poll it with get_job_status/wait_for_job. Independently
+    verify a produced symbol with `run_allegro_dbdoctor -check_only` if you need extra
+    confidence beyond a clean exit (confirmed live this way during this tool's own
+    testing).
+    """
+    args: list[str] = []
+    if symbol_type:
+        args.append(_SYMBOL_TYPE_FLAGS[symbol_type])
+    args.append(_resolve(dra_file))
+    if output_symbol_file:
+        args.append(_resolve(output_symbol_file))
+    record = await submit_job(tool="create_sym", build_args=args)
     return {"job_id": record.job_id, "state": record.state, "job_dir": record.job_dir, "command": record.command}
