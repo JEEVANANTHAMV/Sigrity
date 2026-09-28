@@ -63,9 +63,25 @@ geometry. Extend this module if a real project surfaces additional confirmed
 
 from __future__ import annotations
 
+import pathlib
+import shutil
+
 from sigrity_mcp.core.tclscript import tcl_path
 from sigrity_mcp.core.tclsession import run_session, tcl_sessions
 from sigrity_mcp.mcp_app import mcp
+
+
+def _clear_prior_celsius_results(project_file: str) -> None:
+    """Remove any existing result folders matching <case>_* to prevent modal overwrite prompts."""
+    try:
+        p = pathlib.Path(project_file)
+        if p.parent.exists():
+            stem = p.stem
+            for item in p.parent.glob(f"{stem}_*"):
+                if item.is_dir() and item.name.endswith(("_SS_W", "_Result", "_CFD", "_EC", "_Results")):
+                    shutil.rmtree(item, ignore_errors=True)
+    except Exception:
+        pass
 
 
 @mcp.tool
@@ -79,9 +95,12 @@ See `.forjinn/skills/sigrity-celsius/SKILL.md` for the full verified playbook, p
 
 
 @mcp.tool
-async def celsius3d_run_session(session_id: str, project_file: str) -> dict:
+async def celsius3d_run_session(session_id: str, project_file: str, clean_prior_results: bool = True) -> dict:
     """Write out the session's accumulated Tcl macro and launch Celsius3D against it as a background job.
 See `.forjinn/skills/sigrity-celsius/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+    if clean_prior_results:
+        _clear_prior_celsius_results(project_file)
+
     path = tcl_path(project_file)
     tcl_sessions.add_line(session_id, f"sigrity::begin simulation -fileName {path}")
     tcl_sessions.add_line(session_id, f"sigrity::end simulation -fileName {path}")

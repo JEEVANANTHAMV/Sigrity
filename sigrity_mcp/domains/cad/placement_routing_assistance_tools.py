@@ -42,6 +42,7 @@ from sigrity_mcp.core.jobs import job_manager
 from sigrity_mcp.domains.cad.allegro_drc_tools import run_allegro_batch_drc
 from sigrity_mcp.domains.cad.allegro_placement_tools import run_allegro_placement
 from sigrity_mcp.domains.cad.spif_specctra_tools import (
+    run_allegro_specctra_import,
     run_spif_export_to_specctra,
     run_specctra_autoroute,
     run_specctra_import_session,
@@ -71,7 +72,7 @@ async def run_placement_and_routing_assistance(
     iterate_while_improving: bool = False,
     weight_edges: bool = False,
     run_post_route_drc: bool = True,
-    stage_timeout_seconds: float = 180.0,
+    stage_timeout_seconds: float = 300.0,
 ) -> dict:
     """Run auto-placement, SPECCTRA export+autoroute+import, and a post-route batch DRC pass over a real Allegro board, as one call.
 See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
@@ -125,7 +126,7 @@ See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfa
         }
     )
 
-    import_step = await run_specctra_import_session(placed_board, resolved_session)
+    import_step = await run_allegro_specctra_import(placed_board, resolved_session)
     import_final = await _wait(import_step["job_id"], stage_timeout_seconds)
     import_succeeded = import_final.state == "succeeded"
     stages.append(
@@ -134,8 +135,6 @@ See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfa
             "job_id": import_step["job_id"],
             "state": import_final.state,
             "returncode": import_final.returncode,
-            "note": "Confirmed broken on this machine (ERROR(SPMHDB-238)) as of this suite's last live test — "
-            "a failure here is expected, not necessarily a new problem.",
         }
     )
 

@@ -34,10 +34,14 @@ a `.brd`-state problem — `dbdoctor -drc` reports "0 errors, 0 errors could be 
 and the crash reproduces identically on a fresh untouched copy (Variant A); (c) no
 flag bypasses it — `spif_batch`'s full switch set is `-o|-r|-i|-c` and `specctra.exe`'s
 documented startup options contain no session-import path, making `spif_batch -i` the
-only import route in this install. It is a product-level crash in the SPB_22.1 build;
-`run_specctra_import_session` is kept to re-verify it, and the confirmed
-*export+route* half of this bridge remains the reliable, high-value part — a routed
-`.ses`/`.rte` result plus `final.sts` connection stats is directly useful on its own.
+only import route through the standalone CLI. It is a product-level crash in the
+SPB_22.1 build of `spif_batch.exe` specifically; `run_specctra_import_session` is kept
+to re-verify it (and as a reference for the standalone-CLI approach), but
+`run_allegro_specctra_import` below is the recommended path — it drives Allegro's own
+native `specctra in` command via script replay instead of the crashing standalone binary,
+sidestepping the bug entirely. The confirmed *export+route* half of this bridge remains
+reliable either way — a routed `.ses`/`.rte` result plus `final.sts` connection stats is
+directly useful on its own.
 """
 
 from __future__ import annotations
@@ -45,6 +49,8 @@ from __future__ import annotations
 from typing import Optional
 
 from sigrity_mcp.core.process import submit_job
+from sigrity_mcp.core.skillscript import skill_str
+from sigrity_mcp.core.tclsession import clear_stale_design_lock, run_session, tcl_sessions
 from sigrity_mcp.mcp_app import mcp
 
 
@@ -76,8 +82,37 @@ See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfa
 
 
 @mcp.tool
+async def run_allegro_specctra_import(
+    board_file: str,
+    session_file: str,
+    output_file: Optional[str] = None,
+) -> dict:
+    """Import a routed SPECCTRA session (.ses) into an Allegro board via Allegro's own native `specctra in` command (the recommended import path — see module docstring), as a background job.
+See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+    clear_stale_design_lock(board_file)
+    session = tcl_sessions.create("allegro")
+    clean_ses = str(session_file).replace("\\", "/")
+    tcl_sessions.add_line(session.session_id, f'specctra in "{clean_ses}"')
+    if output_file:
+        clean_out = str(output_file).replace("\\", "/")
+        tcl_sessions.add_line(session.session_id, f"skill (axlSaveDesign ?design {skill_str(clean_out)} ?noCheck t)")
+    else:
+        tcl_sessions.add_line(session.session_id, "skill (axlSaveDesign ?noCheck t)")
+    tcl_sessions.add_line(session.session_id, "quit")
+
+    record = await run_session(
+        session.session_id,
+        tool="allegro",
+        tcl_arg_flag="-s",
+        extra_args=[board_file],
+        script_filename="import_specctra.scr",
+    )
+    return {"job_id": record.job_id, "state": record.state, "job_dir": record.job_dir, "command": record.command}
+
+
+@mcp.tool
 async def run_specctra_import_session(board_file: str, session_file: str) -> dict:
-    """Import a routed SPECCTRA session back into an Allegro board (KNOWN BROKEN on this machine — see module docstring), as a background job.
+    """Import a routed SPECCTRA session via standalone spif_batch.exe (KNOWN BROKEN on this machine — prefer run_allegro_specctra_import), as a background job.
 See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
     args = ["-i", board_file, session_file]
     record = await submit_job(tool="spif_batch", build_args=args)

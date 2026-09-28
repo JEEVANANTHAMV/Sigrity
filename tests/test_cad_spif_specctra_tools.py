@@ -1,6 +1,7 @@
 import pytest
 
 from sigrity_mcp.domains.cad.spif_specctra_tools import (
+    run_allegro_specctra_import,
     run_specctra_autoroute,
     run_specctra_import_session,
     run_spif_export_to_specctra,
@@ -35,3 +36,11 @@ async def test_run_specctra_autoroute_graphics_mode(fake_exe):
 async def test_run_specctra_import_session(fake_exe):
     result = await run_specctra_import_session("board.brd", "routed.ses")
     assert result["command"][1:] == ["-i", "board.brd", "routed.ses"]
+
+
+@pytest.mark.asyncio
+async def test_run_allegro_specctra_import(fake_exe):
+    result = await run_allegro_specctra_import("board.brd", "routed.ses", output_file="imported.brd")
+    assert result["command"][1] == "-s"
+    assert result["command"][2].endswith("import_specctra.scr")
+    assert result["command"][3] == "board.brd"

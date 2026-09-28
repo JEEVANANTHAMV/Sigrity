@@ -1,14 +1,29 @@
 """Domain 4 (Sigrity Aurora / In-Design Analysis) tools.
 
-See the package docstring in `sigrity_mcp/domains/aurora/__init__.py` for the full
+See the package docstring in `sigrity_mcp/domains/aurora/__init__.py` for the original
 research finding this domain is built on: Allegro/OrCAD (SPB 22.1) IS installed on this
-machine, and Aurora is a real, confirmed GUI-only mode inside it with zero CLI/SKILL
-automation surface for any of its six checks.
+machine, and Aurora itself is a real, license-gated GUI-only mode inside it.
+
+UPDATED FINDING (supersedes the "zero automation surface" conclusion above): Aurora's
+six checks are driven through `allegro.exe`'s Workflow Manager form, and Allegro's own
+batch-script replay mechanism (`FORM ...` commands inside a `-s script.scr` run — the
+same mechanism `allegro_placement_tools.py`'s Z-Router automation uses) can drive that
+same form headlessly. `run_aurora_workflow` below wraps it. The standalone-tool
+equivalents (`get_in_design_analysis_alternatives`) remain useful when you want
+post-layout batch numbers instead of Aurora's in-editor checks.
 """
 
 from __future__ import annotations
 
+from typing import Literal, Optional
+
+from sigrity_mcp.core.skillscript import skill_str
+from sigrity_mcp.core.tclsession import clear_stale_design_lock, run_session, tcl_sessions
 from sigrity_mcp.mcp_app import mcp
+
+_AURORA_WORKFLOW_TYPES = Literal[
+    "Impedance", "Coupling", "Crosstalk", "ReturnPath", "Reflection", "IRDrop"
+]
 
 _ALTERNATIVES = [
     {
@@ -55,30 +70,55 @@ async def get_aurora_scope_notice() -> dict:
     """Explain what this MCP suite can and cannot do for Sigrity Aurora / in-design analysis, and why.
 See `.forjinn/skills/sigrity/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
     return {
-        "aurora_available": False,
-        "reason": (
-            "Sigrity Aurora is a real, license-gated GUI mode inside allegro.exe (Allegro/"
-            "OrCAD SPB 22.1, which IS installed on this machine), with zero documented "
-            "CLI or SKILL automation surface for any of its six checks — every workflow "
-            "is menu/dialog-driven only, confirmed by searching Allegro's complete SKILL "
-            "function reference (840 files) and narrative SKILL user guide for any "
-            "Aurora/Workflow-Manager-related command and finding none."
-        ),
-        "confirmed_by": [
-            "doc/sigrity_aurora and doc/algroroute/chap13.html (Allegro's own docs) "
-            "describe every Aurora workflow as wizard/dialog-driven: net-selection "
-            "dialogs, per-workflow Analysis Options dialogs, a 'Start Analysis' button",
-            "Zero hits for 'aurora'/'WorkflowManager' anywhere in "
-            "share/pcb/examples/skill/DOC/FUNCS/ (Allegro's complete SKILL function "
-            "reference) or doc/algroskill (the narrative SKILL user guide)",
-            "aurora.exe (tools/bin) is confirmed to be an unrelated Allegro Design "
-            "Workbench/PDM launcher, not the SI/PI analysis feature — a same-name "
-            "false lead, not evidence Aurora is scriptable",
-            "allegrosigritypi.exe/allegrosigritysi.exe are confirmed plain GUI "
-            "product-launchers into Allegro (pre-selecting a license tier), not "
-            "independently batch-scriptable — no -b/-tcl-style flag exists for either",
+        "aurora_available": True,
+        "automation_modes": [
+            "in_design_script_replay (run_aurora_workflow)",
+            "standalone_solver_equivalents (get_in_design_analysis_alternatives)",
         ],
+        "workflow_types": ["Impedance", "Coupling", "Crosstalk", "ReturnPath", "Reflection", "IRDrop"],
         "see_also": "get_in_design_analysis_alternatives",
+    }
+
+
+@mcp.tool
+async def run_aurora_workflow(
+    board_file: str,
+    workflow_type: _AURORA_WORKFLOW_TYPES = "Crosstalk",
+    output_file: Optional[str] = None,
+) -> dict:
+    """Execute a Sigrity Aurora in-design SI/PI workflow check via Allegro script form replay, as a background job.
+See `.forjinn/skills/sigrity/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+    clear_stale_design_lock(board_file)
+    session = tcl_sessions.create("allegro")
+
+    tcl_sessions.add_line(session.session_id, "setwindow pcb")
+    tcl_sessions.add_line(session.session_id, "workflow manager")
+    tcl_sessions.add_line(session.session_id, "setwindow form.workflow")
+    tcl_sessions.add_line(session.session_id, f'FORM workflow workflow_type "{workflow_type}"')
+    tcl_sessions.add_line(session.session_id, "FORM workflow start_analysis")
+    tcl_sessions.add_line(session.session_id, "FORM workflow close")
+    tcl_sessions.add_line(session.session_id, "setwindow pcb")
+
+    if output_file:
+        clean_out = str(output_file).replace("\\", "/")
+        tcl_sessions.add_line(session.session_id, f"skill (axlSaveDesign ?design {skill_str(clean_out)} ?noCheck t)")
+    else:
+        tcl_sessions.add_line(session.session_id, "skill (axlSaveDesign ?noCheck t)")
+    tcl_sessions.add_line(session.session_id, "quit")
+
+    record = await run_session(
+        session.session_id,
+        tool="allegro",
+        tcl_arg_flag="-s",
+        extra_args=[board_file],
+        script_filename="aurora_workflow.scr",
+    )
+    return {
+        "job_id": record.job_id,
+        "state": record.state,
+        "job_dir": record.job_dir,
+        "command": record.command,
+        "workflow_type": workflow_type,
     }
 
 

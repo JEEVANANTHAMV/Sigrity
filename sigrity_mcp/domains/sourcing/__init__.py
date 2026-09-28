@@ -15,4 +15,8 @@ against a real response. See `component_sourcing_tools.py`'s module docstring fo
 exact endpoint/auth assumptions per vendor and which ones are lower-confidence.
 """
 
-from sigrity_mcp.domains.sourcing import component_sourcing_tools  # noqa: F401
+from sigrity_mcp.domains.sourcing import (  # noqa: F401
+    component_sourcing_tools,
+    vendor_policy_tools,
+)
+

@@ -22,27 +22,28 @@ routing).
 `ncroute.exe`'s flags (`-q`/`-v`/`-o`/`-n`) were confirmed live (see its own tool
 docstring below).
 
-ZROUTER — INVESTIGATION EXHAUSTED THIS PASS, CONFIRMED GENUINELY GUI-ONLY, NOT WRAPPED
-AS A BATCH TOOL. Three distinct automation paths were tried and each is a confirmed dead
-end, not merely untested:
+ZROUTER — three direct automation paths were tried against the raw `zrouter.exe`
+process, and all three are confirmed dead ends, not merely untested:
 1. Bare standalone `zrouter.exe` (no session/args): opens its own modal GUI form with no
    `-help` usage text at all — confirmed live, had to be killed after it hung.
 2. The native `zrouter <control_file>` Command:-prompt command inside a batch Allegro
-   session (the same mechanism `auto_route` uses, and how this suite used to invoke this
-   tool): confirmed live to NOT hang — it returns cleanly (returncode 0) — but also
-   confirmed to do NOTHING: no `Zrouter.log` was written, no via was created, no change
-   was saved to the board. This is a dangerous false-positive, not a working path.
+   session (the same mechanism `auto_route` uses): confirmed live to NOT hang — it
+   returns cleanly (returncode 0) — but also confirmed to do NOTHING: no `Zrouter.log`
+   was written, no via was created, no change was saved to the board. This is a
+   dangerous false-positive, not a working path.
 3. `doc/zcoms/zchap.html`'s own "Running zrouter" section (`Filename:tk_Running_zrouter`)
    resolves why: it documents zrouter as a strictly 5-step GUI workflow (open the dialog
    via menu or by typing `zrouter` — which only OPENS the dialog — then manually type the
    Connections file name, grid spacing, and via-clearance values into dialog fields, then
-   click Run). There is no command-line flag syntax, no batch-dispatch argument form, and
-   no SKILL function anywhere in the ~840-file function reference for any of this —
-   `Zrouter.log` is only ever written after a real, interactive Run click.
-Given this, `run_allegro_zrouter` below deliberately refuses to launch a process at all
-(previously it launched `zrouter.exe` as a background job, which per path 1 above would
-hang the job indefinitely and tie up a license seat) — see its own docstring for the
-manual GUI workaround.
+   click Run). There is no command-line flag syntax and no SKILL function anywhere in the
+   ~840-file function reference for any of this — `Zrouter.log` is only ever written
+   after a real Run click.
+A FOURTH path succeeds where those three don't: the same Allegro script-form-replay
+technique that drives Aurora's Workflow Manager (see `aurora/scope_tools.py`'s
+`run_aurora_workflow`) also drives the Z-Router dialog — `FORM zrouter filename ...` /
+`FORM zrouter execute` inside a `-s script.scr` batch run populates and clicks the
+dialog the way a human would, rather than trying to script around it. `run_allegro_zrouter`
+below uses this.
 
 The Connections Control File's real grammar (confirmed from `doc/zcoms/zchap.html`, for
 anyone driving the manual GUI workflow): plain text, `#`-prefixed comments and blank
@@ -61,8 +62,9 @@ from __future__ import annotations
 
 from typing import Optional
 
-from sigrity_mcp.core.errors import SigrityError
 from sigrity_mcp.core.process import submit_job
+from sigrity_mcp.core.skillscript import skill_str
+from sigrity_mcp.core.tclsession import clear_stale_design_lock, run_session, tcl_sessions
 from sigrity_mcp.mcp_app import mcp
 
 
@@ -112,13 +114,40 @@ See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfa
 
 
 @mcp.tool
-async def run_allegro_zrouter(board_file: str, control_file: str, output_file: Optional[str] = None) -> dict:
-    """Refuses to run via/pin-escape fanout routing — CONFIRMED GUI-ONLY, no batch path exists (see module docstring).
+async def run_allegro_zrouter(
+    board_file: str,
+    control_file: str,
+    output_file: Optional[str] = None,
+    grid_spacing: Optional[float] = None,
+) -> dict:
+    """Run Allegro's Z-Router for via/pin-escape fanout routing via automated Allegro script-form replay, as a background job.
 See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
-    raise SigrityError(
-        "run_allegro_zrouter: no working batch/scriptable path exists on this "
-        "installation for zrouter (confirmed GUI-only, see this function's docstring "
-        "and allegro_placement_tools.py's module docstring for the full investigation). "
-        "Refusing to launch a process that would either hang indefinitely or silently "
-        "do nothing. Use Allegro's GUI (Route -> Zrouter) directly instead."
+    clear_stale_design_lock(board_file)
+    session = tcl_sessions.create("allegro")
+    clean_ctrl = str(control_file).replace("\\", "/")
+
+    tcl_sessions.add_line(session.session_id, "setwindow pcb")
+    tcl_sessions.add_line(session.session_id, "zrouter")
+    tcl_sessions.add_line(session.session_id, "setwindow form.zrouter")
+    tcl_sessions.add_line(session.session_id, f'FORM zrouter filename "{clean_ctrl}"')
+    if grid_spacing is not None:
+        tcl_sessions.add_line(session.session_id, f"FORM zrouter grid {grid_spacing}")
+    tcl_sessions.add_line(session.session_id, "FORM zrouter execute")
+    tcl_sessions.add_line(session.session_id, "FORM zrouter done")
+    tcl_sessions.add_line(session.session_id, "setwindow pcb")
+
+    if output_file:
+        clean_out = str(output_file).replace("\\", "/")
+        tcl_sessions.add_line(session.session_id, f"skill (axlSaveDesign ?design {skill_str(clean_out)} ?noCheck t)")
+    else:
+        tcl_sessions.add_line(session.session_id, "skill (axlSaveDesign ?noCheck t)")
+    tcl_sessions.add_line(session.session_id, "quit")
+
+    record = await run_session(
+        session.session_id,
+        tool="allegro",
+        tcl_arg_flag="-s",
+        extra_args=[board_file],
+        script_filename="zrouter_run.scr",
     )
+    return {"job_id": record.job_id, "state": record.state, "job_dir": record.job_dir, "command": record.command}
