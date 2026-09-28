@@ -76,24 +76,7 @@ async def allegro_copy_project(
     new_design_name: str,
 ) -> dict:
     """Create a new schematic project by copying an existing one — CONFIRMED LIVE (see module docstring).
-
-    Runs `copyproject.exe -proj <source_project_file> -copytopath <copy_to_path>
-    -newprojname <new_project_name> -newlib <new_library_name> -newdesign
-    <new_design_name>` as a background job. This is this suite's confirmed, fully
-    headless way to create a genuinely new schematic project — copy a real starter/
-    template `.cpm` project (e.g. one of the shipped `share/pcb/translators/*_template/`
-    projects, or any existing internally-approved template) into a fresh project+design
-    under a new name.
-
-    IMPORTANT: the produced project file is named EXACTLY `new_project_name` with no
-    `.cpm` extension appended automatically — include it yourself
-    (e.g. `new_project_name="myproject.cpm"`) if you want a `.cpm`-suffixed file.
-    `source_project_file` must be a real, already-existing `.cpm` (not a
-    `@project@`-style unresolved template placeholder).
-    Returns a job_id immediately; poll it with get_job_status/wait_for_job, then browse
-    the new project tree under `copy_to_path`/`worklib/<new_design_name>/` via
-    list_job_files/read_job_output_file.
-    """
+See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
     args = [
         "-proj", _resolve(source_project_file),
         "-copytopath", _resolve(copy_to_path),
@@ -115,14 +98,7 @@ async def allegro_package_xcon_project(
     output_folder: Optional[str] = None,
 ) -> dict:
     """Package a `.xcon` connectivity file into a new schematic project — CONFIRMED LIVE (see module docstring).
-
-    Runs `xcon2project.exe -xcon <xcon_file> -root <root_design_name> -lib
-    <library_name> -refproj <reference_project_file> [-refcdslib <reference_cdslib_file>]
-    [-output <output_folder>]` as a background job. `reference_project_file` is
-    required — xcon2project's own usage banner shows it in brackets but explicitly
-    appends "(-refproj must be specified)".
-    Returns a job_id immediately; poll it with get_job_status/wait_for_job.
-    """
+See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
     args = [
         "-xcon", _resolve(xcon_file),
         "-root", root_design_name,
@@ -147,22 +123,7 @@ async def allegro_generate_sim_variant(
     dielectric_oversize_absolute: Optional[float] = None,
 ) -> dict:
     """Create a new derivative Allegro design with over/undersized traces or dielectrics — CONFIRMED LIVE (see module docstring).
-
-    Runs `generate_sim_variant.exe [-c <pct>|-C <abs>] [-d <pct>|-D <abs>]
-    [-o <output_board_file>] <master_board_file>` as a background job. For each of
-    clines/dielectrics, give EITHER the `_percent` OR the `_absolute` variant, not both
-    (raises ValueError if both are given for the same axis) — percent maps to `-c`/`-d`
-    (e.g. 1.0 = oversize by 1%), absolute maps to `-C`/`-D` (e.g. 0.1 = oversize by 0.1
-    design units; negative undersizes). If `output_board_file` is omitted,
-    generate_sim_variant names it `<master_board_file>_sim.brd` in the job's own working
-    directory.
-
-    Per the tool's own documentation, on-line DRC is deliberately disabled in the
-    resulting variant design — oversized elements may legitimately violate spacing
-    against their now-larger neighbors, so don't run/expect a clean DRC pass against the
-    output.
-    Returns a job_id immediately; poll it with get_job_status/wait_for_job.
-    """
+See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
     if cline_oversize_percent is not None and cline_oversize_absolute is not None:
         raise ValueError("give only one of cline_oversize_percent/cline_oversize_absolute, not both")
     if dielectric_oversize_percent is not None and dielectric_oversize_absolute is not None:

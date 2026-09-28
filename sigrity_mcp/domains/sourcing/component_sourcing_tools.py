@@ -266,31 +266,7 @@ async def lookup_component_sourcing(
     vendors: Optional[list[str]] = None,
 ) -> dict:
     """Look up one part's sourcing data (stock, lead time, price, lifecycle, alternates) across DigiKey, Mouser, Farnell/element14, Arrow, and Avnet in a single call.
-
-    `part_number` is a manufacturer part number (or close keyword) to search each
-    vendor's catalog with; `manufacturer` is accepted for context/logging but not
-    currently required by any of the five underlying searches below. `vendors`
-    restricts the call to a subset (any of "digikey", "mouser", "farnell", "arrow",
-    "avnet") — omit it to query every vendor that has credentials configured.
-
-    BUILT_UNTESTED, more strongly than usual for this suite (see module docstring):
-    this machine has no internet access and no vendor credentials configured, so none
-    of the five vendor integrations below have been run against a real response — every
-    endpoint/field mapping is a best-effort transcription of each vendor's own public
-    developer-portal documentation, not a confirmed-working integration. DigiKey/Mouser/
-    Farnell are reasonably well-documented publicly; Arrow/Avnet are lower-confidence
-    (see their own `confidence_note` field in a successful result).
-
-    A vendor with no API credentials set in the environment (DIGIKEY_CLIENT_ID/
-    DIGIKEY_CLIENT_SECRET, MOUSER_API_KEY, FARNELL_API_KEY, ARROW_API_KEY, AVNET_API_KEY)
-    reports `status: "not_configured"` for that vendor rather than failing the whole
-    call; a vendor whose request fails (network, auth, unexpected response shape)
-    reports `status: "error"` with the exception text. Only the bare part_number/
-    manufacturer strings are ever sent outbound — no design, schematic, or BOM data.
-
-    Returns `{part_number, manufacturer, vendors: {<vendor>: {...}}}` with one entry per
-    queried vendor.
-    """
+See `.forjinn/skills/sigrity/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
     selected = [v for v in (vendors or list(_ALL_VENDORS)) if v in _LOOKUPS]
     unknown = [v for v in (vendors or []) if v not in _LOOKUPS]
 

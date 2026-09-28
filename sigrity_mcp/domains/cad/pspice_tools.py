@@ -25,18 +25,6 @@ from sigrity_mcp.mcp_app import mcp
 @mcp.tool
 async def run_pspice_simulation(circuit_file: str) -> dict:
     """Run a batch PSpice circuit simulation against a `.cir` netlist, as a background job.
-
-    Runs `psp_cmd.exe <circuit_file>` — confirmed live (see module docstring): the tool
-    launches headlessly, reads the circuit, and reports specific, real diagnostics
-    rather than hanging or crashing. `circuit_file` should be self-contained (no
-    `.include` references to files that don't exist on this machine) — if it references
-    external model/subcircuit files, make sure those are reachable from wherever this
-    job actually runs (the job's own scratch directory, not the circuit file's original
-    location), or pre-resolve/inline them before calling this tool.
-    Returns a job_id immediately; poll it with get_job_status/wait_for_job, then read
-    the `.out` file (same base name as the input, `.out` extension) via
-    list_job_files/read_job_output_file for full simulation results/diagnostics beyond
-    this job's own stdout capture.
-    """
+See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
     record = await submit_job(tool="psp_cmd", build_args=[circuit_file])
     return {"job_id": record.job_id, "state": record.state, "job_dir": record.job_dir, "command": record.command}

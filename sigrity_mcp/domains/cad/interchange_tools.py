@@ -30,12 +30,7 @@ from sigrity_mcp.mcp_app import mcp
 @mcp.tool
 async def run_con2xml(input_file: str, output_file: Optional[str] = None) -> dict:
     """Translate a Concept-HDL netlist to XML (KNOWN LICENSE-BLOCKED on this machine — see module docstring).
-
-    Runs `con2xml.exe <input_file> [output_file]`. Confirmed real (License-gated,
-    "No Product License selected... Translation cancelled") rather than missing/GUI-only.
-    Returns a job_id immediately; poll it with get_job_status/wait_for_job — expect a
-    license-failure message in the job log until this feature is licensed.
-    """
+See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
     args = [input_file]
     if output_file:
         args.append(output_file)
@@ -46,12 +41,7 @@ async def run_con2xml(input_file: str, output_file: Optional[str] = None) -> dic
 @mcp.tool
 async def run_cap2xml(input_file: str, output_file: Optional[str] = None) -> dict:
     """Translate an OrCAD Capture design to XML (KNOWN LICENSE-BLOCKED on this machine — see module docstring).
-
-    Runs `cap2xml.exe <input_file> [output_file]`. Confirmed real (license-gated) rather
-    than missing/GUI-only.
-    Returns a job_id immediately; poll it with get_job_status/wait_for_job — expect a
-    license-failure message in the job log until this feature is licensed.
-    """
+See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
     args = [input_file]
     if output_file:
         args.append(output_file)
@@ -62,12 +52,7 @@ async def run_cap2xml(input_file: str, output_file: Optional[str] = None) -> dic
 @mcp.tool
 async def run_dml2con(input_file: str, output_file: Optional[str] = None) -> dict:
     """Translate a DML library/design file to Concept-HDL format (KNOWN LICENSE-BLOCKED on this machine — see module docstring).
-
-    Runs `dml2con.exe <input_file> [output_file]`. Confirmed real (license-gated) rather
-    than missing/GUI-only.
-    Returns a job_id immediately; poll it with get_job_status/wait_for_job — expect a
-    license-failure message in the job log until this feature is licensed.
-    """
+See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
     args = [input_file]
     if output_file:
         args.append(output_file)
@@ -78,14 +63,7 @@ async def run_dml2con(input_file: str, output_file: Optional[str] = None) -> dic
 @mcp.tool
 async def run_apd2con(input_file: str, output_file: Optional[str] = None) -> dict:
     """Bridge an Allegro Package Designer (APD) design to Concept-HDL (KNOWN LICENSE-BLOCKED on this machine — see module docstring).
-
-    Runs `apd2con.exe <input_file> [output_file]`. Confirmed real (license-gated,
-    identical "No Product License selected" failure as the other three tools in this
-    module) rather than missing/GUI-only — `apd.exe` itself (the GUI half of Package
-    Designer) is separately unwrapped as GUI-only with no CLI usage text found.
-    Returns a job_id immediately; poll it with get_job_status/wait_for_job — expect a
-    license-failure message in the job log until this feature is licensed.
-    """
+See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
     args = [input_file]
     if output_file:
         args.append(output_file)

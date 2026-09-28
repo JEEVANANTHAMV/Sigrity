@@ -53,27 +53,7 @@ _ALTERNATIVES = [
 @mcp.tool
 async def get_aurora_scope_notice() -> dict:
     """Explain what this MCP suite can and cannot do for Sigrity Aurora / in-design analysis, and why.
-
-    Call this before trying to "run Aurora" through this suite — there is no Aurora
-    tool here to run, even though Allegro/OrCAD (SPB 22.1, at C:\\Cadence\\SPB_22.1) IS
-    installed on this machine. Aurora is a real, license-gated MODE inside `allegro.exe`
-    itself (selected at its GUI product-chooser dialog, then driven entirely through
-    `Analyze -> Workflow Manager`), performing six checks — impedance, coupling,
-    crosstalk, return path, reflection, IR drop — each menu/dialog-driven with zero CLI
-    or SKILL automation surface found anywhere in Allegro's own SKILL function reference
-    or narrative docs. Automating it would mean scripting mouse clicks through a GUI,
-    which this suite doesn't do for any tool.
-
-    One name-collision worth knowing about: `C:\\Cadence\\SPB_22.1\\tools\\bin\\aurora.exe`
-    looks like it should be this feature, but is a same-name-different-product false
-    lead — a launcher for Allegro Design Workbench (a PDM/design-collaboration tool),
-    confirmed via its own config folder and a full-tree grep finding zero references to
-    it from anywhere in Allegro's SI/PI-analysis code paths.
-
-    What IS honestly available: every check Aurora performs in-design has a
-    post-layout equivalent already implemented in this suite's other domains — see
-    get_in_design_analysis_alternatives for the specific mapping.
-    """
+See `.forjinn/skills/sigrity/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
     return {
         "aurora_available": False,
         "reason": (
@@ -105,12 +85,5 @@ async def get_aurora_scope_notice() -> dict:
 @mcp.tool
 async def get_in_design_analysis_alternatives() -> dict:
     """List the standalone-tool equivalents in this suite for each kind of check Sigrity Aurora performs in-design.
-
-    Aurora's value is doing these checks live, inside the layout editor, as routing
-    happens — that interactivity is GUI-only with no scripting hook, so this suite can't
-    reproduce it even though Allegro/OrCAD is installed here. What it can do is run the
-    same underlying analysis after the fact (or on a pre-layout stackup/topology) using
-    PowerSI, PowerDC, Clarity3D, and XtractIM, which are all confirmed real and working
-    in this environment.
-    """
+See `.forjinn/skills/sigrity/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
     return {"alternatives": _ALTERNATIVES}

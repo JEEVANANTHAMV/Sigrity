@@ -622,6 +622,72 @@ Configuration (see `.env.example`): `SIGRITY_HOME` (default
 matching this machine's `CDS_LIC_FILE`), `SIGRITY_WORKDIR` (default `runs/`, where every
 job's scratch directory is created).
 
+## Connecting a remote MCP client (deepagents / LangChain / anything non-Claude-Code)
+
+`main.py` defaults to `stdio` — a same-machine launcher (Claude Code's `mcp.json`)
+spawns the process and talks to it over its stdin/stdout, which is what the rest of
+this README assumes. A client that isn't on this machine — a `deepagents`/LangChain
+agent, potentially running on an entirely different box from the one with the Cadence
+install — needs the server reachable over the network instead:
+
+```powershell
+# Streamable HTTP (the current MCP standard; use this unless the client is legacy-SSE-only)
+python main.py --transport http --host 0.0.0.0 --port 8765 --path /mcp
+
+# Legacy SSE, for older clients that don't speak Streamable HTTP yet
+python main.py --transport sse --host 0.0.0.0 --port 8765 --path /mcp
+```
+
+Every flag has an env var equivalent (`SIGRITY_MCP_TRANSPORT`, `SIGRITY_MCP_HOST`,
+`SIGRITY_MCP_PORT`, `SIGRITY_MCP_PATH`) if you'd rather bake it into `.env`. Binding
+`0.0.0.0` accepts connections from any machine that can reach this host on that port —
+there is no authentication layer in front of it, and every tool here shells out to a
+real, licensed Cadence install with real file-system access, so treat the port like you
+would an unauthenticated admin endpoint: put it behind a VPN/firewall to trusted hosts
+only, never expose it to the open internet.
+
+**Skill discovery over the wire.** Every tool's one-line description points at a
+`.forjinn/skills/<domain>/SKILL.md` playbook file — Claude Code reads that straight off
+disk because it shares this filesystem. A remote client has no such access, so the same
+content is also served through the MCP protocol itself via two extra tools registered
+alongside the other 181 (`sigrity_mcp/domains/platform/skill_tools.py`):
+
+- **`list_skills()`** — every skill's name + one-line description (cheap, call this
+  once per task).
+- **`load_skill(name)`** — the full verified playbook body for one skill by name.
+
+(There's also a `skill://{name}` MCP *resource* template for clients that read
+resources directly — e.g. `client.read_resource("skill://sigrity-pi")` — but it won't
+show up in a no-argument `list_resources()`/`get_resources()` call since it's a
+parameterized template, so `list_skills`/`load_skill` are the reliable path for an
+arbitrary MCP client.)
+
+**Example: `langchain-mcp-adapters` + `deepagents`**
+
+```python
+from langchain_mcp_adapters.client import MultiServerMCPClient
+from deepagents import create_deep_agent
+
+client = MultiServerMCPClient({
+    "sigrity": {
+        "transport": "http",           # or "sse" if the server was started with --transport sse
+        "url": "http://<host>:8765/mcp",
+    }
+})
+tools = await client.get_tools()       # includes list_skills / load_skill alongside all 181 domain tools
+
+agent = create_deep_agent(tools=tools, instructions=(
+    "Call list_skills() once, then load_skill(name) for the domain(s) this task needs, "
+    "before calling that domain's tools — the short tool descriptions assume you've "
+    "read the matching skill first."
+))
+result = await agent.ainvoke({"messages": [{"role": "user", "content": "..."}]})
+```
+
+Check your installed `langchain-mcp-adapters` version's own docs if `"http"` isn't
+accepted — some versions expect `"streamable_http"` instead; the underlying transport
+is identical.
+
 ## Live validation and what it caught
 
 `lmutil lmstat` reports this machine's FlexNet server (`5280@localhost`) as

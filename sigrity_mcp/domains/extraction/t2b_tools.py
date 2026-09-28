@@ -6,6 +6,36 @@ behavioral model, driven by a `.t2b` control file. Confirmed CLI-only, no Tcl AP
 
 Confirmed batch syntax:
     t2b -b [-check] [-validation <validation_file.xml>] [-ML:<n>] [-resume] [-skip] [-wait[:<timeout>]] <filename.t2b>
+
+IMPORTANT, confirmed live on this machine (Sigrity 2024.0): T2B has no SPICE engine of
+its own — it shells out to an EXTERNAL SPICE simulator and fails (silently, or with a
+license/timeout stall in our run) unless one is installed and findable.
+
+  * The engine is chosen per `[Spice type]` in the `.t2b` control file: `HSPICE` (the
+    samples under share/SpeedXP/Samples/T2B/Example1/*.t2b) or `Spectre` (the
+    Example_Spectre/Example_Spectre1 samples). Cadence's own HSPICE (the v6952-era
+    "HSPICE" referenced throughout doc/t2b_hspice, i.e. v69a_dq.sp / HSPICE -C
+    client-server mode per doc/t2b_qref's "Running HSPICE in Client-Server Mode") is a
+    SEPARATE product that is NOT installed on this machine:
+      - No `hspice.exe` anywhere under C:\Cadence (Sigrity Suite or SPB).
+      - `reg query "HKCR\\HSpice.Application"` and `reg query "HKCR\\HSpice.HSpice"` both
+        fail — HSpice exposes NO COM interface on this box, so there is no COM
+        alternative to reach it either. A full `reg query HKCR /f HSpice /d` returns 0
+        matches.
+      - No `_t2b_config.ini` (the file T2B reads to point at a HSPICE command line, incl.
+        the `[command_extension] +grid` option) is present in the install.
+  * Cadence ships its *own* SPICE engines with SPB_22.1 — chsim.exe, SimSrvr.exe,
+    tlsim.exe, cktsim.exe, modelsim.exe — but these are CLI/GUI simulators, none
+    register a COM object T2B can call, so they are not drop-in HSpice
+    substitutes for T2B. T2B's HSPICE code path specifically invokes the Cadence HSPICE
+    `hspice` command (or `hspice -C` server), not a generic engine.
+  * Practical consequence on this machine: `run_t2b_conversion` on an HSPICE-type `.t2b`
+    (the bundled Example1/buffer.t2b) will not produce an IBIS model because there is no
+    HSPICE to run. A Spectrum-type `.t2b` (Example_Spectre/*) is the variant that could
+    work here IF Spectre is installed and licensed — verify with `run_quick(tool=...,
+    ["-help"])`-style probing, but even Spectre is not clearly installed. The module
+    should be extended (or callers should be told) that HSPICE-backed T2B is
+    effectively unsupported in this environment.
 """
 
 from __future__ import annotations
@@ -27,21 +57,7 @@ async def run_t2b_conversion(
     wait_timeout: Optional[float] = None,
 ) -> dict:
     """Convert a SPICE I/O buffer model to an IBIS behavioral model using T2B, as a background job.
-
-    Runs `t2b -b [-check] [-validation <validation_file>] [-ML:<num_licenses>] [-resume]
-    [-skip] [-wait:<wait_timeout>] <t2b_file>`.
-    `check_ibis=True` adds `-check` to validate the generated IBIS file after conversion.
-    `validation_file` points T2B at an XML file describing extra validation criteria.
-    `num_licenses` sets `-ML:<n>`, the number of licenses T2B may check out for parallel
-    model extraction. `resume`/`skip_to_validation` map to `-resume`/`-skip` for
-    continuing or jumping ahead in a previously interrupted run. `wait_timeout` (seconds)
-    maps to `-wait:<wait_timeout>`, telling T2B to wait up to that long for a free license
-    instead of failing immediately if none is available.
-    T2B writes its output log named after the input file with a `.log` extension (e.g.
-    `mymodel.t2b` -> `mymodel.log`) into the job directory — look for it via
-    list_job_files/read_job_output_file once the job finishes.
-    Returns a job_id immediately; poll it with get_job_status/wait_for_job.
-    """
+See `.forjinn/skills/sigrity-extraction/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
     args = ["-b"]
     if check_ibis:
         args.append("-check")

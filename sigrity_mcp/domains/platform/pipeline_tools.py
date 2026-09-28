@@ -31,41 +31,7 @@ MAX_STEPS = 50
 @mcp.tool
 async def run_tool_pipeline(steps: list[dict], stop_on_error: bool = True) -> dict:
     """Run a sequence of MCP tool calls in one shot, threading results between steps automatically.
-
-    Each entry in `steps` is a dict:
-      - "tool" (required): the exact name of another tool in this server (e.g.
-        "start_powersi_session"). Must not be "run_tool_pipeline" itself — pipelines
-        cannot nest.
-      - "args" (optional): the arguments to call it with, as you would normally. Any
-        string value of the exact form "${name.path}" is replaced with the value at
-        that path in an earlier step's saved result before the call is made (e.g.
-        "${open_session.session_id}"); a placeholder embedded in a larger string like
-        "note-${open_session.session_id}" is stringified in place instead. A reference
-        to a step that hasn't run yet, or wasn't saved, is a pipeline error.
-      - "save_as" (optional): a name to store this step's result dict under, so later
-        steps can reference it via "${that_name.field}". Skip this for steps whose
-        result nothing downstream needs.
-
-    Example — compose and run a complete PowerSI extraction in one call:
-        steps = [
-          {"tool": "start_powersi_session", "args": {"spd_file": "C:/d/board.spd"}, "save_as": "s"},
-          {"tool": "powersi_set_mode", "args": {"session_id": "${s.session_id}", "mode": "extraction"}},
-          {"tool": "powersi_set_frequency_sweep", "args": {"session_id": "${s.session_id}", "start": "1e6", "end": "1e9"}},
-          {"tool": "powersi_add_ports_auto", "args": {"session_id": "${s.session_id}"}},
-          {"tool": "powersi_run_session", "args": {"session_id": "${s.session_id}"}, "save_as": "run"},
-          {"tool": "wait_for_job", "args": {"job_id": "${run.job_id}", "timeout_seconds": 120}},
-        ]
-
-    `stop_on_error=True` (default) halts on the first failing step, leaving later steps
-    unexecuted — check the returned `results` list to see exactly how far it got and
-    why. Set False to keep going and collect every step's outcome regardless (useful
-    for a diagnostic dry-run across independent steps, not for a flow where later steps
-    genuinely depend on earlier ones succeeding).
-
-    At most 50 steps per call. Returns step_count/executed_count/succeeded_count/
-    failed_count plus the full per-step `results` list (each with its resolved args and
-    either a `result` or an `error` key).
-    """
+See `.forjinn/skills/sigrity/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
     if len(steps) > MAX_STEPS:
         return {"error": f"Pipeline has {len(steps)} steps, exceeding the {MAX_STEPS}-step limit."}
 

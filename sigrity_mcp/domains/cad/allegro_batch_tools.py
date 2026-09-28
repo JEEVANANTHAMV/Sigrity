@@ -38,23 +38,7 @@ async def run_allegro_report(
     html: bool = False,
 ) -> dict:
     """Generate a legacy Allegro design report (BOM, DRC, net list, summary, cross-section, ...) as a background job.
-
-    Runs `report.exe -v <report_code> [-H] <board_file> [output_file]`. `report_code`
-    is Cadence's short code for the report type — common ones: 'sum' (summary drawing
-    statistics: layer/component/DRC/drill/connection counts), 'bom' (bill of
-    materials), 'drc' (design rules check), 'net' (net list), 'cmp' (component),
-    'x-section' (layer stackup cross-section). Confirmed live against a real `.brd`
-    sample on this machine (not just documentation) — the full code list, as printed by
-    `report.exe -help`, is: asf, bom, cbm, cmp, cpn, dpf, dpg, drc, drc_shorts, ecp,
-    eld, ell, eln, elp, elw, fcn, fpn, jcp, mod, net, netloop, pad, psu, psw, pcp, npr,
-    slp, slt, spf, sum, spn, uaf, ucn, upc, vfb, waived_drc, vialist_net,
-    vialist_netlayer, x-section. `html=True` requests HTML output where that report
-    type supports it (not all do — report.exe's own error tells you if the one you
-    picked doesn't). If `output_file` is omitted, report.exe picks its own default
-    name next to the input board.
-    Returns a job_id immediately; poll it with get_job_status/wait_for_job, then read
-    the report via read_job_output_file once it succeeds.
-    """
+See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
     args = ["-v", report_code]
     if html:
         args.append("-H")
@@ -78,21 +62,7 @@ async def run_allegro_dbdoctor(
     regenerate_xnets: bool = False,
 ) -> dict:
     """Check (and optionally repair) an Allegro board database's integrity, as a background job.
-
-    Runs `dbdoctor.exe [-check_only|-drc|-shapes] [-no_backup] [-outfile <output_file>]
-    [-purge_vialist] [-purge_padstacks] [-regenerate_xnets] <board_file>`. Confirmed
-    live against a real `.brd` sample on this machine: a check-only pass ran a real
-    orphan-record check end-to-end and reported its result.
-    `check_only=True` (default) only checks, never modifies, the database — the safest
-    mode. Set it False and `run_drc=True` to also check-and-repair plus update all DRCs,
-    or `check_shapes=True` for additional shape checks (repairs, not just checks).
-    Without `no_backup` or `output_file`, dbdoctor copies the input to `<board_file>.orig`
-    before making any change.
-    IMPORTANT: dbdoctor exits non-zero (1) even for a clean check-only pass that finds
-    only warnings, not just on hard failure — read the job's log/output rather than
-    treating any non-zero returncode as a failure by itself.
-    Returns a job_id immediately; poll it with get_job_status/wait_for_job/tail_job_log.
-    """
+See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
     args = []
     if check_only:
         args.append("-check_only")

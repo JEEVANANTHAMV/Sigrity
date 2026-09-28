@@ -238,3 +238,39 @@ class JobManager:
 
 
 job_manager = JobManager()
+
+
+def crash_signature(record: JobRecord) -> Optional[dict]:
+    """Detect a tool *crash* (not a clean error-exit) from a finished job record.
+
+    A crash is the combination of a Windows NT-status code exit (the 0xC0000005 access-violation
+    family, which the OS reports as an *unsigned* 32-bit value because a signed negative
+    exit code cannot be returned through the normal API) plus a non-empty log. This is the
+    exact fingerprint of `spif_batch.exe -i` on this installation: it prints
+    `ERROR(SPMHDB-238): The design is corrupted...` and then dies with a real
+    `..._AllegroMiniDump.dmp` file and exit code 3221225477 (0xC0000005). A clean
+    error-exit (rc 4, rc 2, etc.) has a small positive return code and never matches —
+    so callers can stop confusing "the route finished with warnings" with "the process
+    crashed". Returns None when the record does not look like a crash.
+    """
+    rc = record.returncode
+    if rc is None:
+        return None
+    code = rc if rc <= 0x7FFFFFFF else rc  # keep the unsigned form for the 0xC0... codes
+    if code < 0xC0000000:
+        return None
+    tail = ""
+    try:
+        tail = _read_tail_text(Path(record.log_path), max_bytes=64 * 1024)
+    except (OSError, TypeError):
+        tail = ""
+    return {
+        "is_crash": True,
+        "nt_status": f"0x{code:08X}",
+        "message": (tail.strip().splitlines() or [""])[-1].strip(),
+        "note": (
+            "Process exited with a Windows NT status code (not a normal tool exit code) — "
+            "this is a crash, not a clean error. For spif_batch.exe -i this is the known "
+            "SPMHDB-238 import crash; the export/route half of the pipeline is unaffected."
+        ),
+    }

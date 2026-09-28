@@ -211,26 +211,7 @@ async def run_schematic_checklist(
     rules: Optional[list[str]] = None,
 ) -> dict:
     """Run an organizational design checklist (decoupling, pull-ups/downs, clocks, resets, test points) over a real Allegro net/BOM report.
-
-    `net_report_file` must be a real `report.exe -v net` CSV report (produced by
-    `run_allegro_report(board_file, "net")` — confirmed live in this suite). `rules`
-    defaults to all five checks below; pass a subset of
-    {"decoupling", "pull_up_down", "clocks", "resets", "test_points"} to narrow it.
-    `bom_report_file` (a real `report.exe -v bom` CSV report) is required for the
-    `test_points` check and improves nothing else currently — omit it to skip that
-    check alone rather than failing the whole call.
-
-    Each of the five checks is a coarse, net-level heuristic over REFDES prefixes and
-    net-name patterns (see this module's docstring for exactly what each one looks for)
-    — not a verified per-IC power-pin analysis. Every finding names the specific net/
-    REFDES and states exactly what pattern triggered it, so a reviewer can judge whether
-    it's a real issue or a false positive for this specific design's naming conventions.
-
-    Returns `{findings: [...], summary: {net_count, component_count, finding_count,
-    findings_by_rule}}`. An empty `findings` list means every check passed for the
-    nets/components this report actually contains — it does not mean the design has no
-    schematic errors outside what these five heuristics check for.
-    """
+See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
     selected_rules = rules or list(_ALL_RULES)
     unknown_rules = [r for r in selected_rules if r not in _ALL_RULES]
     if unknown_rules:

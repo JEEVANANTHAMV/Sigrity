@@ -57,6 +57,31 @@ class SigritySettings(BaseSettings):
     log_watchdog_poll_seconds: float = 2.0
     """How often JobManager polls a running job's log size against `max_log_bytes`."""
 
+    skills_dir: Path = Path(".forjinn/skills")
+    """Where the domain skill playbooks (`<name>/SKILL.md`) live. Relative to CWD unless
+    absolute. Claude Code reads these off disk directly; `list_skills`/`load_skill`
+    (see `domains/platform/skill_tools.py`) serve the same files over the MCP protocol
+    itself for clients with no filesystem access to this machine (e.g. a deepagents/
+    LangChain agent connected over http/sse from elsewhere)."""
+
+    mcp_transport: str = "stdio"
+    """`stdio` (default, for a same-machine launcher like Claude Code's mcp.json),
+    `http` (Streamable HTTP, the current MCP standard for remote clients), or `sse`
+    (legacy Server-Sent Events, for older clients that don't yet speak Streamable HTTP).
+    Overridable per-launch with `main.py --transport ...`."""
+
+    mcp_host: str = "127.0.0.1"
+    """Bind address for `http`/`sse` transport. Use `0.0.0.0` to accept connections
+    from other machines on the network (see README's remote-client section for the
+    security tradeoffs of doing that before opening this up)."""
+
+    mcp_port: int = 8765
+    """Bind port for `http`/`sse` transport."""
+
+    mcp_path: str = "/mcp"
+    """URL path the MCP endpoint is served on for `http`/`sse` transport, e.g.
+    `http://<host>:<port>/mcp`."""
+
     @property
     def bin_dir(self) -> Path:
         return self.home / self.bin_subdir
@@ -69,6 +94,12 @@ class SigritySettings(BaseSettings):
         wd = self.workdir if self.workdir.is_absolute() else Path.cwd() / self.workdir
         wd.mkdir(parents=True, exist_ok=True)
         return wd
+
+    def resolve_skills_dir(self) -> Path:
+        """Unlike `resolve_workdir`, never creates the directory — skills are
+        version-controlled content, not job scratch space; a missing dir is a
+        deployment error `skill_tools` surfaces explicitly rather than papering over."""
+        return self.skills_dir if self.skills_dir.is_absolute() else Path.cwd() / self.skills_dir
 
 
 settings = SigritySettings()

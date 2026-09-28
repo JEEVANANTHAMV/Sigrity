@@ -109,32 +109,7 @@ async def allegro_import_dxf(
     use_default_text: bool = False,
 ) -> dict:
     """Import a DXF mechanical outline into Allegro — CREATES A BRAND-NEW .brd BY DEFAULT (CONFIRMED LIVE — see module docstring).
-
-    Runs `dxf2a.exe [-u <output_units>] [-v <original_units>] [-a <accuracy>] [-g] [-t]
-    <cnv_file> <dxf_file> <board_file>` as a background job.
-
-    `update_existing=False` (the default) is dxf2a's real "new design, only" mode —
-    `board_file` should NOT already exist; this is this suite's confirmed way to create
-    a genuinely new Allegro `.brd` from scratch (see the live evidence in this module's
-    docstring). Pass `update_existing=True` to instead merge the DXF data into an
-    ALREADY-existing `board_file` (dxf2a's `-g`, "increment" mode) — e.g. to add a
-    mechanical keepout/outline to a board someone else already started.
-
-    `cnv_file` is a plain-text Layer Conversion File mapping DXF layer names to Allegro
-    `CLASS!`/`SUBCLASS!` pairs — see dxf2a's own `-help` and the confirmed real sample
-    at doc/wb_tut/examples/Module_1/flag_l.cnv for the exact grammar. `output_units`
-    defaults to MILS for a new design if omitted; `original_units` defaults to whatever
-    the DXF file itself specifies; `accuracy` is decimal places (0-4). `use_default_text`
-    (dxf2a's `-t`) reuses existing/default Allegro text blocks instead of creating one
-    per distinct DXF text height.
-
-    Returns a job_id immediately; poll it with get_job_status/wait_for_job. IMPORTANT:
-    dxf2a exits with returncode 1 even on a fully successful run (confirmed live) — read
-    the job log for a trailing "dxf2a complete." line, and for any "ERROR: Invalid
-    class" lines (a layer in `cnv_file` that the target design's class table doesn't
-    recognize — the import still completes, just without that layer's geometry landing
-    correctly), rather than trusting job state alone.
-    """
+See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
     args: list[str] = []
     if output_units:
         args += ["-u", output_units]
@@ -162,20 +137,7 @@ async def allegro_export_dxf(
     export_drill_info: bool = False,
 ) -> dict:
     """Export Allegro mechanical data to DXF (CONFIRMED LIVE — see module docstring).
-
-    Runs `a2dxf.exe [-u <output_units>] [-a <accuracy>] [-f <dxf_format>] [-d]
-    <cnv_file> <dxf_file> <board_file>` as a background job. Confirmed live against a
-    real routed sample board, producing a genuine, valid DXF file.
-
-    `cnv_file` is the same Layer Conversion File format `allegro_import_dxf` takes (maps
-    Allegro `CLASS!`/`SUBCLASS!` pairs to DXF layer names for the export direction).
-    `output_units`/`accuracy` default to the source board's own database units/accuracy
-    if omitted. `dxf_format` selects the DXF revision to write ("12" or "14"; a2dxf's
-    own default is "12"). `export_drill_info` (a2dxf's `-d`) additionally exports NC_DRILL
-    data.
-
-    Returns a job_id immediately; poll it with get_job_status/wait_for_job.
-    """
+See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
     args: list[str] = []
     if output_units:
         args += ["-u", output_units]
@@ -193,23 +155,7 @@ async def allegro_export_dxf(
 @mcp.tool
 async def allegro_new_blank_board(output_board_file: str, overwrite: bool = False, template_file: Optional[str] = None) -> dict:
     """Create a brand-new, empty Allegro board by copying a real blank template — no DXF outline needed.
-
-    Plain filesystem copy (no Cadence process launched), for the case where
-    `allegro_import_dxf` isn't applicable because no DXF mechanical outline exists yet.
-    Defaults to Cadence's own shipped blank 2-layer board template
-    (`share/cdssetup/ult/2layer.brd` under SIGRITY_CADENCE_SPB_HOME, confirmed present
-    on disk) — pass `template_file` to start from a different real board instead (e.g.
-    an internally-approved company template, following the same "start every new design
-    from a checked template" practice Cadence's own documentation recommends over
-    re-running an interactive New Design wizard each time).
-
-    Fails with a clear error if `output_board_file` already exists and `overwrite=False`
-    (the default). Once copied, open it with `allegro_run_session`/SKILL tools the same
-    as any other `.brd` to rename it, set up a stackup, add an outline, etc. — this tool
-    only stages the starting file; it does not open, rename, or otherwise script Allegro
-    itself, so it works even in environments where Allegro's own batch reliability
-    (documented elsewhere in this suite) is in question.
-    """
+See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
     src = Path(template_file) if template_file else (settings.cadence_spb_home / BLANK_BOARD_TEMPLATE)
     dst = Path(output_board_file)
     if not src.is_file():

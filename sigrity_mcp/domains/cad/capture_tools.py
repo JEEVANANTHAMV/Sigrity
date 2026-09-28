@@ -65,22 +65,7 @@ def _win32_user32():
 @mcp.tool
 async def start_capture_session(project_file: str) -> dict:
     """Begin a new OrCAD Capture automation session by opening a project (.opj).
-
-    Returns a session_id — pass it to every other capture_* tool below, then finish
-    with capture_run_session. Nothing is executed yet; this records
-    `Open <project_file>` (a bare path, forward slashes, no quoting — matching the
-    confirmed real sample `Open d:/Sample_Scripts/Sample-19/Sample-19.opj` exactly,
-    since `Open` is a Capture-specific proc rather than a standard Tcl command and its
-    argument-parsing conventions are not independently confirmed to accept brace/quote
-    quoting the way genuine Tcl commands do).
-    Also removes a stale `<project_file>.lck` sibling file if one exists — a live-caught
-    real cause of some of this tool's documented non-determinism: a batch run that was
-    killed rather than exiting cleanly leaves its lock behind, and the next open then
-    blocks on a modal "already open/locked" dialog with no console output at all
-    (indistinguishable from a hang until a human clicks through it). This alone may not
-    fully explain every non-deterministic run documented in this module's docstring, but
-    removes one confirmed, reproducible cause of it.
-    """
+See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
     clear_stale_design_lock(project_file)
     session = tcl_sessions.create("capture")
     tcl_sessions.add_line(session.session_id, f"Open {str(project_file).replace(chr(92), '/')}")
@@ -92,23 +77,7 @@ async def capture_select_page(
     session_id: str, design: str, schematic_folder: str, page: str
 ) -> dict:
     """Select a design/schematic page so subsequent placement acts on a real page.
-
-    Opens the project, the active schematic view still points at the project root, and
-    `PlacePart`/`PlaceWire`/`PlacePin` have no page to act on — a live-confirmed cause of
-    a run that opens, then never does any of the queued work. These two commands switch
-    the active context to the target schematic page first:
-
-        SelectPMItem "<design>"
-        OPage "<schematic_folder>" "<page>"
-
-    Both are taken verbatim from Cadence's own confirmed working sample
-    (doc/orctclsample, Sample-19.tcl: `SelectPMItem "./Sample-19.dsn"` +
-    `OPage "SCHEMATIC1" "PAGE1"`). `design` is the design's project-model path (e.g.
-    `./fault-detector.dsn`, or `SCHEMATIC1/PAGE_1` for a nested page); `schematic_folder`
-    is the design's root schematic folder name; `page` is the page inside it. Pass the
-    same values on repeat if you place on the same page; selecting a second page works
-    the same way for multi-page designs.
-    """
+See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
     tcl_sessions.add_line(session_id, f'SelectPMItem {tcl_str(design)}')
     tcl_sessions.add_line(session_id, f'OPage {tcl_str(schematic_folder)} {tcl_str(page)}')
     return {"session_id": session_id, "design": design, "page": f"{schematic_folder}/{page}"}
@@ -124,11 +93,7 @@ async def capture_place_part(
     package: str = "",
 ) -> dict:
     """Place a part from a library at an absolute page coordinate.
-
-    Appends `PlacePart {x} {y} {library_file} {part_name} {package} FALSE`, the
-    confirmed non-interactive placement call (as opposed to `PlacePartEx`, the
-    interactive/mouse-driven variant) from doc/orctclsample.
-    """
+See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
     line = f"PlacePart {x} {y} {tcl_str(library_file)} {tcl_str(part_name)} {tcl_str(package)} FALSE"
     tcl_sessions.add_line(session_id, line)
     return {"session_id": session_id, "part_name": part_name, "x": x, "y": y}
@@ -136,7 +101,8 @@ async def capture_place_part(
 
 @mcp.tool
 async def capture_place_wire(session_id: str, x1: float, y1: float, x2: float, y2: float) -> dict:
-    """Place a wire segment between two page coordinates. Appends `PlaceWire {x1} {y1} {x2} {y2}`."""
+    """Place a wire segment between two page coordinates. Appends `PlaceWire {x1} {y1} {x2} {y2}`.
+See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
     tcl_sessions.add_line(session_id, f"PlaceWire {x1} {y1} {x2} {y2}")
     return {"session_id": session_id, "from": [x1, y1], "to": [x2, y2]}
 
@@ -150,17 +116,15 @@ async def capture_place_pin(
     pin_type: str = "Passive",
 ) -> dict:
     """Place a pin at a page coordinate (for symbol/mechanical-drawing construction).
-
-    Appends `PlacePin {x} {y} {pin_name} {pin_type} FALSE`, matching the confirmed
-    sample `PlacePin x y "pinName" "Passive" FALSE`.
-    """
+See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
     tcl_sessions.add_line(session_id, f"PlacePin {x} {y} {tcl_str(pin_name)} {tcl_str(pin_type)} FALSE")
     return {"session_id": session_id, "pin_name": pin_name}
 
 
 @mcp.tool
 async def capture_set_property(session_id: str, property_name: str, value: str) -> dict:
-    """Set a property on the currently-selected object(s). Appends `SetProperty {property_name} {value}`."""
+    """Set a property on the currently-selected object(s). Appends `SetProperty {property_name} {value}`.
+See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
     tcl_sessions.add_line(session_id, f"SetProperty {tcl_str(property_name)} {tcl_str(value)}")
     return {"session_id": session_id, "property_name": property_name, "value": value}
 
@@ -218,24 +182,8 @@ def _click_button_in_window(top_hwnd: int, button_text: str) -> bool:
 
 @mcp.tool
 async def capture_handle_custom_launch_dialog(button: str = "No") -> dict:
-    """Auto-dismiss Capture's modal "Capture Custom Launch" recovery dialog.
-
-    Captured live from a real stuck batch run: after Capture's process has failed to
-    launch cleanly in a prior session, the next launch presents this exact dialog
-    ("Capture has detected that it did not launch properly in the previous session.
-    Click 'YES' to launch Capture with the following settings? / Click 'NO' will
-    launch Capture in default mode.") with a Yes/No pair of buttons, and sits there
-    indefinitely — no CLI flag skips it, and it is invisible in the job's own run.log
-    (a stuck job's log stays 0 bytes). This finds the dialog by its exact title and
-    sends a real `BM_CLICK` (Windows message 0x00F5) to the matching button, which
-    is equivalent to a human click and returns immediately (it goes through the
-    window's own message pump, not the job's console). `button` is `"No"` (default —
-    launch in default mode, what a human choosing "just get on with it" would click)
-    or `"Yes"` (launch in the custom/safe mode the dialog's list box describes). Returns
-    `{found: bool, clicked: bool}` — a caller that just launched a capture job and got
-    back no log output after a reasonable wait should call this and re-check, rather
-    than assuming the job is permanently hung.
-    """
+    """Auto-dismiss Capture's modal \"Capture Custom Launch\" recovery dialog.
+See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
     top = _find_window("Capture Custom Launch")
     if top is None:
         return {"found": False, "clicked": False, "note": "No 'Capture Custom Launch' dialog currently open."}
@@ -246,10 +194,7 @@ async def capture_handle_custom_launch_dialog(button: str = "No") -> dict:
 @mcp.tool
 async def capture_annotate(session_id: str) -> dict:
     """Queue reference-designator annotation for the open design.
-
-    Appends `Menu "Tools::Annotate"` — confirmed "Available from: Tools menu" in
-    doc/cap_ref/Project_manager_command_reference.html.
-    """
+See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
     tcl_sessions.add_line(session_id, 'Menu "Tools::Annotate"')
     return {"session_id": session_id}
 
@@ -257,29 +202,7 @@ async def capture_annotate(session_id: str) -> dict:
 @mcp.tool
 async def capture_check_design_rules(session_id: str) -> dict:
     """Queue Capture's electrical/design rules check (ERC) for the open design.
-
-    Appends `Menu "PCB::Design Rules Check"`. Confirmed from
-    doc/cap_ref/Project_manager_command_reference.html's own "Design Rules Check
-    command" entry: "Available from: PCB menu" (distinct from Annotate/Create Netlist
-    above, which are both "Available from: Tools menu") — "Use this command to check a
-    design for violations of design rules... Design Rules Check uses the decision
-    matrix located in the ERC Matrix tab in the Design Rules Check dialog box." This is
-    genuinely Capture's ERC equivalent (electrical rule checking against a
-    user-configurable matrix), not merely a naming coincidence with Allegro's PCB-side
-    DRC.
-
-    UNCONFIRMED live, same caveat as every other capture_* tool: the exact `Menu
-    "PCB::Design Rules Check"` string is built by the same "<Available-from
-    menu>::<command name>" convention already confirmed working for
-    `Menu "Tools::Annotate"`/`Menu "Tools::Create Netlist"` above, but this specific
-    menu path itself was not independently found spelled out as a literal Tcl macro
-    line anywhere in the doc tree — treat it as a well-grounded inference, not a
-    transcribed example, until run live. The doc doesn't say ERC results are
-    scriptably readable afterward either; per the same page, violations are placed as
-    DRC markers on the schematic pages themselves ("Browse DRC Markers" on the Edit
-    menu) rather than written to a plain-text report — inspect the saved design (or a
-    netlist error log) rather than expecting a summary file back from this tool.
-    """
+See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
     tcl_sessions.add_line(session_id, 'Menu "PCB::Design Rules Check"')
     return {"session_id": session_id}
 
@@ -287,22 +210,15 @@ async def capture_check_design_rules(session_id: str) -> dict:
 @mcp.tool
 async def capture_create_netlist(session_id: str) -> dict:
     """Queue netlist creation for the open design, for handoff to PCB layout.
-
-    Appends `Menu "Tools::Create Netlist"` — confirmed "Available from: Tools menu" in
-    doc/cap_ref/Project_manager_command_reference.html. Opens Capture's tabbed
-    "Create Netlist" dialog in an interactive session; in batch mode this queues the
-    same underlying command, but the exact output-format selection (Allegro/PSpice/...)
-    normally made in that dialog is NOT independently confirmed to have a scriptable
-    override — you may need a companion `DialogBox`-style settings file (see the
-    CIS-BOM-from-command-line pattern in doc/orctclcap) to select a format headlessly.
-    """
+See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
     tcl_sessions.add_line(session_id, 'Menu "Tools::Create Netlist"')
     return {"session_id": session_id}
 
 
 @mcp.tool
 async def capture_save(session_id: str) -> dict:
-    """Queue saving the open design. Appends `Menu "File::Save"`."""
+    """Queue saving the open design. Appends `Menu \"File::Save\"`.
+See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
     tcl_sessions.add_line(session_id, 'Menu "File::Save"')
     return {"session_id": session_id}
 
@@ -310,18 +226,7 @@ async def capture_save(session_id: str) -> dict:
 @mcp.tool
 async def capture_run_session(session_id: str, product: str = "OrCAD Capture") -> dict:
     """Write out the session's accumulated Tcl macro and launch Capture against it as a background job.
-
-    UNVERIFIED — see module docstring: this exact batch invocation was not reliably
-    reproduced on this machine across several attempts. Appends `Menu "File::Close"`
-    then `Menu "File::Exit"` (required — Capture does not auto-exit after a batch
-    script per Cadence's own confirmed example) before running
-    `Capture.exe -product=<product> <macro.tcl>` (the script path is a bare positional
-    argument, no preceding flag, per doc/cap_ug's documented switches — this project's
-    core.process.submit_job supports that via tcl_arg_flag=None).
-    Returns a job_id immediately; poll it with get_job_status/wait_for_job/tail_job_log,
-    and treat a job that runs far longer than a Sigrity Tcl job (which typically
-    completes in seconds) as a signal something is stuck, not necessarily still working.
-    """
+See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
     tcl_sessions.add_line(session_id, 'Menu "File::Close"')
     tcl_sessions.add_line(session_id, 'Menu "File::Exit"')
     record = await run_session(

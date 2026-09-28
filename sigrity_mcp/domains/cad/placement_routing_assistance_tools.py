@@ -74,31 +74,7 @@ async def run_placement_and_routing_assistance(
     stage_timeout_seconds: float = 180.0,
 ) -> dict:
     """Run auto-placement, SPECCTRA export+autoroute+import, and a post-route batch DRC pass over a real Allegro board, as one call.
-
-    Stage sequence (see module docstring for the two real quirks that shape this):
-    1. `run_allegro_placement(board_file, ...)` — real auto-placement. Aborts the whole
-       pipeline early if this stage does not end `succeeded`.
-    2. `run_spif_export_to_specctra` — export the placed board to a SPECCTRA `.dsn`.
-       Aborts early on failure, same reasoning.
-    3. `run_specctra_autoroute` — headless autoroute. If `do_file` is omitted, a minimal
-       do-file (the confirmed-working `bestsave`/`status_file`/`smart_route`/
-       `write session`/`report status` template from this suite's own successful live
-       tests) is generated automatically next to the `.dsn`. This stage's job state is
-       NOT used to decide success — `final.sts`/`route.sts` are read directly instead
-       (see module docstring, point 1).
-    4. `run_specctra_import_session` — best-effort attempt to import the routed session
-       back into a `.brd`. Confirmed broken on this installation (see module docstring,
-       point 2) — this pipeline does not abort if it fails, but records whether it did.
-    5. If `run_post_route_drc=True` (default): `run_allegro_batch_drc` against the
-       imported board if step 4 succeeded, otherwise against the *placed* board from
-       step 1 — the result explicitly states which board was actually checked.
-
-    Returns `{stages: [...], final_drc: {...} | None, board_checked_by_drc: str | None}`.
-    Each entry in `stages` has `stage`/`job_id`/`state`/`returncode`, plus stage-specific
-    extras (e.g. `route_stats_available` for the autoroute stage). Poll individual
-    job_ids with tail_job_log/list_job_files for full detail — this tool already waits
-    for each stage to finish before starting the next, up to `stage_timeout_seconds`.
-    """
+See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
     stages: list[dict] = []
 
     placement = await run_allegro_placement(

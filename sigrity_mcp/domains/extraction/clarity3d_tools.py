@@ -61,16 +61,7 @@ def _vertex(vertex: list) -> str:
 @mcp.tool
 async def start_clarity3d_session(design_file: str, tcl_version: int = 6) -> dict:
     """Begin a new Clarity3D automation session by opening a 3D EM design (.3dem).
-
-    Returns a session_id — pass it to every other clarity3d_* tool below to keep adding
-    steps (imports, nets, ports, mesh/frequency settings, ...) to the same macro, then
-    finish with clarity3d_run_session. Nothing is executed yet; this only records:
-        sigrity::configure version -version {<tcl_version>}
-        sigrity::close file -fileName {Unnamed}
-        sigrity::open file -file {<design_file>}
-    (matching the confirmed working sample exactly — closing the default "Unnamed"
-    document before opening the real one).
-    """
+See `.forjinn/skills/sigrity-extraction/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
     session = tcl_sessions.create("clarity3d_workbench")
     sid = session.session_id
     tcl_sessions.add_line(sid, f"sigrity::configure version -version {{{tcl_version}}}")
@@ -88,9 +79,7 @@ async def clarity3d_import_layout(
     log_file: Optional[str] = None,
 ) -> dict:
     """Import a GDSII layout directly into the open Clarity3D design, bypassing a separate Gds2Spd translation step.
-
-    Appends `sigrity::import file -file {<gds_file>} [-map {<map_file>}] [-tech {<tech_file>}] [-log {<log_file>}]`.
-    """
+See `.forjinn/skills/sigrity-extraction/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
     parts = ["sigrity::import file", f"-file {tcl_path(gds_file)}"]
     if map_file:
         parts.append(f"-map {tcl_path(map_file)}")
@@ -109,11 +98,7 @@ async def clarity3d_add_net(
     net_type: Literal["UnnamedNet", "Power", "Ground", "Signal"] = "Signal",
 ) -> dict:
     """Add/tag a net in the open Clarity3D design.
-
-    `net_type` is mapped to Sigrity's internal integer code before being sent:
-    UnnamedNet=0, Power=1, Ground=2, Signal=3. Appends
-    `sigrity::add net -name {<net_name>} -type {<code>}`.
-    """
+See `.forjinn/skills/sigrity-extraction/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
     code = _NET_TYPE_CODES[net_type]
     tcl_sessions.add_line(session_id, f"sigrity::add net -name {tcl_str(net_name)} -type {{{code}}}")
     return {"session_id": session_id, "net_name": net_name, "net_type": net_type, "type_code": code}
@@ -128,11 +113,7 @@ async def clarity3d_create_lumped_port(
     impedance: float = 50,
 ) -> dict:
     """Create a lumped port between two edges (each edge given as a list of [x, y, z] vertices).
-
-    Vertices are formatted as Sigrity's semicolon-separated `{x;y;z}` vector literals, per
-    the `-vector {0;0.5;0}`-style convention seen elsewhere in Sigrity's Tcl docs. Appends
-    `sigrity::create lumpedPort -name {<name>} -edge1Vertexes {{x;y;z} ...} -edge2Vertexes {{x;y;z} ...} -impedance {<impedance>}`.
-    """
+See `.forjinn/skills/sigrity-extraction/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
     edge1_str = "{" + " ".join(_vertex(v) for v in edge1_vertices) + "}"
     edge2_str = "{" + " ".join(_vertex(v) for v in edge2_vertices) + "}"
     tcl_sessions.add_line(
@@ -153,12 +134,7 @@ async def clarity3d_create_wave_port(
     port_type: Literal["TERMINAL", "MODAL"] = "TERMINAL",
 ) -> dict:
     """Create a wave port spanning one or more named geometry faces.
-
-    `faces` are Sigrity's internal face-name identifiers (not free-form text) — each must
-    not contain whitespace or braces, since they're embedded in a flat Tcl list argument
-    with no per-word quoting mechanism of its own. Appends
-    `sigrity::create wavePort -faces {<face1> <face2> ...} -name {<name>} -type {<port_type>}`.
-    """
+See `.forjinn/skills/sigrity-extraction/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
     faces_str = "{" + " ".join(_tcl_word(f) for f in faces) + "}"
     tcl_sessions.add_line(
         session_id,
@@ -174,12 +150,7 @@ async def clarity3d_set_mesh_options(
     mesh_algorithm: Optional[str] = None,
 ) -> dict:
     """Set 3D mesh generation options for the simulation (max edge length and/or mesh algorithm).
-
-    Only the options actually given are included. Appends
-    `sigrity::update simulationMeshOption [-signalNetMaxEdgeLength {<v>} -isSignalNetMaxEdgeLength {1}] [-meshAlgorithm {<v>}]`.
-    Pass at least one of the two parameters — calling this with neither set is a no-op
-    that still appends a bare `sigrity::update simulationMeshOption` line.
-    """
+See `.forjinn/skills/sigrity-extraction/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
     parts = ["sigrity::update simulationMeshOption"]
     if max_edge_length is not None:
         parts.append(f"-signalNetMaxEdgeLength {{{max_edge_length}}} -isSignalNetMaxEdgeLength {{1}}")
@@ -192,16 +163,7 @@ async def clarity3d_set_mesh_options(
 @mcp.tool
 async def clarity3d_set_frequency_sweep(session_id: str, bands: list[dict]) -> dict:
     """Define the frequency sweep as one or more bands, each either log-stepped, linear-stepped, or a single point.
-
-    Each entry in `bands` is a dict with a `"type"` key of `"log"`, `"linear"`, or
-    `"singlepoint"`:
-      - log:         {"type": "log", "min": "1e+06", "max": "2e+10", "points_per_decade": 10}
-      - linear:      {"type": "linear", "min": "2e+10", "max": "2e+12", "step": "2e+09"}
-      - singlepoint: {"type": "singlepoint", "freq": "2e+12"}
-    Builds the exact confirmed syntax
-    `-freqBand {{log 1e+06 2e+10 10} {linear 2e+10 2e+12 2e+09} {singlepoint 2e+12}}` and
-    appends `sigrity::update simulationFrequencySettingOption -freqBand {...}`.
-    """
+See `.forjinn/skills/sigrity-extraction/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
     band_strs = []
     for band in bands:
         kind = band["type"]
@@ -220,13 +182,7 @@ async def clarity3d_set_frequency_sweep(session_id: str, bands: list[dict]) -> d
 @mcp.tool
 async def clarity3d_configure_local_resource(session_id: str, cpus: int = 8) -> dict:
     """Configure Clarity3D to run the simulation locally (not on a remote/cloud/HPC queue) using `cpus` CPU cores.
-
-    Appends the confirmed sample line exactly (with `cpus` substituted):
-    `sigrity::update DynamicClarity3dResource -smt 0 -local -cn localhost -cpus {<cpus>} -autoresume false -resume false -finalonly false`.
-    Clarity3D also supports SSH/LSF/cloud distributed-resource configurations with many
-    more parameters — those are not exposed by this tool; use this one only for the
-    "run on this machine" case.
-    """
+See `.forjinn/skills/sigrity-extraction/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
     tcl_sessions.add_line(
         session_id,
         (
@@ -240,9 +196,7 @@ async def clarity3d_configure_local_resource(session_id: str, cpus: int = 8) -> 
 @mcp.tool
 async def clarity3d_export_touchstone(session_id: str, file: str) -> dict:
     """Queue an export of the simulated result (e.g. Touchstone S-parameters) to a file once the run finishes.
-
-    Appends `sigrity::export file -file {<file>}`.
-    """
+See `.forjinn/skills/sigrity-extraction/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
     tcl_sessions.add_line(session_id, f"sigrity::export file -file {tcl_path(file)}")
     return {"session_id": session_id, "file": file}
 
@@ -250,15 +204,7 @@ async def clarity3d_export_touchstone(session_id: str, file: str) -> dict:
 @mcp.tool
 async def clarity3d_run_session(session_id: str, design_file: str) -> dict:
     """Write out the session's accumulated Tcl macro and launch Clarity3D Workbench against it as a background job.
-
-    Appends `sigrity::begin simulation -fileName {<design_file>}` then
-    `sigrity::end simulation -fileName {<design_file>}` — both are required: `begin` kicks
-    off the run without blocking the Tcl interpreter, while `end` blocks until it
-    completes, which is what makes the batch script actually wait for results instead of
-    exiting immediately. Then runs `clarity3dworkbench --NoUI -tcl <macro.tcl>` (note:
-    `--NoUI` precedes `-tcl`, the reverse of PowerSI's flag order).
-    Returns a job_id immediately; poll it with get_job_status/wait_for_job.
-    """
+See `.forjinn/skills/sigrity-extraction/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
     tcl_sessions.add_line(session_id, f"sigrity::begin simulation -fileName {tcl_path(design_file)}")
     tcl_sessions.add_line(session_id, f"sigrity::end simulation -fileName {tcl_path(design_file)}")
     record = await run_session(

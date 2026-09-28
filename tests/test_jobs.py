@@ -3,7 +3,8 @@ import sys
 
 import pytest
 
-from sigrity_mcp.core.jobs import JobManager
+from sigrity_mcp.core import jobs as jobs_module
+from sigrity_mcp.core.jobs import JobManager, JobRecord, crash_signature
 from sigrity_mcp.core.errors import JobNotFoundError
 
 
@@ -111,4 +112,37 @@ async def test_cancel_state_survives_watcher_completion(tmp_path, monkeypatch):
 
     final = jm.get(job_id)
     assert final.state == "cancelled"
-    assert final.returncode is not None
+
+
+def _rec(tmp_path, returncode, tool="spif_batch"):
+    log = tmp_path / "run.log"
+    log.write_text("ERROR(SPMHDB-238): The design is corrupted.\n", encoding="utf-8")
+    return JobRecord(job_id="j", tool=tool, command=[], job_dir=str(tmp_path),
+                     state="failed", returncode=returncode, log_path=str(log))
+
+
+def test_crash_signature_detects_nt_status(tmp_path):
+    # The real spif_batch -i crash: unsigned 0xC0000005 + a non-empty log.
+    sig = crash_signature(_rec(tmp_path, 3221225477))
+    assert sig is not None and sig["is_crash"] is True
+    assert sig["nt_status"] == "0xC0000005"
+    assert "SPMHDB-238" in sig["message"]
+
+
+def test_crash_signature_ignores_clean_error_exit(tmp_path):
+    # A normal nonzero tool exit (e.g. specctra's rc=4 on a successful route) is not a crash.
+    assert crash_signature(_rec(tmp_path, 4)) is None
+    assert crash_signature(_rec(tmp_path, 2)) is None
+    assert crash_signature(_rec(tmp_path, 0)) is None
+    assert crash_signature(_rec(tmp_path, None)) is None
+
+
+def test_job_status_includes_crash_field_when_applicable(tmp_path):
+    from sigrity_mcp.domains.platform.job_tools import _record_to_dict
+
+    normal = _rec(tmp_path, 3)
+    assert "crash" not in _record_to_dict(normal)
+
+    crashed = _rec(tmp_path, 3221225477)
+    out = _record_to_dict(crashed)
+    assert out.get("crash", {}).get("nt_status") == "0xC0000005"

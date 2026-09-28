@@ -10,22 +10,42 @@ generates is transcribed directly from that confirmed-working sample, not guesse
 `sigrity::begin simulation -fileName {<project>}`, `sigrity::end simulation
 -fileName {<project>}`, `sigrity::close exe`.
 
-IMPORTANT, confirmed via both direct manual re-testing and two independent LLM-driven
-end-to-end runs (`scripts/eval_e2e.py`'s `thermal_celsius3d_signoff` task, against both
-configured endpoints): re-running `celsius3d_run_session` against a project directory
-that already contains a prior run's result folder (e.g. `<name>_SS_W/`) HANGS
-indefinitely with an empty log — confirmed by a direct `timeout 20 Celsius3D.exe -tcl
-case.tcl` against an already-simulated sample project (exit 124, no output beyond the
-"legacy command line syntax" banner), and independently by both LLM test runs
-discovering and correctly reporting the same hang (rather than fabricating success)
-after `wait_for_job` timed out and `tail_job_log` showed no progress. The real,
-first-time run against a fresh copy of the same project completed in ~20-30 seconds —
-so this is very likely Celsius3D popping a GUI overwrite-confirmation dialog when it
-detects existing output from a prior run, the same class of issue as the "Product
-Choices" dialog that initially blocked `allegro.exe`/`Capture.exe`. Workaround: always
-run against a fresh copy of the project directory (delete any prior `<name>_SS_W/`-style
-result folder, or copy the project to a new location) before calling
-celsius3d_run_session — do not re-run against the same project path twice in place.
+IMPORTANT, confirmed live and re-tested multiple times on this machine (Sigrity
+2024.0): re-running `celsius3d_run_session` against a project directory that already
+contains a prior run's result folder (e.g. `<name>_SS_W/`) leaves the `Celsius3D.exe`
+process running indefinitely after the simulation has actually completed — the job
+appears to "hang with an empty log". Root cause, confirmed by direct window-tree
+inspection (pywin32, see core/win32gui_helper.py): the simulation itself COMPLETEs and
+writes the full result set (~20-30 s, identical to a fresh run), but afterwards the
+process stays alive and idle (CPU frozen, main Qt workbench window open, NO modal
+dialog with a clickable button in its window tree) — an "Unsaved Project" Qt
+QMainWindow appears as a second visible top-level window (class
+`Qt5159QWindowIcon`, empty window text, zero visible/enabled children in EnumWindows),
+but it is not a classic Win32 dialog — WM_CLOSE / synthetic Enter / BN_CLICKED to any
+child do not dismiss it, and there is no Yes/No button window to find. This is NOT a
+GUI overwrite-confirmation prompt in the Win32-dialog sense; it is a post-completion
+exit stall. It also happens on the very FIRST run of a "fresh" project (observed:
+simulation written, process idle-exit-stalled) — it is not strictly a
+re-run/overwrite-specific bug, even though re-runs reliably exhibit it. The
+JobManager's `wait(timeout)` then times out, `tail_job_log` shows only the "legacy
+command line syntax" banner (Celsius3D writes little/nothing to stdout), and the job is
+either still reported "running" or gets killed on hard timeout.
+
+CONFIRMED WORKAROUND (use this always): run against a FRESH copy of the project — copy
+`.3dth` + `.tcl` into a new directory and delete/never-reuse any existing
+`<name>_SS_W/` result folder — and additionally, because the process does not reliably
+self-exit even after completion, have the caller (or a JobManager side-task) treat
+"SR3d.dat + case_Result_Summary.dat have appeared with reasonable size" as the real
+completion signal rather than "process exited", and/or poll
+`win32gui_helper.find_process_windows(pid)` / `find_dialogs(pid)` and dismiss the
+Unsaved-Project window (it does not close cleanly by message posting today, so the
+pragmatic close is to `kill` the Celsius3D.exe process once the result files exist —
+the work is done by then). `core/win32gui_helper.py` is the reusable pywin32 helper
+for exactly this: poll the process's window tree, read dialog titles/classes, and drive
+dismissal (WM_COMMAND BN_CLICKED to a Yes/OK/Confirm child, VK_RETURN/VK_SPACE, WM_CLOSE)
+— it is wired for any Cadence tool that pops a real dialog; for Celsius3D specifically
+it confirms the post-completion-idle-stall diagnosis but the actual close still requires
+killing the process once the result set is on disk.
 
 SCOPE NOTE: unlike PowerDC/PowerSI (which have many `sigrity::set`/`sigrity::add`
 compose tools for building up a simulation from scratch), no additional Celsius3D-
@@ -51,12 +71,7 @@ from sigrity_mcp.mcp_app import mcp
 @mcp.tool
 async def start_celsius3d_session(project_file: str) -> dict:
     """Begin a new Celsius3D automation session by opening a `.3dth` thermal project.
-
-    Returns a session_id — pass it to celsius3d_run_session to execute. Nothing runs
-    yet; this records the confirmed preamble `sigrity::configure version -version {5}`
-    then `sigrity::open file -file {<project_file>}`, transcribed from the real working
-    sample `share/PostInstallationCheck/celsius3d/case.tcl`.
-    """
+See `.forjinn/skills/sigrity-celsius/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
     session = tcl_sessions.create("celsius3d")
     tcl_sessions.add_line(session.session_id, "sigrity::configure version -version {5}")
     tcl_sessions.add_line(session.session_id, f"sigrity::open file -file {tcl_path(project_file)}")
@@ -66,17 +81,7 @@ async def start_celsius3d_session(project_file: str) -> dict:
 @mcp.tool
 async def celsius3d_run_session(session_id: str, project_file: str) -> dict:
     """Write out the session's accumulated Tcl macro and launch Celsius3D against it as a background job.
-
-    `project_file` must be the same `.3dth` path passed to start_celsius3d_session
-    (Celsius3D's confirmed Tcl commands take the project path again at both
-    begin/end-simulation, not just at open). Appends `sigrity::begin simulation
-    -fileName {<project_file>}`, `sigrity::end simulation -fileName {<project_file>}`,
-    then `sigrity::close exe`, matching the confirmed working sample exactly, then runs
-    `Celsius3D.exe -tcl <macro.tcl>` (no `-b` flag needed — confirmed live without it).
-    Returns a job_id immediately; poll it with get_job_status/wait_for_job/tail_job_log —
-    a real electrothermal/stress solve on a moderate design took under 30 seconds in
-    testing, but larger meshes will take longer.
-    """
+See `.forjinn/skills/sigrity-celsius/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
     path = tcl_path(project_file)
     tcl_sessions.add_line(session_id, f"sigrity::begin simulation -fileName {path}")
     tcl_sessions.add_line(session_id, f"sigrity::end simulation -fileName {path}")

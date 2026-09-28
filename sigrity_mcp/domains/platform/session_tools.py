@@ -15,11 +15,7 @@ from sigrity_mcp.mcp_app import mcp
 @mcp.tool
 async def preview_tcl_session(session_id: str) -> dict:
     """Show the Tcl macro accumulated so far in an open automation session, without running anything.
-
-    Use this to sanity-check the exact commands a run_*_session tool is about to execute
-    before committing to a potentially long simulation — every `*_add_*`/`*_set_*` tool
-    for this session_id appends one more line to what you'll see here.
-    """
+See `.forjinn/skills/sigrity/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
     try:
         session = tcl_sessions.get(session_id)
         return {
@@ -35,11 +31,7 @@ async def preview_tcl_session(session_id: str) -> dict:
 @mcp.tool
 async def close_tcl_session(session_id: str) -> dict:
     """Discard an open automation session without running it.
-
-    Use this to abandon a session you started composing but decided not to run (e.g. you
-    realized you need different inputs) — otherwise it just stays open, harmlessly, until
-    the server restarts.
-    """
+See `.forjinn/skills/sigrity/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
     try:
         tcl_sessions.get(session_id)  # raise if unknown before reporting success
     except SessionNotFoundError as exc:
@@ -50,7 +42,8 @@ async def close_tcl_session(session_id: str) -> dict:
 
 @mcp.tool
 async def list_tcl_sessions() -> dict:
-    """List every Tcl automation session currently open (composed but not yet run, or run but not closed) on this server."""
+    """List every Tcl automation session currently open (composed but not yet run, or run but not closed) on this server.
+See `.forjinn/skills/sigrity/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
     sessions = tcl_sessions.list_sessions()
     return {
         "count": len(sessions),

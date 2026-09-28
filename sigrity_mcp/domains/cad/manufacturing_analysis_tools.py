@@ -130,29 +130,7 @@ async def analyze_manufacturing_package(
     bom_report_file: Optional[str] = None,
 ) -> dict:
     """Check a generated manufacturing package (Gerber/.art, IPC-2581, IPC-356, BOM) for completeness and real-format well-formedness.
-
-    All arguments are optional file paths to whatever this suite's own
-    `run_allegro_generate_artwork` / `run_ipc2581_export` / `run_ipc356_export` /
-    `run_allegro_report(..., "bom")` calls produced — pass whichever ones you actually
-    generated; nothing is required, but an empty call returns an empty (useless)
-    report, so pass at least one.
-
-    Each file is checked for: existing, being non-empty, and matching that format's own
-    real structural signature (see this module's docstring for exactly what's checked
-    per format — a Gerber RS274X header line, an IPC-2581 root element, an IPC-356
-    header marker). If `bom_report_file` is also given, its REFDES count is reported
-    alongside any RefDes records found in `ipc2581_file`, as a light completeness
-    cross-check (not a guaranteed match — see the IPC-2581 check's own `note` field for
-    when a minimal export genuinely has none).
-
-    This is a structural/completeness gate, NOT an electrical or clearance DFM check —
-    no batch/SKILL automation surface exists on this installation for that (Allegro's
-    `dfa_dlg.exe` is confirmed GUI-only). Use `run_allegro_batch_drc`/
-    `run_allegro_checkplus` for the electrical-rule side of manufacturability.
-
-    Returns `{gerber: [...], ipc2581: {...} | None, ipc356: {...} | None,
-    bom_refdes_count: int | None, overall: {all_well_formed: bool, issues: [...]}}`.
-    """
+See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
     gerber_results = [_check_gerber_file(f) for f in (gerber_files or [])]
     ipc2581_result = _check_ipc2581_file(ipc2581_file) if ipc2581_file else None
     ipc356_result = _check_ipc356_file(ipc356_file) if ipc356_file else None

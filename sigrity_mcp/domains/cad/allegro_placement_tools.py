@@ -75,21 +75,7 @@ async def run_allegro_placement(
     print_connection_matrix: bool = False,
 ) -> dict:
     """Run Allegro's standalone auto-placement engine over a board, as a background job.
-
-    Runs `placement.exe [-a] [-w] [-p] <board_file> [output_file]` — confirmed live via
-    `allegro_batch placement -help`'s usage banner ("Allegro auto-place program").
-    `iterate_while_improving` maps to `-a` (keep iterating while placement quality is
-    still improving), `weight_edges` to `-w` (weight connections by net importance),
-    `print_connection_matrix` to `-p` (diagnostic dump of the connection matrix, not a
-    placement-quality setting). If `output_file` is omitted, the tool writes back to
-    (or next to) the input board per its own default.
-    This performs real component placement — it does NOT route traces; see
-    run_allegro_ncroute/run_allegro_zrouter for the narrower routing capability actually
-    confirmed on this installation (drill-route and via-fanout only, not general
-    autorouting — no batch CLI was found for that).
-    Returns a job_id immediately; poll it with get_job_status/wait_for_job, then inspect
-    the output board / job log via list_job_files/read_job_output_file.
-    """
+See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
     args = []
     if iterate_while_improving:
         args.append("-a")
@@ -112,14 +98,7 @@ async def run_allegro_ncroute(
     verbose: bool = False,
 ) -> dict:
     """Generate NC (numerically-controlled) drill-route data for a board, as a background job.
-
-    Runs `ncroute.exe [-q] [-v] [-o <output_file>] <board_file>` — confirmed live via
-    `allegro_batch ncroute -help`'s usage banner. This produces drill/NC-route output for
-    fabrication, not signal-trace autorouting (no batch CLI exists on this installation
-    for that — see this module's docstring). `quiet`/`verbose` map to `-q`/`-v`
-    respectively; pass at most one.
-    Returns a job_id immediately; poll it with get_job_status/wait_for_job.
-    """
+See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
     args = []
     if quiet:
         args.append("-q")
@@ -135,24 +114,7 @@ async def run_allegro_ncroute(
 @mcp.tool
 async def run_allegro_zrouter(board_file: str, control_file: str, output_file: Optional[str] = None) -> dict:
     """Refuses to run via/pin-escape fanout routing — CONFIRMED GUI-ONLY, no batch path exists (see module docstring).
-
-    Raises SigrityError unconditionally instead of launching anything. This suite
-    previously launched `zrouter.exe` directly as a background job here — confirmed live
-    this pass that doing so hangs indefinitely (it opens a modal GUI form with no CLI
-    usage text), which would tie up the calling job and a license seat forever. A second
-    attempt, running the native `zrouter <control_file>` command inside a batch Allegro
-    session (the same mechanism `auto_route` uses), was confirmed to return cleanly but
-    do nothing at all (no via created, no Zrouter.log, no board change) — the console
-    command only opens the dialog; `doc/zcoms/zchap.html`'s own "Running zrouter"
-    section documents entering the connections-file/grid-spacing/via-clearance values
-    into dialog fields and clicking Run as the only real path, with no batch/SKILL
-    equivalent found anywhere in this installation's doc tree or ~840-file SKILL
-    function reference.
-    If you need via/pin-escape fanout routing, the only confirmed-real path is the
-    manual Allegro GUI: Route -> Zrouter, fill in the Connections Control File you
-    authored (see the module docstring for its confirmed real grammar) plus grid
-    spacing/via-clearance, and click Run — then read the real `Zrouter.log` it writes.
-    """
+See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
     raise SigrityError(
         "run_allegro_zrouter: no working batch/scriptable path exists on this "
         "installation for zrouter (confirmed GUI-only, see this function's docstring "

@@ -33,18 +33,7 @@ async def run_spdsim_simulation(
     logs: Optional[str] = None,
 ) -> dict:
     """Run a SPDSIM transmission-line field simulation against a `.spd` project (built beforehand in SPDGEN) as a background job.
-
-    Runs `SPDSIM.exe -b [-s] [-n<save_interval_steps>] [-r[:logs]] <spd_file>`.
-    `save_interval_steps` sets how often (in simulation steps) results are checkpointed
-    to disk (SPDSIM's default is every 100 steps if omitted).
-    `logs` selects which auxiliary logs to write, using SPDSIM's letter codes
-    concatenated together — e, x, r, p, t, m for execution_time/reading_time/
-    profile_spd/trace_extraction/memory_time respectively (e.g. "ept"); omit for
-    SPDSIM's default set, or pass "" for none.
-    Returns a job_id immediately — poll it with get_job_status/wait_for_job, then
-    inspect the `.cur` curve files and `*.log` files it writes via list_job_files/
-    read_job_output_file.
-    """
+See `.forjinn/skills/sigrity-si/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
     args = ["-b"]
     if minimized_window:
         args.append("-s")

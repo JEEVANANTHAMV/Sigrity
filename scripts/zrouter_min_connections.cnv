@@ -1,0 +1,19 @@
+# Connections Control File for the zrouter GUI POC (real nets from board.brd).
+#
+# Grammar (doc/zcoms/zchap.html, "The Connections Control File"):
+#   <I/O refdes> <net> <extend_layer> <min#vias> [<max#vias>]
+#   * <net> <shape_layer> <extend_layer> <percentage_shape_coverage>
+# Blank lines and # comments are ignored; lines are routed in file order. Fields are
+# separated by one or more spaces/tabs and must stay in this order.
+#
+# The board (runs/artwork_test/board.brd) has 2 layers: TOP and BOTTOM, 81 ICs,
+# 0 existing vias, and a real GND net carrying pins U1.12, U1.8, etc. We ask zrouter to
+# extend a via from U1's GND pin(s) down to the BOTTOM ETCH subclass (1 via each), which
+# is exactly the "connect GND pins of a module to the ground plane" use case.
+#
+# NOTE: zrouter only acts on I/O pins of *MLC modules*; U1/U8 are here ordinary ICs. If
+# zrouter finds no MLC module it will route nothing and write no Zrouter.log — that is a
+# valid outcome of this test, not a hang. See the POC report for the full assessment.
+U1 GND BOTTOM 1
+U8 GND BOTTOM 1
+U1 * BOTTOM 1 1

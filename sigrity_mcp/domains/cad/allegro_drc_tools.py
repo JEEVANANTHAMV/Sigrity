@@ -40,14 +40,7 @@ from sigrity_mcp.mcp_app import mcp
 @mcp.tool
 async def run_allegro_batch_drc(board_file: str, output_file: Optional[str] = None, nographic: bool = True) -> dict:
     """Run a headless DRC pass over an Allegro board and write a DRC report, as a background job.
-
-    Runs `batch_drc.exe [-nographic] <board_file> [output_file]`. `nographic=True`
-    (default) suppresses any GUI window per the confirmed doc syntax in
-    `doc/bcoms/bchap.html` — leave it on for unattended use. If `output_file` is
-    omitted, `batch_drc` picks its own default name next to the input board.
-    Returns a job_id immediately; poll it with get_job_status/wait_for_job, then read
-    the report via read_job_output_file/list_job_files once it succeeds.
-    """
+See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
     args = []
     if nographic:
         args.append("-nographic")
@@ -68,16 +61,7 @@ async def run_allegro_checkplus(
     rule_file: Optional[str] = None,
 ) -> dict:
     """Run Allegro's standalone constraint/rule checker (`checkplus.exe`) against a project file, as a background job.
-
-    Runs `checkplus.exe -proj <project_file> [-verbose] [-max_messages <n>]
-    [-I <include_path>] [-r <env_file>] [-r <rule_file>]`, per the confirmed live
-    `-help` usage banner. `project_file` is the design/constraint project this tool
-    checks (its exact expected format was not independently confirmed against a real
-    project on this machine — treat this tool as `built_untested` until run against one).
-    `rule_file`/`env_file` both map to checkplus's `-r` flag (it accepts it twice, once
-    for an environment file and once for a rule file); pass whichever you have.
-    Returns a job_id immediately; poll it with get_job_status/wait_for_job.
-    """
+See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
     args = ["-proj", project_file]
     if verbose:
         args.append("-verbose")

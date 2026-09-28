@@ -78,19 +78,8 @@ async def allegro_create_trace(
     layer: str,
     net_name: str,
 ) -> dict:
-    """Create a routed trace (a "path"/cline) on a given etch layer and net, within the current Allegro SKILL session.
-
-    Appends `skill (axlDBCreatePath (axlPathStart {points}) {layer} {net_name}))` — a
-    simplified straight-segment-list wrapper around the confirmed real
-    `axlDBCreatePath`/`axlPathStart` functions. `points` is a list of `[x, y]` vertices
-    (at least two) the path/trace runs through, in the board's native design units.
-    `net_name` must already exist (create it first with allegro_create_net in the same
-    session) — `axlDBCreatePath` returns nil and creates nothing if the net doesn't
-    exist yet. Note Allegro may merge the resulting cline with adjacent clines on the
-    same net (documented behavior, not a bug) — the actual created geometry can be a
-    superset of the given points.
-    This only queues the step — call allegro_run_session to actually execute it.
-    """
+    """Create a routed trace (a \"path\"/cline) on a given etch layer and net, within the current Allegro SKILL session.
+See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
     if len(points) < 2:
         raise ValueError("A trace needs at least two points.")
     path_expr = f"(axlPathStart {_point_list(points)})"
@@ -110,15 +99,7 @@ async def allegro_create_via(
     mirror: bool = False,
 ) -> dict:
     """Place a standalone via at an explicit coordinate, within the current Allegro SKILL session.
-
-    Appends `skill (axlDBCreateVia {padstack_name} (list {x} {y}) [{net_name}] [t/nil]
-    {rotation})`, per the confirmed real `axlDBCreateVia` function. `padstack_name`
-    must already exist in the design or be loadable from the library search path
-    (`PADPATH`) — Allegro loads it automatically in that case. `net_name` defaults to a
-    standalone (netless) via if omitted. Note per the function's own doc: this cannot
-    create a test-point via — that needs a separate, unwrapped `axlTestPoint` call.
-    This only queues the step — call allegro_run_session to actually execute it.
-    """
+See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
     net_arg = skill_str(net_name) if net_name is not None else "nil"
     mirror_arg = "t" if mirror else "nil"
     expr = f"(axlDBCreateVia {skill_str(padstack_name)} (list {x} {y}) {net_arg} {mirror_arg} {rotation})"
@@ -137,20 +118,7 @@ async def allegro_create_simple_padstack(
     drill_diameter: Optional[float] = None,
 ) -> dict:
     """Create a simple, single-pad-layer padstack definition, within the current Allegro SKILL session.
-
-    BEST-EFFORT/SIMPLIFIED wrapper: `axlDBCreatePadStack`'s real signature supports
-    dozens of drill/pad options via nested SKILL defstructs — this tool only covers the
-    single-pad, single-drill (or no-drill, for an SMT pad) case shown in the function's
-    own "Surface Mount Padstack" example. Appends
-    `skill (axlDBCreatePadStack {name} {drill-defstruct-or-nil}
-    (cons (make_axlPadStackPad ?layer {pad_layer} ?type 'REGULAR ?figure '{pad_figure}
-    ?figureSize {pad_width}:{pad_height}) nil) t)`. `drill_diameter` omitted creates a
-    surface-mount pad with no drill; given, creates a plated circular through-hole of
-    that diameter. For anything beyond this (multiple pad layers, slots, keepouts,
-    thermal reliefs, non-round drills, ...), write a SKILL script directly from
-    `share/pcb/examples/skill/dbcreate/pad.il` instead.
-    This only queues the step — call allegro_run_session to actually execute it.
-    """
+See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
     pad_struct = (
         f"(make_axlPadStackPad ?layer {skill_str(pad_layer)} ?type 'REGULAR "
         f"?figure '{pad_figure} ?figureSize {pad_width}:{pad_height})"
@@ -176,19 +144,7 @@ async def allegro_place_module_instance(
     mirror: bool = False,
 ) -> dict:
     """Place a module (component footprint) instance at an explicit board coordinate and rotation, within the current Allegro SKILL session.
-
-    Appends `skill (axlDBCreateModuleInstance {instance_name} {module_def_name}
-    (list {x} {y}) {rotation} {0|1|2} [nil] [t/nil])`, per the confirmed real
-    `axlDBCreateModuleInstance` function — a distinct, lower-level placement API from
-    `allegro_create_component`'s `axlDBCreateComponent` (which creates a placeholder
-    without necessarily placing it). `module_def_name` must reference an existing
-    module/footprint definition already available to the design. `logic_from_schematic`
-    (`i_logic_method`) selects where the instance's logic comes from: `False` (default)
-    is `0` (no logic, pure mechanical placement), `True` is `1` (logic from schematic);
-    the doc also documents a `2` (logic from module definition) not exposed here — pass
-    it via a direct SKILL call if needed.
-    This only queues the step — call allegro_run_session to actually execute it.
-    """
+See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
     logic_method = 1 if logic_from_schematic else 0
     mirror_arg = "t" if mirror else "nil"
     expr = (
@@ -216,20 +172,7 @@ async def allegro_assign_net(
     ignore_fixed: bool = False,
 ) -> dict:
     """Assign a pin/via/shape to a net (or unassign it to a dummy net), within the current Allegro SKILL session.
-
-    Appends `skill (axlDBAssignNet (car (axlSelectByName {object_type} {object_name}))
-    {net_name-or-nil} {t/nil} {t/nil})`, per the confirmed real `axlDBAssignNet`
-    function, which itself takes a resolved dbid rather than a name — this tool
-    resolves the name to a dbid via `axlSelectByName` in the same expression (a common
-    real pattern shown in Allegro's own SKILL examples) so callers don't need to manage
-    dbids across session lines. `object_type` is Allegro's own object-type string for
-    `axlSelectByName` (e.g. `"PIN"`, `"VIA"`, `"SHAPE"`) — get the exact set of valid
-    type strings from `axlSelectByName`'s own doc page if unsure. Pass `net_name=None`
-    to unassign to a dummy net. `ripup=True` also rips up connected clines/vias on the
-    old net; `ignore_fixed=True` overrides the default refusal to reassign a net on an
-    object with a FIXED property.
-    This only queues the step — call allegro_run_session to actually execute it.
-    """
+See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
     net_arg = skill_str(net_name) if net_name is not None else "nil"
     ripup_arg = "t" if ripup else "nil"
     ignore_arg = "t" if ignore_fixed else "nil"
@@ -253,26 +196,7 @@ async def allegro_create_film(
     mirrored: bool = False,
 ) -> dict:
     """Create (or replace) an artwork film record, within the current Allegro SKILL session.
-
-    CONFIRMED LIVE — this is the real missing piece behind Gerber export: `gbplot.exe`
-    (see allegro_manufacturing_tools.py) needs an already-generated `.art` file, which
-    itself needs a film record defined on the board. Allegro's Artwork Control Form
-    normally authors these interactively; `axlFilmCreate` is the real, documented SKILL
-    equivalent, confirmed live producing genuine RS274X Gerber output end-to-end: create
-    a film per copper/silkscreen/soldermask layer needed (e.g. `["ETCH/TOP"]` for the top
-    copper layer), save the design, then run run_allegro_generate_artwork.
-
-    Appends `skill (axlFilmCreate {film_name} ?layers (list {layers...}) [?negative t]
-    [?mirrored t])`. `layers` are fully-qualified Allegro layer names (e.g. `"ETCH/TOP"`,
-    `"ETCH/BOTTOM"`, `"SILKSCREEN_TOP"`) — pass a class name alone (e.g. `"MANUFACTURING"`)
-    to include every subclass of that class. `negative`/`mirrored` map to the function's
-    own `?negative`/`?mirrored` booleans; every other real optional (`?rotation`,
-    `?xOffset`, `?sequence`, ...) is left at its documented default — call
-    axlFilmCreate again with the same film_name to replace/adjust it.
-    This only queues the step — call allegro_run_session to actually execute it, then
-    allegro_save_design before running artwork.exe (film records don't take effect on
-    disk until the design is saved).
-    """
+See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
     layer_list = "(list " + " ".join(skill_str(l) for l in layers) + ")"
     parts = [skill_str(film_name), "?layers", layer_list]
     if negative:
@@ -287,18 +211,7 @@ async def allegro_create_film(
 @mcp.tool
 async def allegro_get_module_instance_location(session_id: str, instance_name: str) -> dict:
     """Queue a read-only query of a placed module instance's current location/rotation, within the current Allegro SKILL session.
-
-    Appends `skill (axlGetModuleInstanceLocation (car (axlSelectByName "GROUP"
-    {instance_name})))`, per the confirmed real `axlGetModuleInstanceLocation` function
-    and its own doc example (which resolves the instance via `axlSingleSelectName`/
-    `axlGetSelSet` — this tool uses the equivalent, more directly composable
-    `axlSelectByName` form instead). Returns `(list (list x y) rotation [mirror])` in
-    the session's own output when run.
-    Like every other SKILL query line in this suite, inspect the job's log via
-    tail_job_log/read_job_output_file after allegro_run_session — this suite has no
-    mechanism to pipe a SKILL return value directly back into the MCP response.
-    This only queues the step — call allegro_run_session to actually execute it.
-    """
+See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
     expr = f'(axlGetModuleInstanceLocation (car (axlSelectByName "GROUP" {skill_str(instance_name)})))'
     tcl_sessions.add_line(session_id, _skill_line(expr))
     return {"session_id": session_id, "instance_name": instance_name}

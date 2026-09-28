@@ -106,55 +106,7 @@ async def generate_schematic_from_spec(
     create_netlist: bool = True,
 ) -> dict:
     """Author a complete schematic from a structured circuit spec in one call, then save and run it.
-
-    `project_file`: the OrCAD Capture project (.opj) to open (see start_capture_session).
-
-    `parts`: required, one dict per component to place —
-        {"x": float, "y": float, "library_file": str, "part_name": str, "package": str (optional)}
-    each mapped 1:1 to capture_place_part.
-
-    `wires` (optional): one dict per wire segment —
-        {"x1": float, "y1": float, "x2": float, "y2": float}
-    each mapped 1:1 to capture_place_wire. This is how the spec's net connectivity is
-    actually expressed on the page — the caller (or the upstream system that produced
-    this spec) is responsible for supplying real, connecting page coordinates; this
-    tool does not do any auto-routing/auto-layout of the schematic page itself.
-
-    `pins` (optional): one dict per page pin/mechanical pin —
-        {"x": float, "y": float, "pin_name": str, "pin_type": str (default "Passive")}
-    each mapped 1:1 to capture_place_pin.
-
-    `design`/`schematic_folder`/`page` (all optional): name the exact schematic page to
-    author on. Placement commands act only on the currently-active page, and after
-    `Open <proj>` the active view is the project root, not a page — so the target page
-    is selected before any Place* runs (via capture_select_page, using the documented
-    `SelectPMItem`/`OPage` commands). All three omitted (default): the project's own
-    .opj model is parsed and the design whose Type is a schematic design is located
-    automatically; the root schematic folder name is then derived from the design name
-    (OrCAD's convention — the same derivation this project's own shipped sample uses,
-    e.g. design `fault-detector.dsn` / root folder `Detector-Dsn`) and the first page
-    `PAGE_1` is used. If the .opj can't be read or has no schematic-design entry, a
-    generic best-effort fallback (project stem as both design and folder, `PAGE_1`)
-    is used instead — the run still proceeds and the result's `page` field tells the
-    caller exactly which address was targeted, so a wrong guess is visible in the
-    output rather than silent. For a different page or a multi-page design, pass all
-    three (any-one-implied-all: giving only some is an error, to avoid a half-resolved
-    page address).
-
-    `annotate=True` (default) queues reference-designator annotation after placement —
-    the confirmed way to get real REFDES values without this tool having to (unsafely)
-    guess which placed object a SetProperty call would currently apply to.
-    `create_netlist=True` (default) queues netlist creation for PCB layout handoff.
-
-    Composes, in order: start_capture_session -> capture_select_page ->
-    capture_place_part (xN) -> capture_place_wire (xN) -> capture_place_pin (xN) ->
-    [capture_annotate] -> [capture_create_netlist] -> capture_save ->
-    capture_run_session. Returns `{job_id, state, job_dir, command, parts_placed,
-    wires_placed, pins_placed, page}` where `page` says which design/page the spec was
-    targeted at. Poll the job_id with wait_for_job/tail_job_log exactly as
-    capture_run_session itself documents, and read this module's docstring's HONEST
-    LIMITATION note before trusting a `succeeded` state alone.
-    """
+See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
     given = [design, schematic_folder, page]
     if any(given) and not all(given):
         return {

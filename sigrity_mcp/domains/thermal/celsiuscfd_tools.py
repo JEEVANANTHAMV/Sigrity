@@ -36,13 +36,7 @@ from sigrity_mcp.mcp_app import mcp
 @mcp.tool
 async def start_celsiuscfd_session(project_file: str) -> dict:
     """Begin a new CelsiusCFD automation session by opening a `.3dth` CFD-thermal project.
-
-    Returns a session_id — pass it to celsiuscfd_set_solver_cpu_percentage (optional)
-    and celsiuscfd_run_session. Nothing runs yet; this records the confirmed preamble
-    `sigrity::configure version -version {5}` then `sigrity::open file
-    -file {<project_file>}`, transcribed from the real working sample
-    `share/PostInstallationCheck/celsiuscfd/pcb_pkg_sav.tcl`.
-    """
+See `.forjinn/skills/sigrity-celsius/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
     session = tcl_sessions.create("celsiuscfd")
     tcl_sessions.add_line(session.session_id, "sigrity::configure version -version {5}")
     tcl_sessions.add_line(session.session_id, f"sigrity::open file -file {tcl_path(project_file)}")
@@ -52,13 +46,7 @@ async def start_celsiuscfd_session(project_file: str) -> dict:
 @mcp.tool
 async def celsiuscfd_set_solver_cpu_percentage(session_id: str, cpu_percentage: int) -> dict:
     """Set what percentage of available CPU the CFD solver is allowed to use.
-
-    Appends `sigrity::update CFDSolverOptions -SolverCPUPercentage {<cpu_percentage>}`,
-    confirmed against the real working sample (which used `{1}` — a deliberately small
-    value for a fast post-install smoke test, not necessarily a recommended production
-    setting). This is the only CelsiusCFD-specific solver-configuration Tcl command
-    confirmed on this machine.
-    """
+See `.forjinn/skills/sigrity-celsius/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
     tcl_sessions.add_line(
         session_id, f"sigrity::update CFDSolverOptions -SolverCPUPercentage {{{cpu_percentage}}}"
     )
@@ -68,16 +56,7 @@ async def celsiuscfd_set_solver_cpu_percentage(session_id: str, cpu_percentage: 
 @mcp.tool
 async def celsiuscfd_run_session(session_id: str, project_file: str) -> dict:
     """Write out the session's accumulated Tcl macro and launch CelsiusCFD against it as a background job.
-
-    `project_file` must be the same `.3dth` path passed to start_celsiuscfd_session.
-    Appends `sigrity::begin simulation -fileName {<project_file>}`, `sigrity::end
-    simulation -fileName {<project_file>}`, then `sigrity::close exe`, matching the
-    confirmed working sample exactly, then runs `CelsiusCFD.exe -tcl <macro.tcl>` (no
-    `-b` flag needed — confirmed live without it).
-    Returns a job_id immediately; poll it with get_job_status/wait_for_job/tail_job_log —
-    CFD solves are typically slower than Celsius3D's structural/thermal-stress solve;
-    pass a generous wait_for_job timeout.
-    """
+See `.forjinn/skills/sigrity-celsius/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
     path = tcl_path(project_file)
     tcl_sessions.add_line(session_id, f"sigrity::begin simulation -fileName {path}")
     tcl_sessions.add_line(session_id, f"sigrity::end simulation -fileName {path}")

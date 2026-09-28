@@ -35,19 +35,7 @@ async def run_allegro_design_extractor(
     connectivity_server_as_source: bool = False,
 ) -> dict:
     """Extract an Allegro design's connectivity/data model to JSON, as a background job.
-
-    Runs `designextractor.exe -p <project_file> [-o <output_file>] [-f]
-    [-u <elastic_url>] [-c]` — confirmed live via `designextractor.exe -help`'s full
-    usage banner. `pretty_format=True` (default) maps to `-f` (pretty-printed JSON,
-    easier to inspect/read back with read_job_output_file than minified output).
-    `elastic_url` optionally streams the result directly to an Elasticsearch endpoint
-    instead of (or in addition to) writing `output_file` — leave unset for a plain file
-    dump. `connectivity_server_as_source` (`-c`) sources data from Allegro's live
-    connectivity server rather than the static project file, for use against an
-    already-open design session.
-    Returns a job_id immediately; poll it with get_job_status/wait_for_job, then read
-    the JSON via read_job_output_file once it succeeds.
-    """
+See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
     args = ["-p", project_file]
     if output_file:
         args += ["-o", output_file]

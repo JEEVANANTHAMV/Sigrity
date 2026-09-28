@@ -21,13 +21,7 @@ from sigrity_mcp.mcp_app import mcp
 @mcp.tool
 async def copy_file(source_file: str, destination_file: str, overwrite: bool = False) -> dict:
     """Copy a file (e.g. a read-only Cadence sample) to a new location before running a tool against it.
-
-    Creates any missing parent directories of `destination_file`. Fails with a clear
-    error if `destination_file` already exists and `overwrite=False` (the default) —
-    pass `overwrite=True` to replace it. Uses `shutil.copy2`, which preserves file
-    metadata (timestamps) but not any alternate-data-stream/ACL-specific Windows
-    attributes.
-    """
+See `.forjinn/skills/sigrity/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
     src = Path(source_file)
     dst = Path(destination_file)
     if not src.is_file():
@@ -42,10 +36,7 @@ async def copy_file(source_file: str, destination_file: str, overwrite: bool = F
 @mcp.tool
 async def move_file(source_file: str, destination_file: str, overwrite: bool = False) -> dict:
     """Move (rename) a file to a new location.
-
-    Creates any missing parent directories of `destination_file`. Fails with a clear
-    error if `destination_file` already exists and `overwrite=False` (the default).
-    """
+See `.forjinn/skills/sigrity/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
     src = Path(source_file)
     dst = Path(destination_file)
     if not src.is_file():
@@ -62,10 +53,7 @@ async def move_file(source_file: str, destination_file: str, overwrite: bool = F
 @mcp.tool
 async def delete_file(file_path: str) -> dict:
     """Delete a single file. DESTRUCTIVE — there is no undo.
-
-    Refuses (raises) if `file_path` is a directory, to avoid an accidental recursive
-    delete via this tool — this suite intentionally has no directory-delete tool.
-    """
+See `.forjinn/skills/sigrity/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
     path = Path(file_path)
     if path.is_dir():
         raise IsADirectoryError(f"delete_file only deletes a single file, not a directory: {path}")
@@ -78,20 +66,6 @@ async def delete_file(file_path: str) -> dict:
 @mcp.tool
 async def check_design_lock(design_path: str) -> dict:
     """Check whether a `<design_path>.lck` file exists next to an Allegro/Capture design.
-
-    Diagnostic for a real, confirmed-live failure mode: if a prior Allegro/Capture batch
-    job against this exact path was killed rather than exiting cleanly, it leaves an
-    orphaned lock file behind, and the NEXT launch against that path then blocks forever
-    on a modal "design is open/locked, override?" GUI dialog with zero console output —
-    indistinguishable from a generic hang or a license-fetch delay until a human clicks
-    through it. `allegro_run_session`/`start_capture_session` already clear this
-    automatically before launching, so this should be rare going forward — use this to
-    check a suspiciously stuck job (one still `running` well past its usual load time
-    with a run.log that hasn't grown beyond the startup banner) BEFORE assuming it's a
-    license or performance issue. If `lock_exists` is true, cancel_job the stuck job
-    first, then call this suite's own *_run_session tool again (it will clear the lock
-    itself) rather than deleting the lock out from under a job that might still
-    legitimately be running.
-    """
+See `.forjinn/skills/sigrity/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
     lock_path = Path(f"{design_path}.lck")
     return {"design_path": design_path, "lock_exists": lock_path.is_file(), "lock_path": str(lock_path)}

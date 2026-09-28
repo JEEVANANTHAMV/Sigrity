@@ -24,23 +24,7 @@ from sigrity_mcp.mcp_app import mcp
 @mcp.tool
 async def run_celsius2d_workspace(pdcx_file: str, save_excel_result: bool = True) -> dict:
     """Run an already-configured Celsius2D thermal/thermal-stress workspace, as a background job.
-
-    Runs `Celsius2D.exe -b -XIMSAVE -r <pdcx_file>` — confirmed live via a real Cadence
-    sample workspace on this machine (see module docstring). `save_excel_result` maps to
-    the `-XIMSAVE` flag (auto-save the results workbook); it's included unconditionally
-    here since that's how the confirmed-working invocation was actually run — pass
-    `save_excel_result=False` only if you've independently confirmed Celsius2D accepts
-    running without it.
-    `pdcx_file` must already be a fully-configured Celsius2D/PowerDC-style workspace
-    (materials, thermal boundary conditions, and — for CFD-linked cases — a valid
-    referenced CFD file) — this tool runs an existing setup, it does not build one from
-    bare geometry (no additional Celsius2D-specific authoring Tcl/CLI surface was found
-    documented anywhere in the shipped doc tree).
-    Returns a job_id immediately; poll it with get_job_status/wait_for_job/tail_job_log,
-    then read the engine's own log (`<name>_ThermalEngine.log` /
-    `<name>_ResourceProfile.log`) via list_job_files/read_job_output_file for full detail
-    beyond this job's own stdout capture.
-    """
+See `.forjinn/skills/sigrity-celsius/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
     args = ["-b"]
     if save_excel_result:
         args.append("-XIMSAVE")
