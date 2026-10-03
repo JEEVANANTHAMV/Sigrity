@@ -41,6 +41,28 @@ See `.forjinn/skills/sigrity/SKILL.md` for the full verified playbook, pitfalls,
 
 
 @mcp.tool
+async def restore_tcl_session(session_id: str) -> dict:
+    """Reconstruct an open automation session from its on-disk snapshot after a server
+    restart (every `*_start_session`/`add_*` call persists one automatically). Use this
+    when a session_id you composed earlier now raises "no open script session" — this
+    is the self-healing path `run_session` already tries on your behalf internally, but
+    calling it directly lets you confirm a session is recoverable (or inspect its
+    restored script) before re-attempting the run.
+See `.forjinn/skills/sigrity/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+    try:
+        session = tcl_sessions.restore(session_id)
+        return {
+            "session_id": session_id,
+            "tool": session.tool,
+            "step_count": session.step_count,
+            "script": session.script.render(),
+            "restored": True,
+        }
+    except SessionNotFoundError as exc:
+        return {"error": str(exc)}
+
+
+@mcp.tool
 async def list_tcl_sessions() -> dict:
     """List every Tcl automation session currently open (composed but not yet run, or run but not closed) on this server.
 See `.forjinn/skills/sigrity/SKILL.md` for the full verified playbook, pitfalls, and a live example."""

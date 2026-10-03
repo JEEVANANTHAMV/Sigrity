@@ -42,6 +42,48 @@ def _safe_stat_size(path: Path) -> int:
         return 0
 
 
+def _pid_alive(pid: int) -> bool:
+    """Windows-only liveness check via OpenProcess, used to correct a job record that
+    claims `state="running"` from a server instance that is no longer tracking its
+    process (a restart between submit() and completion). PROCESS_QUERY_LIMITED_
+    INFORMATION needs no special privileges for a same-user process. Deliberately
+    conservative on the PID-reuse hazard: a reused PID belonging to a different process
+    reads as "still alive", which only means we keep reporting `running` rather than
+    incorrectly flipping a genuinely-running job to `failed`."""
+    import ctypes
+
+    PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+    handle = ctypes.windll.kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+    if not handle:
+        return False
+    ctypes.windll.kernel32.CloseHandle(handle)
+    return True
+
+
+async def _kill_process_tree(proc: asyncio.subprocess.Process) -> None:
+    """Kill `proc` AND its descendant processes on Windows via `taskkill /F /T`, not
+    just the immediate child `asyncio.subprocess.Process` handle. A real, confirmed gap:
+    some wrapped tools (SPDSIM's sub-process launch pattern, per `core.tool_status`'s
+    `spdsim` note) spawn child workers of their own; a bare `proc.kill()` only ever
+    killed the immediate parent, leaving detached grandchild processes running after a
+    `cancel_job` call reported success. Falls back to a plain `proc.kill()` if
+    `taskkill` itself is unavailable or fails, so the immediate child is still killed
+    even in that case."""
+    try:
+        tree_kill = await asyncio.create_subprocess_exec(
+            "taskkill", "/F", "/T", "/PID", str(proc.pid),
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        await tree_kill.wait()
+    except OSError:
+        pass
+    try:
+        proc.kill()
+    except ProcessLookupError:
+        pass  # already dead -- taskkill (or a natural exit) beat us to it
+
+
 def _read_tail_text(path: Path, max_bytes: int) -> str:
     """Read at most the last `max_bytes` of a file, never the whole thing.
 
@@ -279,7 +321,19 @@ class JobManager:
         job_json = job_dir / "job.json"
         if job_json.is_file():
             data = json.loads(job_json.read_text(encoding="utf-8"))
-            return JobRecord(**data)
+            record = JobRecord(**data)
+            if record.state == "running" and record.pid is not None and not _pid_alive(record.pid):
+                # This server instance never observed this job's completion (it was
+                # submitted by an earlier server process that restarted/crashed before
+                # the process exited) -- the OS confirms the PID is gone, so the stale
+                # "running" state is corrected here rather than lying forever. The real
+                # exit code is unknowable at this point; leave it unset rather than
+                # inventing one.
+                record.state = "failed"
+                record.returncode = None
+                record.ended_at = time.time()
+                record.save()
+            return record
         raise JobNotFoundError(f"No job found with id '{job_id}'")
 
     async def wait(self, job_id: str, timeout: float) -> JobRecord:
@@ -287,6 +341,18 @@ class JobManager:
         proc = self._procs.get(job_id)
         if proc is None:
             if record.state == "running":
+                # `get()` already re-checks PID liveness when it reads this record off
+                # disk and corrects a truly-dead process to "failed" -- so reaching
+                # "running" here with no live proc handle means either the OS says the
+                # PID is still genuinely alive (truly unwaitable from this server
+                # instance), or `record` came from the in-memory dict without a disk
+                # round-trip. Re-check directly rather than assume the worse case.
+                if record.pid is not None and not _pid_alive(record.pid):
+                    record.state = "failed"
+                    record.returncode = None
+                    record.ended_at = time.time()
+                    record.save()
+                    return record
                 raise JobStillRunningError(
                     f"Job '{job_id}' is running in a process this server instance is not "
                     "tracking (likely a previous server run) — poll status()/tail_log() instead."
@@ -304,16 +370,28 @@ class JobManager:
             await asyncio.sleep(0.05)
         return self.get(job_id)
 
-    def cancel(self, job_id: str) -> JobRecord:
+    async def cancel(self, job_id: str) -> tuple[JobRecord, str]:
+        """Returns `(record, outcome)` where `outcome` is one of:
+        - "killed" — a live process handle was found and killed (the normal case).
+        - "already-terminal" — the job had already finished; nothing to kill.
+        - "no-live-handle" — `record.state` is still "running" but this server instance
+          holds no process handle for it (submitted by an earlier server run). NO kill
+          is performed in this case — silently returning the unchanged record here (the
+          previous behavior) looked identical to a successful cancel from the caller's
+          side, with the real process left running undetected.
+        """
         record = self.get(job_id)
         proc = self._procs.get(job_id)
-        if proc is not None and record.state == "running":
-            proc.kill()
-            record.state = "cancelled"
-            record.ended_at = time.time()
-            record.save()
-            self._stop_dismiss_watcher(job_id)
-        return record
+        if proc is None:
+            return record, "no-live-handle"
+        if record.state != "running":
+            return record, "already-terminal"
+        await _kill_process_tree(proc)
+        record.state = "cancelled"
+        record.ended_at = time.time()
+        record.save()
+        self._stop_dismiss_watcher(job_id)
+        return record, "killed"
 
     def tail_log(self, job_id: str, max_lines: int) -> list[str]:
         record = self.get(job_id)

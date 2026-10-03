@@ -28,8 +28,9 @@ async def test_cancel_terminates_a_genuinely_slow_process(tmp_path, monkeypatch)
     )
     assert record.state == "running"
 
-    cancelled = jm.cancel(job_id)
+    cancelled, outcome = await jm.cancel(job_id)
     assert cancelled.state == "cancelled"
+    assert outcome == "killed"
 
     # The underlying OS process must actually be gone, not just marked cancelled in our
     # bookkeeping -- proc.wait() should resolve promptly once really killed.

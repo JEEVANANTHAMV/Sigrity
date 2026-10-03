@@ -20,10 +20,13 @@ that matters.
 
 from __future__ import annotations
 
+import json
+import time
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from sigrity_mcp.core.config import settings
 from sigrity_mcp.core.errors import SigrityError
 from sigrity_mcp.core.tclscript import TclScript
 
@@ -70,21 +73,43 @@ class ScriptSession:
 TclSession = ScriptSession
 
 
+def _session_snapshot_path(session_id: str) -> Path:
+    return settings.resolve_workdir() / "sessions" / f"{session_id}.json"
+
+
 class ScriptSessionManager:
     def __init__(self) -> None:
         self._sessions: dict[str, ScriptSession] = {}
+        # Ids this server instance has itself closed (via run_session's close_after or an
+        # explicit close()), so get()'s error can distinguish "you consumed this one
+        # yourself" from "this id was never created / the server restarted" — the exact
+        # ambiguity a caller otherwise has no way to tell apart from a bare
+        # SessionNotFoundError. Capped so a long-lived server doesn't grow this
+        # unboundedly; losing the oldest entries only degrades the message back to the
+        # generic case, it never breaks correctness.
+        self._closed: dict[str, float] = {}
+        self._closed_cap = 1000
 
     def create(self, tool: str) -> ScriptSession:
         session_id = f"{tool}-session-{uuid.uuid4().hex[:8]}"
         session = ScriptSession(session_id=session_id, tool=tool)
         self._sessions[session_id] = session
+        self._snapshot(session)
         return session
 
     def get(self, session_id: str) -> ScriptSession:
         if session_id not in self._sessions:
+            if session_id in self._closed:
+                raise SessionNotFoundError(
+                    f"Script session '{session_id}' was already run/closed in this server "
+                    "process — it is single-use. Start a NEW session with the matching "
+                    "*_start_session tool and re-queue the script lines (or do the whole "
+                    "flow in one run_tool_pipeline)."
+                )
             raise SessionNotFoundError(
-                f"No open script session '{session_id}'. It may have already been run/closed, "
-                "or never created — start one with the matching *_start_session tool."
+                f"No open script session '{session_id}' was ever created in this server "
+                "process — check the id for a typo, or the server may have restarted "
+                "(try restore_tcl_session if the session was created before a restart)."
             )
         return self._sessions[session_id]
 
@@ -92,6 +117,7 @@ class ScriptSessionManager:
         session = self.get(session_id)
         session.script.raw(line)
         session.step_count += 1
+        self._snapshot(session)
         return session
 
     def preview(self, session_id: str) -> str:
@@ -99,26 +125,72 @@ class ScriptSessionManager:
 
     def close(self, session_id: str) -> None:
         self._sessions.pop(session_id, None)
+        self._closed[session_id] = time.time()
+        if len(self._closed) > self._closed_cap:
+            oldest = sorted(self._closed, key=self._closed.get)[: len(self._closed) - self._closed_cap]
+            for sid in oldest:
+                del self._closed[sid]
+        try:
+            _session_snapshot_path(session_id).unlink(missing_ok=True)
+        except OSError:
+            pass
 
     def list_sessions(self) -> list[ScriptSession]:
         return list(self._sessions.values())
+
+    def _snapshot(self, session: ScriptSession) -> None:
+        """Persist this session's accumulated script to disk so `restore()` can
+        reconstruct it after a server restart. Best-effort: a write failure here must
+        never break the in-memory flow that's this manager's actual job — sessions
+        already work fine without persistence, this only adds a recovery path."""
+        try:
+            path = _session_snapshot_path(session.session_id)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(
+                json.dumps(
+                    {
+                        "session_id": session.session_id,
+                        "tool": session.tool,
+                        "step_count": session.step_count,
+                        "lines": list(session.script._lines),
+                    },
+                    indent=2,
+                ),
+                encoding="utf-8",
+            )
+        except OSError:
+            pass
+
+    def restore(self, session_id: str) -> ScriptSession:
+        """Reconstruct a session from its on-disk snapshot (written by every `create()`/
+        `add_line()` call) when it's not in this server instance's memory — the normal
+        case being a server restart between a `*_start_session` call and the matching
+        `run_session`. Raises `SessionNotFoundError` (same type as `get()`) if no
+        snapshot exists either; the composed script itself is NOT recoverable if this
+        server instance never saw it (sessions are queued client-side call by call, so
+        a session an earlier server process never received cannot be reconstructed from
+        nothing)."""
+        if session_id in self._sessions:
+            return self._sessions[session_id]
+        path = _session_snapshot_path(session_id)
+        if not path.is_file():
+            raise SessionNotFoundError(
+                f"No open script session '{session_id}' and no on-disk snapshot to restore "
+                "— it was never created in any server process, or its snapshot was already "
+                "cleaned up by a close()."
+            )
+        data = json.loads(path.read_text(encoding="utf-8"))
+        session = ScriptSession(session_id=data["session_id"], tool=data["tool"], step_count=data["step_count"])
+        for line in data["lines"]:
+            session.script.raw(line)
+        self._sessions[session_id] = session
+        return session
 
 
 # Backward-compat alias, same reasoning as TclSession above.
 TclSessionManager = ScriptSessionManager
 
 tcl_sessions = ScriptSessionManager()
-
-# Interactive Allegro/Capture GUI session jobs normally complete in ~5-20s (confirmed
-# live: axlDBCreateNet ~5.6s, load+query+exit ~20s; even the most complex documented
-# stackup/routing session finished in ~1-3 minutes). The global `job_stall_timeout_seconds`
-# default (2 hours) is tuned for long batch simulations (XcitePI, PowerSI, PowerDC) and is
-# far too long for this class of job: a real, repeatedly-confirmed failure mode (ripping
-# up and re-routing a multi-branch/multi-pin net) hangs the session indefinitely with the
-# log gone completely silent, and nothing catches it for two hours. 300s gives every
-# documented legitimate session several times its normal runtime margin while still
-# surfacing this specific hang in minutes instead of hours.
-ALLEGRO_SESSION_STALL_TIMEOUT_SECONDS = 300
 
 
 async def run_session(
@@ -153,8 +225,9 @@ async def run_session(
     to do.
 
     The same `tool in ("allegro", "capture")` check also applies
-    `ALLEGRO_SESSION_STALL_TIMEOUT_SECONDS` (300s) in place of the global 2-hour stall
-    watchdog default -- a real, repeatable failure mode (ripping up and re-routing a
+    `settings.allegro_session_stall_timeout_seconds` (300s by default) in place of the
+    global 2-hour stall watchdog default -- a real, repeatable failure mode (ripping up
+    and re-routing a
     multi-branch/multi-pin net) hangs these sessions indefinitely with the log gone
     completely silent, and the 2-hour default would leave that running for hours before
     anything noticed. No working chat-level fix for the hang itself was found (per-branch
@@ -177,13 +250,22 @@ async def run_session(
     closes the same dialog-hang gap for it that Allegro already has, at zero cost (a
     dialog-watching thread that finds nothing to click is a harmless no-op).
 
+    If `session_id` is not in this server instance's memory but has an on-disk snapshot
+    (written by every `*_start_session`/`add_*` call — see `ScriptSessionManager._snapshot`),
+    it is transparently restored before raising `SessionNotFoundError` — the common
+    "server restarted between composing the macro and running it" case becomes
+    self-healing with zero caller changes, instead of losing the whole queued script.
+
     Thin bridge to `core.process.submit_job` kept here (rather than there) so
     `core.process` doesn't need to import session state — imported lazily to avoid a
     module-load cycle (process.py has no reason to know about sessions at import time).
     """
     from sigrity_mcp.core.process import submit_job
 
-    session = tcl_sessions.get(session_id)
+    try:
+        session = tcl_sessions.get(session_id)
+    except SessionNotFoundError:
+        session = tcl_sessions.restore(session_id)
     record = await submit_job(
         tool=tool,
         build_args=build_args,
@@ -193,7 +275,7 @@ async def run_session(
         script_filename=script_filename,
         dismiss_dialogs=(tool in ("allegro", "capture")),
         stall_timeout_seconds=(
-            ALLEGRO_SESSION_STALL_TIMEOUT_SECONDS if tool in ("allegro", "capture") else None
+            settings.allegro_session_stall_timeout_seconds if tool in ("allegro", "capture") else None
         ),
     )
     if close_after:

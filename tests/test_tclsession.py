@@ -15,7 +15,8 @@ from sigrity_mcp.core.tclsession import (
 from sigrity_mcp.core.jobs import JobManager
 
 
-def test_create_and_get_session():
+def test_create_and_get_session(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
     mgr = TclSessionManager()
     session = mgr.create("powersi")
     assert session.session_id.startswith("powersi-session-")
@@ -28,7 +29,8 @@ def test_unknown_session_raises():
         mgr.get("does-not-exist")
 
 
-def test_add_line_accumulates_and_previews():
+def test_add_line_accumulates_and_previews(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
     mgr = TclSessionManager()
     session = mgr.create("powerdc")
     mgr.add_line(session.session_id, "sigrity::open document {!}")
@@ -39,7 +41,8 @@ def test_add_line_accumulates_and_previews():
     assert mgr.get(session.session_id).step_count == 2
 
 
-def test_close_removes_session():
+def test_close_removes_session(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
     mgr = TclSessionManager()
     session = mgr.create("xcitepi")
     mgr.close(session.session_id)
@@ -47,12 +50,66 @@ def test_close_removes_session():
         mgr.get(session.session_id)
 
 
-def test_list_sessions():
+def test_list_sessions(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
     mgr = TclSessionManager()
     a = mgr.create("powersi")
     b = mgr.create("powerdc")
     ids = {s.session_id for s in mgr.list_sessions()}
     assert ids == {a.session_id, b.session_id}
+
+
+def test_get_distinguishes_closed_from_never_created(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    mgr = TclSessionManager()
+    session = mgr.create("powersi")
+    mgr.close(session.session_id)
+    with pytest.raises(SessionNotFoundError, match="already run/closed"):
+        mgr.get(session.session_id)
+    with pytest.raises(SessionNotFoundError, match="was ever created"):
+        mgr.get("totally-made-up-id")
+
+
+def test_restore_reconstructs_session_after_simulated_restart(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    mgr = TclSessionManager()
+    session = mgr.create("powerdc")
+    mgr.add_line(session.session_id, "sigrity::open document {!}")
+    mgr.add_line(session.session_id, "sigrity::save -w {test.pdcx} {!}")
+
+    # Simulate a server restart: fresh manager, same on-disk workdir.
+    fresh_mgr = TclSessionManager()
+    with pytest.raises(SessionNotFoundError):
+        fresh_mgr.get(session.session_id)
+
+    restored = fresh_mgr.restore(session.session_id)
+    assert restored.session_id == session.session_id
+    assert restored.tool == "powerdc"
+    assert restored.step_count == 2
+    text = restored.script.render()
+    assert "sigrity::open document {!}" in text
+    assert "sigrity::save -w {test.pdcx} {!}" in text
+    # Now in memory — a second restore()/get() call just returns the same object.
+    assert fresh_mgr.get(session.session_id) is restored
+
+
+def test_restore_raises_when_no_snapshot_exists(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    mgr = TclSessionManager()
+    with pytest.raises(SessionNotFoundError):
+        mgr.restore("never-existed")
+
+
+def test_restore_unavailable_after_close_cleans_up_snapshot(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    mgr = TclSessionManager()
+    session = mgr.create("xcitepi")
+    mgr.add_line(session.session_id, "xpi_start")
+    mgr.close(session.session_id)
+
+    fresh_mgr = TclSessionManager()
+    with pytest.raises(SessionNotFoundError):
+        fresh_mgr.restore(session.session_id)
 
 
 @pytest.mark.asyncio
@@ -159,10 +216,8 @@ async def test_run_session_auto_enables_dismiss_dialogs_only_for_allegro_and_cap
     leave that running for two hours before anything noticed.
     """
     import sigrity_mcp.core.process as process_module
-    from sigrity_mcp.core.tclsession import (
-        ALLEGRO_SESSION_STALL_TIMEOUT_SECONDS,
-        tcl_sessions,
-    )
+    from sigrity_mcp.core.config import settings
+    from sigrity_mcp.core.tclsession import tcl_sessions
 
     seen = {}
     real_submit_job = process_module.submit_job
@@ -179,7 +234,7 @@ async def test_run_session_auto_enables_dismiss_dialogs_only_for_allegro_and_cap
     await run_session(allegro_session.session_id, tool="allegro", tcl_arg_flag="-s",
                        extra_args=["board.brd"], script_filename="macro.scr")
     assert seen["dismiss_dialogs"] is True
-    assert seen["stall_timeout_seconds"] == ALLEGRO_SESSION_STALL_TIMEOUT_SECONDS
+    assert seen["stall_timeout_seconds"] == settings.allegro_session_stall_timeout_seconds
 
     seen.clear()
     capture_session = tcl_sessions.create("capture")
@@ -187,7 +242,7 @@ async def test_run_session_auto_enables_dismiss_dialogs_only_for_allegro_and_cap
     await run_session(capture_session.session_id, tool="capture", tcl_arg_flag=None,
                        build_args=["-product=OrCAD Capture"], script_filename="macro.tcl")
     assert seen["dismiss_dialogs"] is True
-    assert seen["stall_timeout_seconds"] == ALLEGRO_SESSION_STALL_TIMEOUT_SECONDS
+    assert seen["stall_timeout_seconds"] == settings.allegro_session_stall_timeout_seconds
 
     seen.clear()
     other_session = tcl_sessions.create("powersi")

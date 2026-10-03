@@ -132,10 +132,20 @@ async def cancel_job(job_id: str) -> dict:
     """Forcibly kill a still-running background job (e.g. a simulation started with wrong inputs).
 See `.forjinn/skills/sigrity/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
     try:
-        record = job_manager.cancel(job_id)
-        return _record_to_dict(record)
+        record, outcome = await job_manager.cancel(job_id)
     except JobNotFoundError as exc:
         return {"error": str(exc)}
+    out = _record_to_dict(record)
+    out["cancel_outcome"] = outcome
+    if outcome == "no-live-handle":
+        out["note"] = (
+            "This server instance does not hold a live handle to that job's process "
+            "(it was submitted by an earlier server run). NO kill was performed. "
+            f"Verify/kill at the OS level using pid={record.pid} if you need it stopped "
+            "(e.g. `taskkill /F /T /PID <pid>`), and check_design_lock if it was an "
+            "allegro/capture session job."
+        )
+    return out
 
 
 @mcp.tool

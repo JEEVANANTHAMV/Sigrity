@@ -97,6 +97,18 @@ class SigritySettings(BaseSettings):
     `SIGRITY_JOB_STALL_TIMEOUT_SECONDS` rather than treat 2 hours as a hard ceiling. Set
     to 0 to disable entirely."""
 
+    allegro_session_stall_timeout_seconds: int = 300
+    """Same safety-net as `job_stall_timeout_seconds`, but specifically for Allegro/Capture
+    interactive SESSION jobs (`core.tclsession.run_session` for `tool in ("allegro",
+    "capture")`), which run far shorter than the long batch simulations the 2-hour global
+    default is tuned for (confirmed live: ~5-20s for simple session calls, ~1-3 minutes for
+    the most complex documented stackup/routing session). A real, repeatedly-confirmed
+    failure mode (ripping up and re-routing a multi-branch/multi-pin net) hangs these
+    sessions indefinitely with the log gone completely silent; the 2-hour default would
+    leave that running for hours before anything noticed. Override via
+    `SIGRITY_ALLEGRO_SESSION_STALL_TIMEOUT_SECONDS` if a future session class is confirmed
+    to legitimately need a longer silent stretch than 300s."""
+
     stall_watchdog_poll_seconds: float = 5.0
     """How often JobManager samples a running job's log size for `job_stall_timeout_seconds`'s
     "has this gone completely silent" check. Coarser than `log_watchdog_poll_seconds`

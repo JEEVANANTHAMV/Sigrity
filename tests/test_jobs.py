@@ -113,8 +113,9 @@ async def test_cancel_running_job(tmp_path, monkeypatch):
         job_dir=job_dir,
         job_id=job_id,
     )
-    record = jm.cancel(job_id)
+    record, outcome = await jm.cancel(job_id)
     assert record.state == "cancelled"
+    assert outcome == "killed"
 
 
 @pytest.mark.asyncio
@@ -133,7 +134,7 @@ async def test_cancel_state_survives_watcher_completion(tmp_path, monkeypatch):
         job_dir=job_dir,
         job_id=job_id,
     )
-    jm.cancel(job_id)
+    await jm.cancel(job_id)
 
     proc = jm._procs[job_id]
     await asyncio.wait_for(proc.wait(), timeout=10)
@@ -397,7 +398,7 @@ async def test_cancel_stops_dismiss_watcher_immediately(tmp_path, monkeypatch, f
     watcher = fake_dismiss_watcher.instances[0]
     assert watcher.stopped is False
 
-    jm.cancel(job_id)
+    await jm.cancel(job_id)
     # Hands off to the executor the same way the normal completion path does (see
     # _stop_dismiss_watcher) -- give the scheduled call a beat to actually run, same as
     # test_submit_with_dismiss_dialogs_starts_and_stops_watcher above.
@@ -420,3 +421,124 @@ def test_dismiss_watcher_stop_is_idempotent_across_cancel_and_watch(tmp_path):
     jm._stop_dismiss_watcher("job-1")
     jm._stop_dismiss_watcher("job-1")  # must not raise
     assert "job-1" not in jm._dismiss_watchers
+
+
+# --- get()/wait() correcting a stale "running" state via PID liveness --------------
+#
+# Regression coverage for a real gap: a job submitted by an earlier server process
+# (restarted/crashed before the job finished) has no entry in self._jobs or self._procs
+# in the NEW server instance -- get()'s disk-fallback branch used to return the stale
+# "running" record verbatim, forever, with no way for a caller to ever learn the truth.
+#
+# _pid_alive() itself is a thin ctypes.OpenProcess wrapper verified once, directly,
+# against this test process's own PID (always genuinely alive) and an arbitrarily huge
+# PID number (never a real process). get()/wait()'s own branching logic is then tested
+# with _pid_alive() monkeypatched to a fixed answer -- real PIDs are not reused
+# deterministically (the whole point of the OS's reuse hazard this suite already
+# accepts), so a real spawn-and-reap PID is flaky under a full test-suite run's process
+# churn; monkeypatching isolates what these tests actually assert (get()/wait()'s
+# control flow), not the OS's PID bookkeeping.
+
+
+def test_pid_alive_sanity_check():
+    import os
+
+    assert jobs_module._pid_alive(os.getpid()) is True
+    assert jobs_module._pid_alive(999_999_999) is False
+
+
+def _write_stale_running_job_json(tmp_path, job_id: str, pid: int) -> None:
+    from sigrity_mcp.core.config import settings
+
+    job_dir = settings.resolve_workdir() / job_id
+    job_dir.mkdir(parents=True, exist_ok=True)
+    record = JobRecord(
+        job_id=job_id, tool="fake_tool", command=[], job_dir=str(job_dir),
+        state="running", pid=pid, started_at=0.0, log_path=str(job_dir / "run.log"),
+    )
+    (job_dir / "job.json").write_text(
+        __import__("json").dumps(__import__("dataclasses").asdict(record)), encoding="utf-8"
+    )
+
+
+def test_get_corrects_stale_running_state_when_pid_is_dead(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(jobs_module, "_pid_alive", lambda pid: False)
+    _write_stale_running_job_json(tmp_path, "fake_tool-dead", 123456)
+
+    jm = JobManager()
+    record = jm.get("fake_tool-dead")
+    assert record.state == "failed"
+    assert record.returncode is None
+
+    # The correction is persisted, not just returned once.
+    reread = jm.get("fake_tool-dead")
+    assert reread.state == "failed"
+
+
+def test_get_leaves_running_state_when_pid_is_alive(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(jobs_module, "_pid_alive", lambda pid: True)
+    _write_stale_running_job_json(tmp_path, "fake_tool-alive", 123456)
+
+    jm = JobManager()
+    record = jm.get("fake_tool-alive")
+    assert record.state == "running"
+
+
+@pytest.mark.asyncio
+async def test_wait_resolves_orphaned_but_finished_job_instead_of_raising(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(jobs_module, "_pid_alive", lambda pid: False)
+    _write_stale_running_job_json(tmp_path, "fake_tool-orphan", 123456)
+
+    jm = JobManager()
+    # No entry in jm._procs for this job_id -- simulates "this server instance never
+    # submitted it" exactly like a restart would.
+    record = await jm.wait("fake_tool-orphan", timeout=1.0)
+    assert record.state == "failed"
+
+
+@pytest.mark.asyncio
+async def test_wait_still_raises_when_untracked_process_is_genuinely_alive(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(jobs_module, "_pid_alive", lambda pid: True)
+    _write_stale_running_job_json(tmp_path, "fake_tool-alive2", 123456)
+
+    jm = JobManager()
+    with pytest.raises(jobs_module.JobStillRunningError):
+        await jm.wait("fake_tool-alive2", timeout=1.0)
+
+
+# --- cancel() outcome classification ------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_cancel_outcome_no_live_handle(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    jm = JobManager()
+    job_id, job_dir = jm.new_job_dir("fake_tool")
+    # A record in memory with state="running" but deliberately no entry in jm._procs --
+    # simulates "this server instance didn't submit this job".
+    jm._jobs[job_id] = JobRecord(
+        job_id=job_id, tool="fake_tool", command=[], job_dir=str(job_dir),
+        state="running", pid=999999,
+    )
+    record, outcome = await jm.cancel(job_id)
+    assert outcome == "no-live-handle"
+    assert record.state == "running"  # unchanged -- no kill was performed
+
+
+@pytest.mark.asyncio
+async def test_cancel_outcome_already_terminal(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    jm = JobManager()
+    job_id, job_dir = jm.new_job_dir("fake_tool")
+    await jm.submit(
+        tool="fake_tool", command=[sys.executable, "-c", "pass"], job_dir=job_dir, job_id=job_id,
+    )
+    finished = await jm.wait(job_id, timeout=10)
+    assert finished.state == "succeeded"
+
+    record, outcome = await jm.cancel(job_id)
+    assert outcome == "already-terminal"
