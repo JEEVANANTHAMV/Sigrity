@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
@@ -59,6 +60,10 @@ async def test_run_allegro_gerber_plot(fake_exe):
 async def test_run_allegro_generate_artwork_all_films(fake_exe):
     result = await run_allegro_generate_artwork("board.brd")
     assert result["command"][1:] == ["board.brd"]
+    # fake_exe's stand-in process produces no real .art files -- the no-films-defined
+    # silent-no-op must now be a named diagnostic, not silence.
+    assert result["art_files"] == []
+    assert "no film records" in result["note"]
 
 
 @pytest.mark.asyncio
@@ -71,6 +76,51 @@ async def test_run_allegro_generate_artwork_specific_films(fake_exe):
 async def test_run_allegro_generate_artwork_list_only(fake_exe):
     result = await run_allegro_generate_artwork("board.brd", list_only=True)
     assert result["command"][1:] == ["-l", "board.brd"]
+    assert "art_files" not in result  # list_only never launches a real pour, no poll needed
+
+
+# Regression coverage: artwork.exe exits nonzero ("ARTWORK had warnings") even on a
+# fully successful run that genuinely produced real .art files -- confirmed live. A
+# caller trusting state=="failed" alone would wrongly discard a real result.
+
+
+@dataclass
+class _FakeArtworkRecord:
+    job_id: str
+    job_dir: str
+    command: list
+    state: str = "failed"
+    returncode: int | None = 1
+
+
+class _FakeJobManagerFixedState:
+    def __init__(self, record):
+        self._record = record
+
+    def get(self, job_id):
+        return self._record
+
+
+@pytest.mark.asyncio
+async def test_run_allegro_generate_artwork_rc1_with_real_art_files(tmp_path, monkeypatch):
+    import sigrity_mcp.core.jobs as jobs_module
+    import sigrity_mcp.domains.cad.allegro_manufacturing_tools as mfg_module
+
+    job_dir = tmp_path / "job"
+    job_dir.mkdir()
+    (job_dir / "TOP.art").write_text("G04 File Format: Gerber RS274X\n", encoding="utf-8")
+    (job_dir / "BOTTOM.art").write_text("G04 File Format: Gerber RS274X\n", encoding="utf-8")
+    fake_record = _FakeArtworkRecord(job_id="fake-artwork", job_dir=str(job_dir), command=["artwork.exe"])
+
+    async def _fake_submit_job(*args, **kwargs):
+        return fake_record
+
+    monkeypatch.setattr(mfg_module, "submit_job", _fake_submit_job)
+    monkeypatch.setattr(jobs_module, "job_manager", _FakeJobManagerFixedState(fake_record))
+
+    result = await run_allegro_generate_artwork("board.brd")
+    assert sorted(result["art_files"]) == ["BOTTOM.art", "TOP.art"]
+    assert "do not treat state='failed'" in result["note"]
 
 
 @pytest.mark.asyncio

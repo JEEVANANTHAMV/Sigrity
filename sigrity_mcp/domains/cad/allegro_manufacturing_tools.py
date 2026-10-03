@@ -59,11 +59,28 @@ on an unresolved relative path instead of failing cleanly.
 
 from __future__ import annotations
 
+import asyncio
+import time
+from pathlib import Path
 from typing import Literal, Optional
 
 from sigrity_mcp.core.paths import resolve_path as _resolve
 from sigrity_mcp.core.process import submit_job
 from sigrity_mcp.mcp_app import mcp
+
+
+async def _wait_for_terminal_state(job_id: str, poll_timeout_seconds: float) -> str:
+    """Bounded poll for a job to reach any terminal state, returning whatever state is
+    current when the window expires (never raises, never blocks past the timeout)."""
+    from sigrity_mcp.core.jobs import job_manager
+
+    deadline = time.monotonic() + poll_timeout_seconds
+    while time.monotonic() < deadline:
+        current = job_manager.get(job_id)
+        if current.state != "running":
+            return current.state
+        await asyncio.sleep(min(1.0, max(0.0, deadline - time.monotonic())))
+    return job_manager.get(job_id).state
 
 
 @mcp.tool
@@ -119,7 +136,31 @@ See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfa
             args += ["-f", film]
         args.append(board_file)
     record = await submit_job(tool="allegro_artwork", build_args=args)
-    return {"job_id": record.job_id, "state": record.state, "job_dir": record.job_dir, "command": record.command}
+    result = {"job_id": record.job_id, "state": record.state, "job_dir": record.job_dir, "command": record.command}
+
+    if list_only:
+        return result
+
+    final_state = await _wait_for_terminal_state(record.job_id, poll_timeout_seconds=60.0)
+    result["state"] = final_state
+    if final_state != "running":
+        job_dir = Path(record.job_dir)
+        art_files = sorted(str(p.name) for p in job_dir.glob("*.art"))
+        result["art_files"] = art_files
+        if not art_files:
+            result["note"] = (
+                "artwork.exe produced no .art files -- the board likely has no film "
+                "records defined yet. Run allegro_create_film + allegro_save_design + "
+                "allegro_run_session on this board first, then re-run."
+            )
+        elif final_state == "failed":
+            result["note"] = (
+                "artwork.exe exits with a nonzero return code ('ARTWORK had warnings') "
+                f"even on a fully successful run -- real .art files were produced "
+                f"({art_files}), so do not treat state='failed' alone as proof this "
+                "run failed. Check photoplot.log in job_dir for the actual warnings."
+            )
+    return result
 
 
 @mcp.tool

@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
@@ -103,3 +104,73 @@ async def test_new_blank_board_overwrite_true_replaces(tmp_path):
 async def test_new_blank_board_missing_template_raises(tmp_path):
     with pytest.raises(FileNotFoundError):
         await allegro_new_blank_board(str(tmp_path / "new_design.brd"), template_file=str(tmp_path / "nope.brd"))
+
+
+# --- dxf2a rc-1-on-success / Invalid-class detection --------------------------------
+#
+# Regression coverage for two real, confirmed-live dxf2a quirks: it exits nonzero even
+# on a fully successful run (the real completion signal is "dxf2a complete." in the
+# log, not rc), and a fresh design's default class table silently drops geometry for
+# any DXF layer mapped to a class it doesn't recognize ("ERROR: Invalid class X.").
+
+
+@dataclass
+class _FakeRecord:
+    job_id: str
+    job_dir: str
+    command: list
+    state: str = "failed"
+    returncode: int | None = 1
+
+
+class _FakeJobManagerFixedState:
+    def __init__(self, record):
+        self._record = record
+
+    def get(self, job_id):
+        return self._record
+
+
+@pytest.mark.asyncio
+async def test_import_dxf_detects_completion_marker_despite_nonzero_rc(tmp_path, monkeypatch):
+    import sigrity_mcp.core.jobs as jobs_module
+    import sigrity_mcp.domains.cad.allegro_import_tools as import_module
+
+    job_dir = tmp_path / "job"
+    job_dir.mkdir()
+    (job_dir / "run.log").write_text("...\ndxf2a complete.\n", encoding="utf-8")
+    fake_record = _FakeRecord(job_id="fake-dxf2a", job_dir=str(job_dir), command=["dxf2a.exe"])
+
+    async def _fake_submit_job(*args, **kwargs):
+        return fake_record
+
+    monkeypatch.setattr(import_module, "submit_job", _fake_submit_job)
+    monkeypatch.setattr(jobs_module, "job_manager", _FakeJobManagerFixedState(fake_record))
+
+    result = await allegro_import_dxf("layers.cnv", "outline.dxf", "new.brd")
+    assert result["dxf2a_completed"] is True
+    assert "do not treat state='failed'" in result["note"]
+
+
+@pytest.mark.asyncio
+async def test_import_dxf_detects_invalid_class_partial_import(tmp_path, monkeypatch):
+    import sigrity_mcp.core.jobs as jobs_module
+    import sigrity_mcp.domains.cad.allegro_import_tools as import_module
+
+    job_dir = tmp_path / "job"
+    job_dir.mkdir()
+    (job_dir / "run.log").write_text(
+        "ERROR: Invalid class CONDUCTOR.\nERROR: Invalid class CONDUCTOR.\ndxf2a complete.\n",
+        encoding="utf-8",
+    )
+    fake_record = _FakeRecord(job_id="fake-dxf2a-2", job_dir=str(job_dir), command=["dxf2a.exe"])
+
+    async def _fake_submit_job(*args, **kwargs):
+        return fake_record
+
+    monkeypatch.setattr(import_module, "submit_job", _fake_submit_job)
+    monkeypatch.setattr(jobs_module, "job_manager", _FakeJobManagerFixedState(fake_record))
+
+    result = await allegro_import_dxf("layers.cnv", "outline.dxf", "new.brd")
+    assert result["invalid_classes"] == ["CONDUCTOR"]
+    assert "CONDUCTOR" in result["note"]

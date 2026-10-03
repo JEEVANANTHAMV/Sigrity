@@ -82,6 +82,9 @@ second completion time, suspect this before assuming a hang.
 from __future__ import annotations
 
 import shutil
+import asyncio
+import re
+import time
 from pathlib import Path
 from typing import Literal, Optional
 
@@ -95,6 +98,22 @@ _UNITS = Literal["MILS", "INCHES", "CM", "MM", "MICRONS"]
 # Relative to SIGRITY_CADENCE_SPB_HOME — confirmed present on disk, a real shipped blank
 # 2-layer board (~322KB), not a placeholder/template with unresolved @project@ tokens.
 BLANK_BOARD_TEMPLATE = Path("share") / "cdssetup" / "ult" / "2layer.brd"
+
+_INVALID_CLASS_RE = re.compile(r"ERROR: Invalid class (\S+)\.")
+
+
+async def _wait_for_terminal_state(job_id: str, poll_timeout_seconds: float) -> str:
+    """Bounded poll for a job to reach any terminal state, returning whatever state is
+    current when the window expires (never raises, never blocks past the timeout)."""
+    from sigrity_mcp.core.jobs import job_manager
+
+    deadline = time.monotonic() + poll_timeout_seconds
+    while time.monotonic() < deadline:
+        current = job_manager.get(job_id)
+        if current.state != "running":
+            return current.state
+        await asyncio.sleep(min(1.0, max(0.0, deadline - time.monotonic())))
+    return job_manager.get(job_id).state
 
 
 @mcp.tool
@@ -123,7 +142,36 @@ See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfa
         args.append("-t")
     args += [_resolve(cnv_file), _resolve(dxf_file), _resolve(board_file)]
     record = await submit_job(tool="dxf2a", build_args=args)
-    return {"job_id": record.job_id, "state": record.state, "job_dir": record.job_dir, "command": record.command}
+    result = {"job_id": record.job_id, "state": record.state, "job_dir": record.job_dir, "command": record.command}
+
+    final_state = await _wait_for_terminal_state(record.job_id, poll_timeout_seconds=60.0)
+    result["state"] = final_state
+    if final_state != "running":
+        log_path = Path(record.job_dir) / "run.log"
+        try:
+            log_text = log_path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            log_text = ""
+        completed = "dxf2a complete." in log_text
+        invalid_classes = sorted(set(_INVALID_CLASS_RE.findall(log_text)))
+        result["dxf2a_completed"] = completed
+        if completed and final_state == "failed":
+            result["note"] = (
+                "dxf2a.exe exits with a nonzero return code even on a fully successful "
+                "run (confirmed: 'dxf2a complete.' is present in the log) -- do not "
+                "treat state='failed' alone as proof this import failed."
+            )
+        if invalid_classes:
+            result["invalid_classes"] = invalid_classes
+            result["note"] = (
+                result.get("note", "") + " "
+                f"dxf2a dropped geometry for unmapped class(es) {invalid_classes} -- "
+                "this is a real partial import (the .brd was still written). Re-read "
+                "it with run_allegro_report(report_code='sum') to confirm per-layer "
+                "completeness, or pass update_existing=True against a board whose "
+                "class table already defines these classes."
+            ).strip()
+    return result
 
 
 @mcp.tool
