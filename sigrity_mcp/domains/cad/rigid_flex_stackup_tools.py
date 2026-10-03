@@ -313,7 +313,7 @@ See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfa
             }
         )
 
-    return {
+    result = {
         "session_id": session_id,
         "layer_count": len(layers),
         "queued_layers": queued,
@@ -327,6 +327,20 @@ See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfa
         "zone/ref_plane/hatched_plane are informational metadata only, not settable via any "
         "SKILL API found on this install -- see this tool's docstring for what was checked.",
     }
+    collision_names = [
+        layer.get("name") for layer in layers
+        if str(layer.get("name", "")).upper() in ("TOP", "BOTTOM")
+    ]
+    if collision_names:
+        result["warning"] = (
+            f"Layer(s) named {collision_names} will be SILENTLY SKIPPED by Allegro "
+            "(name collision with the board's pre-existing outer TOP/BOTTOM layers) -- "
+            "no duplicate is created and the existing entry's attributes are NOT "
+            "modified. Drop these entries from `layers` if you want only internal "
+            "layers created, or separately drive axlXSectionGet/axlXSectionModify/"
+            "axlXSectionSet to change the outer layers' attributes."
+        )
+    return result
 
 
 @mcp.tool

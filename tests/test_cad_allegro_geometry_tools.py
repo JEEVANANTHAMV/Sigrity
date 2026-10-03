@@ -204,6 +204,8 @@ async def test_delete_connect_default_ripup():
     sid = session["session_id"]
     result = await allegro_delete_connect(sid, "NET", "N00885")
     assert result["ripup"] is True
+    assert "DESTRUCTIVE" in result["warning"]
+    assert "allegro_assign_net" in result["warning"]
     preview = await preview_tcl_session(sid)
     assert (
         "skill (axlDeleteObject (car (axlSelectByName \"NET\" \"N00885\")) 'ripup)"
@@ -247,4 +249,71 @@ async def test_get_module_instance_location():
         'skill (axlGetModuleInstanceLocation (car (axlSelectByName "GROUP" "U1_inst")))'
         in preview["script"]
     )
+    await close_tcl_session(sid)
+
+
+@pytest.mark.asyncio
+async def test_delete_connect_no_warning_for_non_net_object_type():
+    session = await start_allegro_session()
+    sid = session["session_id"]
+    result = await allegro_delete_connect(sid, "PIN", "U1.1")
+    assert "warning" not in result
+    await close_tcl_session(sid)
+
+
+# --- allegro_create_trace: self-overlapping path pre-flight check ------------------
+#
+# Regression coverage for a real failure signature: axlDBCreatePath silently returns
+# nil (0 segments, Missing Connections: 1) for a path that retraces part of its own
+# prior extent -- same symptom as the bare-layer-name/zero-width bugs, different cause.
+
+
+@pytest.mark.asyncio
+async def test_create_trace_rejects_self_overlapping_horizontal_path():
+    session = await start_allegro_session()
+    sid = session["session_id"]
+    # Two horizontal segments at y=0: [0,10]->[0,0] is really x 0..10, then x 5..15 --
+    # these overlap in x-range [5,10].
+    with pytest.raises(ValueError, match="self-overlaps"):
+        await allegro_create_trace(
+            sid, [[0, 0], [10, 0], [5, 0], [15, 0]], "TOP", "GND", width=5.0
+        )
+    await close_tcl_session(sid)
+
+
+@pytest.mark.asyncio
+async def test_create_trace_rejects_self_overlapping_vertical_path():
+    session = await start_allegro_session()
+    sid = session["session_id"]
+    with pytest.raises(ValueError, match="self-overlaps"):
+        await allegro_create_trace(
+            sid, [[0, 0], [0, 10], [0, 5], [0, 15]], "TOP", "GND", width=5.0
+        )
+    await close_tcl_session(sid)
+
+
+@pytest.mark.asyncio
+async def test_create_trace_allows_segments_touching_at_a_corner():
+    # A valid L-shaped corner: segments share an endpoint but do not overlap in extent.
+    session = await start_allegro_session()
+    sid = session["session_id"]
+    result = await allegro_create_trace(
+        sid, [[0, 0], [10, 0], [10, 10]], "TOP", "GND", width=5.0
+    )
+    assert result["point_count"] == 3
+    await close_tcl_session(sid)
+
+
+@pytest.mark.asyncio
+async def test_create_trace_allows_a_real_meander_with_no_overlap():
+    # A genuine meander (back-and-forth) that does NOT retrace its own extent -- each
+    # horizontal leg is at a different Y, so no two collinear segments overlap.
+    session = await start_allegro_session()
+    sid = session["session_id"]
+    result = await allegro_create_trace(
+        sid,
+        [[0, 0], [10, 0], [10, 5], [0, 5], [0, 10], [10, 10]],
+        "TOP", "GND", width=5.0,
+    )
+    assert result["point_count"] == 6
     await close_tcl_session(sid)

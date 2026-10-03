@@ -62,6 +62,35 @@ async def test_generate_multilayer_stackup_composes_in_given_order_not_reversed(
 
 
 @pytest.mark.asyncio
+async def test_generate_multilayer_stackup_warns_on_top_bottom_name_collision():
+    # Regression: a layer named "TOP"/"BOTTOM" (case-insensitive) collides with the
+    # board's own pre-existing outer layers and is silently skipped by Allegro -- no
+    # duplicate, no error, no attribute change. Must surface a warning instead of
+    # reporting it as queued with no caveat.
+    session = await start_allegro_session()
+    sid = session["session_id"]
+    layers = [
+        {"name": "top", "layer_type": "CONDUCTOR", "material": "COPPER", "thickness_mil": 1.4},
+        {"name": "INNER1", "layer_type": "PLANE", "material": "COPPER", "thickness_mil": 1.4},
+        {"name": "BOTTOM", "layer_type": "CONDUCTOR", "material": "COPPER", "thickness_mil": 1.4},
+    ]
+    result = await generate_multilayer_stackup(sid, layers=layers)
+    assert "SILENTLY SKIPPED" in result["warning"]
+    assert "top" in result["warning"] and "BOTTOM" in result["warning"]
+    await close_tcl_session(sid)
+
+
+@pytest.mark.asyncio
+async def test_generate_multilayer_stackup_no_warning_for_normal_layer_names():
+    session = await start_allegro_session()
+    sid = session["session_id"]
+    layers = [{"name": "L2_GND", "layer_type": "PLANE", "material": "COPPER", "thickness_mil": 1.4}]
+    result = await generate_multilayer_stackup(sid, layers=layers)
+    assert "warning" not in result
+    await close_tcl_session(sid)
+
+
+@pytest.mark.asyncio
 async def test_generate_multilayer_stackup_rejects_empty_or_unnamed_layers():
     session = await start_allegro_session()
     sid = session["session_id"]

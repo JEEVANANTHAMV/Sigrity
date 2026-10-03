@@ -138,6 +138,43 @@ def _etch_layer_arg(layer: str) -> str:
 
 
 @mcp.tool
+def _check_self_overlap(points: list[list[float]]) -> None:
+    """Raise ValueError if any two collinear (both-horizontal or both-vertical)
+    segments of this path overlap in extent. A self-overlapping path (e.g. a meander
+    that doubles back over part of its own previous run) causes `axlDBCreatePath` to
+    silently return nil (0 segments created, Missing Connections: 1) with no error --
+    this is the same failure signature as the bare-layer-name/zero-width bugs this
+    module already fixed, but a different root cause. Strict inequality on the overlap
+    test allows two segments to merely touch at a shared endpoint (a valid corner)."""
+    n = len(points)
+    for i in range(n - 1):
+        x1, y1 = points[i]
+        x2, y2 = points[i + 1]
+        for j in range(i + 1, n - 1):
+            x3, y3 = points[j]
+            x4, y4 = points[j + 1]
+            if y1 == y2 and y3 == y4 and y1 == y3:
+                lo1, hi1 = min(x1, x2), max(x1, x2)
+                lo2, hi2 = min(x3, x4), max(x3, x4)
+                if lo1 < hi2 and lo2 < hi1:
+                    raise ValueError(
+                        f"Path self-overlaps: horizontal segments at y={y1} "
+                        f"(points {i}->{i + 1}) and (points {j}->{j + 1}) overlap in "
+                        f"x-range [{lo1},{hi1}] vs [{lo2},{hi2}]. axlDBCreatePath "
+                        "will silently return nil for this path."
+                    )
+            elif x1 == x2 and x3 == x4 and x1 == x3:
+                lo1, hi1 = min(y1, y2), max(y1, y2)
+                lo2, hi2 = min(y3, y4), max(y3, y4)
+                if lo1 < hi2 and lo2 < hi1:
+                    raise ValueError(
+                        f"Path self-overlaps: vertical segments at x={x1} "
+                        f"(points {i}->{i + 1}) and (points {j}->{j + 1}) overlap in "
+                        f"y-range [{lo1},{hi1}] vs [{lo2},{hi2}]. axlDBCreatePath "
+                        "will silently return nil for this path."
+                    )
+
+
 async def allegro_create_trace(
     session_id: str,
     points: list[list[float]],
@@ -177,6 +214,7 @@ async def allegro_create_trace(
 See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
     if len(points) < 2:
         raise ValueError("A trace needs at least two points.")
+    _check_self_overlap(points)
     path_expr = f"(axlPathStart {_point_list(points)} {width})"
     skill_layer = _etch_layer_arg(layer)
     expr = f"(axlDBCreatePath {path_expr} {skill_str(skill_layer)} {skill_str(net_name)})"
@@ -324,17 +362,39 @@ async def allegro_delete_connect(
     `allegro_run_session`, independently confirm via `run_allegro_report(...,
     report_code="sum")` (nets/pins/connections unchanged, the net now shows as
     ratsnest/unrouted) or `run_allegro_batch_drc` (the target violation gone).
+
+    **CAUTION**: despite the doc text above, `object_type="NET"` was confirmed LIVE to
+    be DESTRUCTIVE to the net's logical identity, not just its etch (real net count
+    dropped 75->74, the net's pins went to Unused, and a subsequent
+    `allegro_create_trace` for that net silently created nothing since the net no
+    longer existed). For a non-destructive rip-up-and-reroute, use
+    `allegro_assign_net(object_type="PIN", object_name=<a pin on the net>,
+    net_name=<the net's own name>, ripup=True)` instead — see the `warning` field in
+    the return value for `object_type="NET"`.
 See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
     select_expr = f"(car (axlSelectByName {skill_str(object_type)} {skill_str(object_name)}))"
     mode_arg = " 'ripup" if ripup else ""
     expr = f"(axlDeleteObject {select_expr}{mode_arg})"
     tcl_sessions.add_line(session_id, _skill_line(expr))
-    return {
+    result = {
         "session_id": session_id,
         "object_type": object_type,
         "object_name": object_name,
         "ripup": ripup,
     }
+    if object_type.upper() == "NET":
+        result["warning"] = (
+            "DESTRUCTIVE: axlDeleteObject on a NET dbid deletes the net's LOGICAL "
+            "IDENTITY entirely (not just its etch) -- confirmed live (net count "
+            "dropped 75->74, pins went to Unused). The net ceases to exist; a "
+            "subsequent allegro_create_trace(net_name=<this net>) will silently "
+            "create NOTHING (axlDBCreatePath returns nil for a nonexistent net). For "
+            "a non-destructive rip-up-and-reroute, use "
+            "allegro_assign_net(object_type='PIN', object_name='<a pin on the net>', "
+            "net_name='<the net's own name>', ripup=True) instead -- that strips the "
+            "connected clines while leaving the net and its pins intact."
+        )
+    return result
 
 
 def _closed_path_expr(points: list[list[float]]) -> str:
