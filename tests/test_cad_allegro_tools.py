@@ -85,6 +85,23 @@ async def test_run_session_builds_correct_argv_and_appends_quit(fake_exe):
     assert result["command"][2].endswith("macro.scr")
     assert result["command"][3] == "board.brd"
     assert len(result["command"]) == 4
+    # No axlSaveDesign in this session -- no .jrl-journal warning expected.
+    assert "note" not in result
 
     finished = await fake_exe["jobs"].wait(result["job_id"], timeout=10)
     assert finished.state in ("succeeded", "failed")
+
+
+@pytest.mark.asyncio
+async def test_run_session_warns_about_jrl_journal_when_session_saves_design(fake_exe):
+    # Regression: SKILL-level save errors (e.g. the ?noCheck keyword bug) are logged
+    # only to Allegro's own .jrl journal, never to run.log -- a state="succeeded"
+    # result is not proof the save actually executed. Surface that at the call site
+    # whenever the session's own script queues an axlSaveDesign call.
+    session = await start_allegro_session()
+    sid = session["session_id"]
+    await allegro_save_design(sid)
+
+    result = await allegro_run_session(sid, board_file="board.brd")
+    assert "axlSaveDesign" in result["note"]
+    assert ".jrl" in result["note"]

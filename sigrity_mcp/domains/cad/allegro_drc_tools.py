@@ -31,15 +31,45 @@ launches correctly and is license-fetching (no dialog, no crash), but a correct
 
 from __future__ import annotations
 
+import asyncio
+import time
+from pathlib import Path
 from typing import Optional
 
 from sigrity_mcp.core.process import submit_job
 from sigrity_mcp.mcp_app import mcp
 
+_BATCH_DRC_COMPLETION_MARKER = "DRC update completed"
+
 
 @mcp.tool
-async def run_allegro_batch_drc(board_file: str, output_file: Optional[str] = None, nographic: bool = True) -> dict:
+async def run_allegro_batch_drc(
+    board_file: str,
+    output_file: Optional[str] = None,
+    nographic: bool = True,
+    poll_timeout_seconds: float = 60.0,
+) -> dict:
     """Run a headless DRC pass over an Allegro board and write a DRC report, as a background job.
+
+    Confirmed live (real on-disk job records, not just documentation): `batch_drc.exe`'s
+    launcher process intermittently detaches before the DRC work itself finishes writing
+    its own `batch_drc.log` completion marker -- the job's own state/returncode then
+    never reaches a terminal value (confirmed: real job dirs with a complete
+    `batch_drc.log` ending "DRC update completed" and a complete `dbdoctor.log`, yet
+    `state:"running"`/`returncode:null` forever). This is intermittent, not universal
+    (the large majority of runs resolve normally via the launcher's own exit).
+
+    To avoid returning a misleading `state:"running"` for a job that may already be
+    done, this call blocks for up to `poll_timeout_seconds` (default 60s, well past the
+    tool's real observed ~1-15s runtime) re-checking both the job's own state and
+    `batch_drc.log`'s completion marker. If the job reaches a real terminal state first,
+    the corrected state is returned with no other change. If the log's completion
+    marker appears while the job record is still stuck at "running" (the detached-
+    launcher case), a `note` field says so explicitly and points at `batch_drc.log`/
+    `dbdoctor.log` for the real results, instead of leaving the caller to trust a
+    state that will never change. If neither happens within the window, today's
+    original behavior is preserved exactly (the record as-is, no note) -- not a
+    regression for genuinely slow/stuck runs.
 See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
     args = []
     if nographic:
@@ -48,7 +78,34 @@ See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfa
     if output_file:
         args.append(output_file)
     record = await submit_job(tool="allegro_batch_drc", build_args=args)
-    return {"job_id": record.job_id, "state": record.state, "job_dir": record.job_dir, "command": record.command}
+    result = {"job_id": record.job_id, "state": record.state, "job_dir": record.job_dir, "command": record.command}
+
+    from sigrity_mcp.core.jobs import job_manager
+
+    log_path = Path(record.job_dir) / "batch_drc.log"
+    deadline = time.monotonic() + poll_timeout_seconds
+    while time.monotonic() < deadline:
+        current = job_manager.get(record.job_id)
+        if current.state != "running":
+            result["state"] = current.state
+            result["returncode"] = current.returncode
+            return result
+        try:
+            tail = log_path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            tail = ""
+        if _BATCH_DRC_COMPLETION_MARKER in tail:
+            result["note"] = (
+                "batch_drc.exe's launcher process detached before its job record "
+                "reached a terminal state -- a known, intermittent launcher quirk, not "
+                "a sign the DRC pass failed. Real completion was detected instead via "
+                f"batch_drc.log's '{_BATCH_DRC_COMPLETION_MARKER}' marker: the DRC pass "
+                "is done. Read batch_drc.log/dbdoctor.log in job_dir for the real "
+                "results; do not keep waiting on this job's state to change."
+            )
+            return result
+        await asyncio.sleep(min(2.0, max(0.0, deadline - time.monotonic())))
+    return result
 
 
 @mcp.tool

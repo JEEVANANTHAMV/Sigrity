@@ -190,7 +190,8 @@ See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfa
 async def allegro_run_session(session_id: str, board_file: str) -> dict:
     """Write out the session's accumulated SKILL macro and launch Allegro against a real board as a background job.
 See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
-    tcl_sessions.add_line(session_id, "quit")
+    session = tcl_sessions.add_line(session_id, "quit")
+    has_save = any("axlSaveDesign" in line for line in session.script._lines)
     clear_stale_design_lock(board_file)
     record = await run_session(
         session_id,
@@ -199,4 +200,13 @@ See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfa
         extra_args=[board_file],
         script_filename="macro.scr",
     )
-    return {"job_id": record.job_id, "state": record.state, "job_dir": record.job_dir, "command": record.command}
+    result = {"job_id": record.job_id, "state": record.state, "job_dir": record.job_dir, "command": record.command}
+    if has_save:
+        result["note"] = (
+            "SKILL-level errors (e.g. an unrecognized axlSaveDesign keyword) are logged "
+            "to Allegro's own .jrl journal next to the board file, NOT to run.log -- a "
+            "state='succeeded' result is not proof the queued save actually executed. "
+            "Verify the expected output file genuinely changed (size/mtime, or an "
+            "independent report.exe read-back) before trusting this result."
+        )
+    return result

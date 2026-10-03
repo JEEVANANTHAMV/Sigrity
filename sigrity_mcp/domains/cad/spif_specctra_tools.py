@@ -128,4 +128,18 @@ async def run_specctra_import_session(board_file: str, session_file: str) -> dic
 See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
     args = ["-i", board_file, session_file]
     record = await submit_job(tool="spif_batch", build_args=args)
-    return {"job_id": record.job_id, "state": record.state, "job_dir": record.job_dir, "command": record.command}
+    return {
+        "job_id": record.job_id,
+        "state": record.state,
+        "job_dir": record.job_dir,
+        "command": record.command,
+        "warning": (
+            "spif_batch.exe -i is CONFIRMED BROKEN on this installation (SPMHDB-238 "
+            "crash, deterministic). Do NOT use this as the primary import path -- use "
+            "run_allegro_specctra_import instead. Do NOT wait_for_job on this job: the "
+            "launcher crashes and detaches, so the job record stays "
+            "state='running'/returncode=None forever. If you must inspect the result, "
+            "poll list_job_files for a spif_batch_P*.AllegroMiniDump.dmp artifact and "
+            "read run.log for 'ERROR(SPMHDB-238)'."
+        ),
+    }

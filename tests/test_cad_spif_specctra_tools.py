@@ -36,6 +36,10 @@ async def test_run_specctra_autoroute_graphics_mode(fake_exe):
 async def test_run_specctra_import_session(fake_exe):
     result = await run_specctra_import_session("board.brd", "routed.ses")
     assert result["command"][1:] == ["-i", "board.brd", "routed.ses"]
+    # Regression: this path is confirmed broken (SPMHDB-238 crash) with no automated
+    # guardrail against a caller picking it over run_allegro_specctra_import.
+    assert "SPMHDB-238" in result["warning"]
+    assert "run_allegro_specctra_import" in result["warning"]
 
 
 @pytest.mark.asyncio
