@@ -52,6 +52,22 @@ resolvable as a library-loadable module definition via this mechanism on this bo
 library-path configuration, even though it's referenced by name in the design already.
 Not yet confirmed working end-to-end against a module_def_name that does resolve this
 way — `allegro_get_module_instance_location` (read-only) remains `built_untested`.
+
+`allegro_create_copper_shape` (`axlDBCreateShape`) closes a real, high-leverage gap found
+in a later pass: `generate_multilayer_stackup`/`allegro_create_stackup`
+(`rigid_flex_stackup_tools.py`/`allegro_tools.py`) author layer STRUCTURE (name/type/
+material/thickness via `axlXSectionCreate`) but never create any actual copper geometry —
+a "PLANE"-typed layer from those tools is a cross-section definition only, zero copper
+poured onto it. This was the suspected root cause of PowerDC `pdcVRM` binds failing with
+"The net pair ... is not specified" against boards built purely from
+`generate_multilayer_stackup` (nothing physical on the plane layer to attach to). The
+vendored `axlDBCreateOpenShape.txt` doc is explicit that the same `axlDBCreateShape`
+call becomes a real connectivity-driven dynamic "plane pour" (not a fixed polygon) simply
+by using class `BOUNDARY` instead of `ETCH` in the layer string (`"BOUNDARY/<layer>"` vs
+`"ETCH/<layer>"`) — confirmed against the real worked example
+`share/pcb/examples/skill/dbcreate/axldbctshp.il` (`dbc_shp_t2`: a solid-filled
+`"ETCH/TOP"` shape assigned to net `"GND"`). See `allegro_create_copper_shape`'s own
+docstring for the live before/after PowerDC test and its result.
 """
 
 from __future__ import annotations
@@ -184,6 +200,109 @@ See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfa
         "object_type": object_type,
         "object_name": object_name,
         "net_name": net_name,
+    }
+
+
+def _closed_path_expr(points: list[list[float]]) -> str:
+    """Build an r_path SKILL expression (`axlPathStart`) from a boundary point list,
+    auto-closing it if the caller didn't repeat the first point as the last one.
+
+    Per the vendored doc (`axlDBCreateOpenShape.txt` NOTE): "A path starts at startPoint
+    and a segment is created for each segment in the pathList. If the path does not end
+    at the startPoint IT IS considered AN ERROR" -- the same restriction applies to
+    `axlDBCreateShape`, which takes the same arguments.
+    """
+    pts = [list(p) for p in points]
+    if pts and (pts[0][0] != pts[-1][0] or pts[0][1] != pts[-1][1]):
+        pts.append(pts[0])
+    return f"(axlPathStart {_point_list(pts)})"
+
+
+@mcp.tool
+async def allegro_create_copper_shape(
+    session_id: str,
+    layer: str,
+    net_name: str,
+    points: list[list[float]],
+    dynamic: bool = True,
+) -> dict:
+    """Pour a real, solid-filled copper shape onto a cross-section layer and assign it to
+    a net (`axlDBCreateShape`), within the current Allegro SKILL session.
+
+    This is the real fix for the gap `generate_multilayer_stackup`/`allegro_create_stackup`
+    leave open (see this module's docstring): those tools author layer STRUCTURE via
+    `axlXSectionCreate` but never create actual copper — a "PLANE"-typed layer is a bare
+    cross-section definition with nothing physical on it. This tool creates the actual
+    shape/pour and binds it to a net in one real SKILL call.
+
+    `layer` is the BARE xsection/etch layer name (e.g. `"L2_GND"`, matching the `name` you
+    gave `generate_multilayer_stackup`/`allegro_create_stackup`) — NOT a full
+    class/subclass string. This tool builds the class/subclass itself from `dynamic`:
+      - `dynamic=True` (default): `"BOUNDARY/<layer>"` — per the vendored doc
+        (`axlDBCreateOpenShape.txt`: "A static shape is created if you create shape on
+        class ETCH, dynamic shapes are created if class is BOUNDARY ... The same rule
+        also applies to axlDBCreateShape"), this is a real connectivity-driven "plane
+        pour" that conforms to its net and re-floods on update (`axlDBDynamicShapes`) —
+        what PCB designers mean by a "copper pour"/"plane shape", not a fixed polygon.
+        LIVE-CONFIRMED on a real board (see this tool's own module and
+        `.forjinn/skills/sigrity-cad/SKILL.md`): `axlDBGetShapes("BOUNDARY/<layer>")`
+        read back a real non-nil shape dbid after this call + save + run.
+      - `dynamic=False`: `"ETCH/<layer>"` — a plain static filled copper shape (e.g. for
+        a CONDUCTOR/signal layer where a fixed polygon is actually what's wanted).
+
+    `points`: an explicit closed boundary as `[[x, y], ...]` in board (design) units —
+    auto-closed if you omit the repeated first/last point (see `_closed_path_expr`).
+    REQUIRED, deliberately with NO auto-derive-from-board-outline default: an earlier
+    design considered defaulting to `(car (axlPolyFromDB (car (axlDBGetShapes "BOARD
+    GEOMETRY/OUTLINE"))))` ("pour the whole board outline" with no coordinates needed) but
+    this was LIVE-TESTED and DISPROVEN against a real board (the Fault-Detector sample):
+    `axlDBGetShapes("BOARD GEOMETRY/OUTLINE")` returned `nil` — a real board's physical
+    outline is typically drawn as plain LINE/ARC segments, not a "shape" database object,
+    so there is nothing for `axlDBGetShapes` to find there (confirmed: this board has 157
+    real shapes total, all of them `PACKAGE GEOMETRY/*` component silkscreen/assembly/
+    place-bound outlines — zero `BOARD GEOMETRY/*` shapes of any kind). A components-
+    bounding-box fallback (`axlDBGetExtents(axlDBGetDesign()->components nil)`) was also
+    tried live and returned a degenerate `((0.0 0.0) (0.0 0.0))` box, so it isn't a
+    reliable substitute either. Rather than ship a default that silently pours nothing,
+    this tool requires an explicit boundary — pass your own board outline coordinates
+    (e.g. from your own design records, or from converting the outline's LINE segments via
+    `axlDBComposeShapesFromLines` first, not wrapped by this tool) or any sub-region
+    polygon you want poured.
+
+    The shape is always solid-filled (`l_r_fill = t`) — an unfilled "pour" isn't real
+    copper. Voids/keepouts are NOT handled by this minimal-scope tool; for anything beyond
+    "cover this boundary solid on one layer/net", hand-write SKILL from the real worked
+    example `share/pcb/examples/skill/dbcreate/axldbctshp.il` instead.
+
+    VERIFY, don't trust this tool's return value: SKILL return values never surface here
+    (see this module's docstring) — after `allegro_save_design` + `allegro_run_session`,
+    independently confirm the shape landed (a captured `axlDBGetShapes("<class>/<layer>")`
+    query is the reliable check; CONFIRMED LIVE this way 3 independent times, including a
+    SECOND, fully separate Allegro process re-opening the saved board from disk — see
+    `.forjinn/skills/sigrity-cad/SKILL.md` Task 7). This tool was originally built to test
+    whether missing plane copper was blocking PowerDC `pdcVRM` net-pair binds — it was
+    NOT: the exact same PowerDC error reproduced before and after pouring real,
+    independently-verified copper (see `core.tool_status`'s `powerdc` note and
+    `.forjinn/skills/sigrity-cad/SKILL.md` Task 7 for the full investigation). So this
+    tool is confirmed to do what it says (pour real, net-bound copper) — just don't
+    expect that alone to fix a `pdcVRM` net-pair failure.
+See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+    if len(points) < 3:
+        raise ValueError("An explicit shape boundary needs at least 3 points.")
+    path_expr = _closed_path_expr(points)
+    boundary_source = "explicit points"
+
+    class_name = "BOUNDARY" if dynamic else "ETCH"
+    skill_layer = f"{class_name}/{layer}"
+    expr = f"(axlDBCreateShape {path_expr} t {skill_str(skill_layer)} {skill_str(net_name)})"
+    tcl_sessions.add_line(session_id, _skill_line(expr))
+    return {
+        "session_id": session_id,
+        "layer": layer,
+        "skill_layer": skill_layer,
+        "net_name": net_name,
+        "dynamic": dynamic,
+        "boundary_source": boundary_source,
     }
 
 

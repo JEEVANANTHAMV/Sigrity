@@ -126,6 +126,35 @@ async def run_session(
     (SKILL command-replay via `-s`, written as `.scr`) — see `core.process.submit_job`'s
     docstring for the exact semantics.
 
+    `tool in ("allegro", "capture")` always launches as `dismiss_dialogs=True` -- every
+    `run_session` caller that passes `tool="allegro"` is a real
+    `allegro.exe -s <script> <board>` interactive-GUI launch (confirmed by grep across
+    the domain modules: every other Allegro-family batch exe -- report.exe,
+    batch_drc.exe, designextractor.exe, ... -- goes through `core.process.submit_job`
+    directly under its own distinct tool name, not through a script session at all), and
+    this is CONFIRMED LIVE to be able to raise a modal startup dialog with nothing
+    present to click it -- see `core.win32gui_helper.DismissWatcher`'s docstring for the
+    live repro evidence. Setting this here, once, means every current and future
+    `tool="allegro"` call site (`allegro_tools.allegro_run_session`,
+    `aurora.scope_tools`'s in-design-analysis workflow, `allegro_placement_tools`'s
+    zrouter run, `spif_specctra_tools`'s SPECCTRA import) gets the fix automatically,
+    with nothing for any of those call sites (or the LLM agent calling them) to remember
+    to do.
+
+    `capture_run_session` (`tool="capture"`) gets the same treatment for the same class
+    of bug: `win32gui_helper`'s own module docstring explicitly names orCAD Capture
+    alongside Allegro as a Cadence exe that "initialise[s] a Qt or classic-Win32 GUI even
+    when driven from the command line, and block[s] on a modal dialog" -- and
+    `core.tool_status`'s "capture" note documents three distinct real dialogs seen on
+    this exact install (a 'Product Choices' license-tier chooser, a 'Capture Custom
+    Launch' crash-recovery prompt, and a stale-.lck-file 'already open/locked, override?'
+    prompt). Capture's batch invocation is separately still `known_blocked` for an
+    unrelated reason (the `Open <project>` step itself hangs with zero windows at all,
+    which DismissWatcher correctly can't help with -- see capture_tools.py's module
+    docstring), so this does not make `capture_run_session` reliable end-to-end, but it
+    closes the same dialog-hang gap for it that Allegro already has, at zero cost (a
+    dialog-watching thread that finds nothing to click is a harmless no-op).
+
     Thin bridge to `core.process.submit_job` kept here (rather than there) so
     `core.process` doesn't need to import session state — imported lazily to avoid a
     module-load cycle (process.py has no reason to know about sessions at import time).
@@ -140,6 +169,7 @@ async def run_session(
         tcl_arg_flag=tcl_arg_flag,
         extra_args=extra_args,
         script_filename=script_filename,
+        dismiss_dialogs=(tool in ("allegro", "capture")),
     )
     if close_after:
         tcl_sessions.close(session_id)

@@ -133,3 +133,52 @@ async def test_run_session_supports_positional_arg_and_custom_filename(fake_exe)
     )
     script_path = str(Path(record.job_dir) / "macro.tcl")
     assert record.command[1:] == ["-product=OrCAD Capture", script_path]
+
+
+@pytest.mark.asyncio
+async def test_run_session_auto_enables_dismiss_dialogs_only_for_allegro_and_capture(
+    fake_exe, monkeypatch
+):
+    """`tool="allegro"` via run_session is ALWAYS a real `allegro.exe -s <script> <board>`
+    interactive-GUI launch (every Allegro batch exe goes through submit_job directly
+    under its own distinct tool name instead -- see core.tclsession.run_session's
+    docstring). This locks down that run_session sets dismiss_dialogs=True for it
+    automatically -- with no call site (allegro_tools.allegro_run_session,
+    aurora.scope_tools, allegro_placement_tools's zrouter run, spif_specctra_tools) or
+    LLM agent needing to remember to do anything. `tool="capture"` (capture_tools.py's
+    capture_run_session) gets the same treatment for the same class of bug -- Capture is
+    explicitly named alongside Allegro in win32gui_helper's own module docstring as a
+    Cadence exe that pops modal dialogs even from the command line, and core.tool_status's
+    "capture" note documents three distinct real dialogs seen on this exact install.
+    Every other tool is left alone.
+    """
+    import sigrity_mcp.core.process as process_module
+    from sigrity_mcp.core.tclsession import tcl_sessions
+
+    seen = {}
+    real_submit_job = process_module.submit_job
+
+    async def _spy_submit_job(*args, **kwargs):
+        seen["dismiss_dialogs"] = kwargs.get("dismiss_dialogs", False)
+        return await real_submit_job(*args, **kwargs)
+
+    monkeypatch.setattr(process_module, "submit_job", _spy_submit_job)
+
+    allegro_session = tcl_sessions.create("allegro")
+    tcl_sessions.add_line(allegro_session.session_id, "skill (something)")
+    await run_session(allegro_session.session_id, tool="allegro", tcl_arg_flag="-s",
+                       extra_args=["board.brd"], script_filename="macro.scr")
+    assert seen["dismiss_dialogs"] is True
+
+    seen.clear()
+    capture_session = tcl_sessions.create("capture")
+    tcl_sessions.add_line(capture_session.session_id, "Open project.opj")
+    await run_session(capture_session.session_id, tool="capture", tcl_arg_flag=None,
+                       build_args=["-product=OrCAD Capture"], script_filename="macro.tcl")
+    assert seen["dismiss_dialogs"] is True
+
+    seen.clear()
+    other_session = tcl_sessions.create("powersi")
+    tcl_sessions.add_line(other_session.session_id, "puts hello")
+    await run_session(other_session.session_id, tool="powersi")
+    assert seen["dismiss_dialogs"] is False

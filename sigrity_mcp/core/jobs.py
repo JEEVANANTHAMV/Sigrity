@@ -21,6 +21,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Optional
 
+from sigrity_mcp.core import win32gui_helper
 from sigrity_mcp.core.config import settings
 from sigrity_mcp.core.errors import JobNotFoundError, JobStillRunningError
 
@@ -77,6 +78,17 @@ class JobRecord:
     genuinely running long. See core.config's `max_log_bytes` docstring for the real
     incident this guards against."""
 
+    stall_timeout_killed: bool = False
+    """True if JobManager force-killed this job because its log file went completely
+    silent (zero byte growth) for `settings.job_stall_timeout_seconds`. See
+    core.config's `job_stall_timeout_seconds` docstring for the confirmed real failure
+    modes this guards against (an un-dismissed modal dialog, a silent license wait,
+    Celsius3D's confirmed post-completion idle-stall). A job killed this way may still
+    have genuinely completed real work and written real output files before going
+    silent (this is exactly what happens in the Celsius3D case) — check
+    `list_job_files`/output content before assuming nothing happened, don't trust
+    state="failed" alone."""
+
     def save(self) -> None:
         Path(self.job_dir, "job.json").write_text(json.dumps(asdict(self), indent=2), encoding="utf-8")
 
@@ -85,6 +97,7 @@ class JobManager:
     def __init__(self) -> None:
         self._jobs: dict[str, JobRecord] = {}
         self._procs: dict[str, asyncio.subprocess.Process] = {}
+        self._dismiss_watchers: dict[str, win32gui_helper.DismissWatcher] = {}
 
     def new_job_dir(self, tool: str) -> tuple[str, Path]:
         job_id = f"{tool}-{uuid.uuid4().hex[:10]}"
@@ -92,7 +105,22 @@ class JobManager:
         job_dir.mkdir(parents=True, exist_ok=True)
         return job_id, job_dir
 
-    async def submit(self, tool: str, command: list[str], job_dir: Path, job_id: str) -> JobRecord:
+    async def submit(
+        self,
+        tool: str,
+        command: list[str],
+        job_dir: Path,
+        job_id: str,
+        dismiss_dialogs: bool = False,
+    ) -> JobRecord:
+        """`dismiss_dialogs=True` starts a `win32gui_helper.DismissWatcher` against this
+        job's pid for its whole lifetime -- for interactive Cadence GUI launches (Allegro
+        session jobs: `allegro.exe -s <script> <board>`) that can raise a modal dialog
+        mid-startup with nothing else present to click it. See `DismissWatcher`'s
+        docstring for the confirmed live failure mode this closes. Batch-only tools
+        (report.exe, batch_drc.exe, ...) never pass this -- they have no GUI to dismiss
+        a dialog from in the first place.
+        """
         log_path = job_dir / "run.log"
         record = JobRecord(
             job_id=job_id,
@@ -114,14 +142,32 @@ class JobManager:
         )
         record.pid = proc.pid
         self._procs[job_id] = proc
+        if dismiss_dialogs:
+            try:
+                self._dismiss_watchers[job_id] = win32gui_helper.spawn_dismiss_watcher(proc.pid)
+            except Exception:
+                pass  # never let watcher setup block/break the job launch itself
         record.save()
 
         asyncio.create_task(self._watch(job_id, proc, log_file))
         return record
 
+    def _stop_dismiss_watcher(self, job_id: str) -> None:
+        """Signal and join the job's DismissWatcher thread (if any) WITHOUT blocking the
+        asyncio event loop that every other concurrent MCP tool call shares -- `.stop()`
+        itself is a blocking call (thread.join()), so it runs on the default executor's
+        worker thread instead of inline here."""
+        watcher = self._dismiss_watchers.pop(job_id, None)
+        if watcher is not None:
+            try:
+                asyncio.get_running_loop().run_in_executor(None, watcher.stop)
+            except RuntimeError:  # no running loop (e.g. cancel() called from sync code)
+                watcher.stop()
+
     async def _watch(self, job_id: str, proc: asyncio.subprocess.Process, log_file) -> None:
         log_path = Path(log_file.name)
         runaway_flag = {"killed": False}
+        stall_flag = {"killed": False}
 
         async def size_watchdog() -> None:
             # Fully independent of the completion signal below — never touches
@@ -143,14 +189,44 @@ class JobManager:
                     proc.kill()
                     return
 
+        async def stall_watchdog() -> None:
+            # Same "fully independent, only ever calls proc.kill(), never touches
+            # proc.wait()" shape as size_watchdog above, for the opposite failure
+            # shape: not too much output, but none at all for too long. See
+            # `settings.job_stall_timeout_seconds`'s docstring for exactly which real
+            # failure modes this is a last-resort safety net for (DismissWatcher /
+            # a license wait / Celsius3D's confirmed post-completion idle-stall).
+            limit = settings.job_stall_timeout_seconds
+            if limit <= 0:
+                return  # disabled
+            last_size = -1
+            last_change = time.monotonic()
+            while True:
+                await asyncio.sleep(settings.stall_watchdog_poll_seconds)
+                size = _safe_stat_size(log_path)
+                now = time.monotonic()
+                if size != last_size:
+                    last_size = size
+                    last_change = now
+                    continue
+                if now - last_change >= limit:
+                    stall_flag["killed"] = True
+                    proc.kill()
+                    return
+
         watchdog_task = asyncio.ensure_future(size_watchdog())
+        stall_task = asyncio.ensure_future(stall_watchdog())
         returncode = await proc.wait()
-        watchdog_task.cancel()
-        try:
-            await watchdog_task
-        except asyncio.CancelledError:
-            pass
+        self._stop_dismiss_watcher(job_id)
+        for t in (watchdog_task, stall_task):
+            t.cancel()
+        for t in (watchdog_task, stall_task):
+            try:
+                await t
+            except asyncio.CancelledError:
+                pass
         runaway = runaway_flag["killed"]
+        stalled = stall_flag["killed"]
         if returncode > 0x7FFFFFFF:
             returncode -= 0x100000000
         log_file.close()
@@ -164,6 +240,13 @@ class JobManager:
         if runaway:
             record.state = "failed"
             record.runaway_log_killed = True
+        elif stalled and record.state != "cancelled":
+            # A genuine race is possible here: proc.wait() and stall_watchdog's own
+            # proc.kill() can both be "about to resolve" in the same instant a normal
+            # completion was already happening on its own — stalled only overrides the
+            # outcome when the job wasn't already explicitly cancelled by a caller.
+            record.state = "failed"
+            record.stall_timeout_killed = True
         elif record.state != "cancelled":
             record.state = "succeeded" if returncode == 0 else "failed"
         try:
@@ -213,6 +296,7 @@ class JobManager:
             record.state = "cancelled"
             record.ended_at = time.time()
             record.save()
+            self._stop_dismiss_watcher(job_id)
         return record
 
     def tail_log(self, job_id: str, max_lines: int) -> list[str]:

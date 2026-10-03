@@ -93,6 +93,17 @@ worse, hangs ~20 min. The traps verified live: file tools are `source_file`/`des
 (`"1e6"`, NOT `"1MHz"`); Celsius/Clarity3D `*_run_session` require the project/design path AGAIN
 as a second arg.
 
+**FIXED 2026-10-01 — `list`/`dict` arguments sent as JSON strings now work.** If the calling
+model emits a `list[...]`/`dict[...]`-typed argument (e.g. `generate_multilayer_stackup`'s
+`layers`, `run_tool_pipeline`'s `steps`) as a JSON-encoded *string* rather than a native
+array/object — a real, observed quirk of some open-weight models' tool-call emission (e.g.
+qwen3-max via vLLM) — it is now transparently parsed back to a native list/dict for every tool
+in this suite before validation, instead of failing with a pydantic `list_type`/`dict_type`
+error. See `sigrity_mcp/core/argument_coercion_middleware.py` for the mechanism (one FastMCP
+middleware, applied suite-wide) and `sigrity-cad`'s SKILL.md (Task 6) for the tool that
+originally surfaced this. A parameter that legitimately accepts either a string or a list
+(`Union[str, list[str]]`, e.g. `ref_des` in several PI tools) is unaffected either way.
+
 ## Domain index → which SKILL.md has the sequences + sample files
 
 - **SI/Power-Aware** → `sigrity-si`: PowerSI (S-param, crosstalk, RLGC), BroadbandSPICE, SPDSIM.

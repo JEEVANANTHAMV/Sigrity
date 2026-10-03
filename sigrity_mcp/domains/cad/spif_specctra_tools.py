@@ -38,7 +38,7 @@ only import route through the standalone CLI. It is a product-level crash in the
 SPB_22.1 build of `spif_batch.exe` specifically; `run_specctra_import_session` is kept
 to re-verify it (and as a reference for the standalone-CLI approach), but
 `run_allegro_specctra_import` below is the recommended path — it drives Allegro's own
-native `specctra in` command via script replay instead of the crashing standalone binary,
+native `specctra_in` command via script replay instead of the crashing standalone binary,
 sidestepping the bug entirely. The confirmed *export+route* half of this bridge remains
 reliable either way — a routed `.ses`/`.rte` result plus `final.sts` connection stats is
 directly useful on its own.
@@ -87,17 +87,29 @@ async def run_allegro_specctra_import(
     session_file: str,
     output_file: Optional[str] = None,
 ) -> dict:
-    """Import a routed SPECCTRA session (.ses) into an Allegro board via Allegro's own native `specctra in` command (the recommended import path — see module docstring), as a background job.
+    """Import a routed SPECCTRA session (.ses) into an Allegro board via Allegro's own native `specctra_in` command (the recommended import path — see module docstring), as a background job.
 See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
     clear_stale_design_lock(board_file)
     session = tcl_sessions.create("allegro")
     clean_ses = str(session_file).replace("\\", "/")
-    tcl_sessions.add_line(session.session_id, f'specctra in "{clean_ses}"')
+    tcl_sessions.add_line(session.session_id, f'specctra_in "{clean_ses}"')
+    # `specctra_in <file>` (one word -- see module docstring's ROOT CAUSE note) drives
+    # the real "Import From Auto-Router" dialog (share/pcb/text/forms/spif_in.form:
+    # fields SES_IN/TRANSLATE_TO/CLOSE) headlessly, auto-filling SES_IN and clicking
+    # TRANSLATE_TO ("Run") in one step -- CONFIRMED live via the replay journal (no
+    # separate FORM lines needed for that part). But the form stays open (modeless)
+    # afterward, and Allegro's command dispatcher refuses any further top-level command
+    # with "Finish current command first" (CONFIRMED live) until it is explicitly
+    # closed -- so every caller must close it before anything else (a save, another
+    # command, or `quit`) or that next command silently no-ops.
+    tcl_sessions.add_line(session.session_id, "setwindow form.spif_in")
+    tcl_sessions.add_line(session.session_id, "FORM spif_in CLOSE")
+    tcl_sessions.add_line(session.session_id, "setwindow pcb")
     if output_file:
         clean_out = str(output_file).replace("\\", "/")
-        tcl_sessions.add_line(session.session_id, f"skill (axlSaveDesign ?design {skill_str(clean_out)} ?noCheck t)")
+        tcl_sessions.add_line(session.session_id, f'skill (axlSaveDesign ?design {skill_str(clean_out)} ?mode {skill_str("nocheck")})')
     else:
-        tcl_sessions.add_line(session.session_id, "skill (axlSaveDesign ?noCheck t)")
+        tcl_sessions.add_line(session.session_id, f'skill (axlSaveDesign ?mode {skill_str("nocheck")})')
     tcl_sessions.add_line(session.session_id, "quit")
 
     record = await run_session(

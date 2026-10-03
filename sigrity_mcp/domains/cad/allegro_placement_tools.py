@@ -138,9 +138,9 @@ See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfa
 
     if output_file:
         clean_out = str(output_file).replace("\\", "/")
-        tcl_sessions.add_line(session.session_id, f"skill (axlSaveDesign ?design {skill_str(clean_out)} ?noCheck t)")
+        tcl_sessions.add_line(session.session_id, f'skill (axlSaveDesign ?design {skill_str(clean_out)} ?mode {skill_str("nocheck")})')
     else:
-        tcl_sessions.add_line(session.session_id, "skill (axlSaveDesign ?noCheck t)")
+        tcl_sessions.add_line(session.session_id, f'skill (axlSaveDesign ?mode {skill_str("nocheck")})')
     tcl_sessions.add_line(session.session_id, "quit")
 
     record = await run_session(

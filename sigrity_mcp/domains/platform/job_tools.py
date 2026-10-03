@@ -29,7 +29,32 @@ def _record_to_dict(record) -> dict:
         "job_dir": record.job_dir,
         "log_path": record.log_path,
         "license_issue_suspected": record.license_issue_suspected,
+        # Both booleans below default False and were previously set on JobRecord but
+        # never surfaced past this function to any MCP tool caller -- a caller polling
+        # get_job_status/wait_for_job on a job JobManager force-killed for a runaway
+        # (too much) or stalled (too little, see core.config's job_stall_timeout_seconds)
+        # log had no way to learn *why* state="failed" without reading job.json off disk
+        # directly. Surfaced here so the reason reaches the caller through the same
+        # tool-facing dict every other field already does.
+        "runaway_log_killed": record.runaway_log_killed,
+        "stall_timeout_killed": getattr(record, "stall_timeout_killed", False),
     }
+    if out["runaway_log_killed"]:
+        out["note"] = (
+            "JobManager force-killed this job because its log file exceeded "
+            "max_log_bytes (a runaway/unbounded output loop, not a genuine long-running "
+            "result) -- see core.config's max_log_bytes docstring."
+        )
+    elif out["stall_timeout_killed"]:
+        out["note"] = (
+            "JobManager force-killed this job because its log went completely silent "
+            "(zero byte growth) for job_stall_timeout_seconds -- a likely hung/stuck "
+            "process (an undismissed dialog, a license wait, or a post-completion "
+            "idle-stall like Celsius3D's confirmed behavior), not necessarily a clean "
+            "failure. Check list_job_files/read_job_output_file before assuming no real "
+            "work happened -- a stalled job can still have written complete, genuine "
+            "results before going silent."
+        )
     sig = crash_signature(record)
     if sig is not None:
         out["crash"] = sig

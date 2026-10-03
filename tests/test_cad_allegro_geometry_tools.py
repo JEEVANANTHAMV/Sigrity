@@ -2,6 +2,7 @@ import pytest
 
 from sigrity_mcp.domains.cad.allegro_geometry_tools import (
     allegro_assign_net,
+    allegro_create_copper_shape,
     allegro_create_film,
     allegro_create_simple_padstack,
     allegro_create_trace,
@@ -110,6 +111,71 @@ async def test_create_film_negative_and_mirrored():
         'skill (axlFilmCreate "BOTTOM" ?layers (list "ETCH/BOTTOM") ?negative t ?mirrored t)'
         in preview["script"]
     )
+    await close_tcl_session(sid)
+
+
+@pytest.mark.asyncio
+async def test_create_copper_shape_dynamic_default_boundary_class():
+    session = await start_allegro_session()
+    sid = session["session_id"]
+    result = await allegro_create_copper_shape(
+        sid, "L2_GND", "GND", points=[[0, 0], [1000, 0], [1000, 1000], [0, 1000]]
+    )
+    assert result["dynamic"] is True
+    assert result["skill_layer"] == "BOUNDARY/L2_GND"
+    preview = await preview_tcl_session(sid)
+    assert (
+        'skill (axlDBCreateShape (axlPathStart (list (list 0 0) (list 1000 0) (list 1000 1000) '
+        '(list 0 1000) (list 0 0))) t "BOUNDARY/L2_GND" "GND")' in preview["script"]
+    )
+    await close_tcl_session(sid)
+
+
+@pytest.mark.asyncio
+async def test_create_copper_shape_requires_points():
+    session = await start_allegro_session()
+    sid = session["session_id"]
+    with pytest.raises(TypeError):
+        await allegro_create_copper_shape(sid, "L2_GND", "GND")
+    await close_tcl_session(sid)
+
+
+@pytest.mark.asyncio
+async def test_create_copper_shape_static_etch_with_explicit_points():
+    session = await start_allegro_session()
+    sid = session["session_id"]
+    result = await allegro_create_copper_shape(
+        sid, "TOP", "VCC", points=[[0, 0], [100, 0], [100, 100], [0, 100]], dynamic=False
+    )
+    assert result["dynamic"] is False
+    assert result["skill_layer"] == "ETCH/TOP"
+    preview = await preview_tcl_session(sid)
+    assert "axlPathStart" in preview["script"]
+    assert '"ETCH/TOP"' in preview["script"] and '"VCC"' in preview["script"]
+    # auto-closed: 4 input points -> 5 points in the rendered path (first repeated as last)
+    assert preview["script"].count("(list ") == 6  # 5 point pairs + the outer list(...)
+    await close_tcl_session(sid)
+
+
+@pytest.mark.asyncio
+async def test_create_copper_shape_points_already_closed_not_duplicated():
+    session = await start_allegro_session()
+    sid = session["session_id"]
+    await allegro_create_copper_shape(
+        sid, "L2_GND", "GND", points=[[0, 0], [100, 0], [100, 100], [0, 100], [0, 0]]
+    )
+    preview = await preview_tcl_session(sid)
+    # 5 input points already closed -> still 5 point pairs, not 6
+    assert preview["script"].count("(list ") == 6
+    await close_tcl_session(sid)
+
+
+@pytest.mark.asyncio
+async def test_create_copper_shape_rejects_too_few_points():
+    session = await start_allegro_session()
+    sid = session["session_id"]
+    with pytest.raises(ValueError):
+        await allegro_create_copper_shape(sid, "TOP", "GND", points=[[0, 0], [1, 1]])
     await close_tcl_session(sid)
 
 

@@ -101,6 +101,17 @@ async def powerdc_add_vrm(
     voltage: float,
 ) -> dict:
     """Add a voltage-regulator-module (VRM) source on a power/ground net pair for one or more components.
+
+    LIVE-TESTED 2026-10-02 and NOT YET WORKING on a plain SPDIF-translated board: `sigrity::add pdcVRM
+    -auto -net {power,ground} ...` consistently fails with `The net pair '-net {power net name, ground
+    net name}' is not specified.` even with real net names from the attached design and real copper
+    present on the referenced layer (the suspected missing-copper cause was tested and ruled out -- see
+    `core.tool_status`'s `powerdc`/`allegro` notes for the full 4-variation investigation). Leading
+    hypothesis: `-auto -net {X,Y}` resolves against pre-defined PowerDC Net Classes (as seen in this
+    suite's own `IR_Package.pdcx`, and in every real Cadence sample script, which always uses the
+    literal class name `PowerNets` rather than any board-specific net), not raw net-name strings -- a
+    bare SPDIF-translated `.spd` with no Net Class/AMM setup may not satisfy this regardless of net
+    names. Treat this tool as unconfirmed until a Net-Class-defined design is tried.
 See `.forjinn/skills/sigrity-pi/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
     ckt = _ckt_arg(ref_des)
     tcl_sessions.add_line(

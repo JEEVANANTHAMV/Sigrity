@@ -9,6 +9,8 @@ from __future__ import annotations
 
 from fastmcp import FastMCP
 
+from sigrity_mcp.core.argument_coercion_middleware import JsonStringArgumentCoercionMiddleware
+
 mcp = FastMCP(
     name="sigrity-mcp",
     instructions=(
@@ -37,3 +39,11 @@ mcp = FastMCP(
         "dir). Use `run_tool_pipeline` to chain a known multi-step flow in one call."
     ),
 )
+
+# Some calling models (observed live with qwen3-max via vLLM) emit a list/dict-typed
+# tool argument as a JSON-encoded string instead of a native JSON array/object; FastMCP's
+# strict pydantic argument validation rejects that outright. This middleware pre-parses
+# such arguments for every tool call before validation runs -- see
+# sigrity_mcp/core/argument_coercion_middleware.py for the full rationale and exactly
+# which FastMCP extension point this uses.
+mcp.add_middleware(JsonStringArgumentCoercionMiddleware())

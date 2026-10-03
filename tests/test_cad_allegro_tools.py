@@ -38,9 +38,38 @@ async def test_compose_tools_append_expected_skill():
     assert 'skill (axlDBCreateNet "GND")' in script
     assert 'skill (axlDBCreateComponent "U1" "MyDevice" "SOIC8")' in script
     assert "axlDBCreateShape" in script and "BOARD GEOMETRY/OUTLINE" in script
-    assert "skill (axlXSectionCreate nil 'top)" in script
+    assert "skill (axlXSectionCreate nil 'top (make_axlXSection))" in script
     assert "skill (axlDRCUpdate nil)" in script
     assert "skill (axlSaveDesign)" in script
+
+    await close_tcl_session(sid)
+
+
+@pytest.mark.asyncio
+async def test_allegro_create_stackup_real_attributes_and_position_forms():
+    """allegro_create_stackup used to only ever emit a bare, attribute-less
+    (axlXSectionCreate nil 'position) call -- confirmed real name/layerType/material/
+    thickness authoring (via make_axlXSection) live against a real board (see
+    generate_multilayer_stackup's docstring / core/tool_status.py's "allegro" note for the
+    live evidence); this test locks down the SKILL it composes for each position form.
+    """
+    session = await start_allegro_session()
+    sid = session["session_id"]
+
+    await allegro_create_stackup(sid, position="bottom", name="L2_GND", layer_type="PLANE",
+                                  material="COPPER", thickness_mil=1.4)
+    await allegro_create_stackup(sid, position="ANCHOR_LAYER")  # insert above a named layer
+    await allegro_create_stackup(sid, position=3)  # numeric x_position
+
+    script = tcl_sessions.preview(sid)
+    lines = [ln for ln in script.splitlines() if ln.strip()]
+    assert len(lines) == 3
+    assert (
+        "skill (axlXSectionCreate nil 'bottom (make_axlXSection ?name \"L2_GND\" "
+        '?layerType "PLANE" ?material "COPPER" ?thickness 1.4))' in lines[0]
+    )
+    assert 'skill (axlXSectionCreate nil "ANCHOR_LAYER" (make_axlXSection))' in lines[1]
+    assert "skill (axlXSectionCreate nil 3 (make_axlXSection))" in lines[2]
 
     await close_tcl_session(sid)
 

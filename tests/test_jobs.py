@@ -4,8 +4,38 @@ import sys
 import pytest
 
 from sigrity_mcp.core import jobs as jobs_module
+from sigrity_mcp.core import win32gui_helper
 from sigrity_mcp.core.jobs import JobManager, JobRecord, crash_signature
 from sigrity_mcp.core.errors import JobNotFoundError
+
+
+class _FakeDismissWatcher:
+    """Stand-in for win32gui_helper.DismissWatcher that needs no real Windows GUI --
+    just records whether/when it was started and stopped, so the job-lifecycle wiring
+    (start on submit, stop once the job ends) can be tested on any machine."""
+
+    instances: list["_FakeDismissWatcher"] = []
+
+    def __init__(self, pid):
+        self.pid = pid
+        self.stopped = False
+        self.stop_calls = 0
+        _FakeDismissWatcher.instances.append(self)
+
+    def stop(self, join_timeout: float = 5.0) -> None:
+        self.stopped = True
+        self.stop_calls += 1
+
+
+@pytest.fixture
+def fake_dismiss_watcher(monkeypatch):
+    _FakeDismissWatcher.instances.clear()
+
+    def _spawn(pid, **kwargs):
+        return _FakeDismissWatcher(pid)
+
+    monkeypatch.setattr(jobs_module.win32gui_helper, "spawn_dismiss_watcher", _spawn)
+    return _FakeDismissWatcher
 
 
 @pytest.mark.asyncio
@@ -146,3 +176,201 @@ def test_job_status_includes_crash_field_when_applicable(tmp_path):
     crashed = _rec(tmp_path, 3221225477)
     out = _record_to_dict(crashed)
     assert out.get("crash", {}).get("nt_status") == "0xC0000005"
+
+
+# --- job_stall_timeout_seconds watchdog (core.config) -----------------------------
+#
+# Regression coverage for a real gap found alongside the runaway-log killer: before
+# this, a job whose log went completely silent (an undismissed dialog, a silent
+# license wait, Celsius3D's confirmed post-completion idle-stall) had NO automatic
+# recovery at all -- only a human polling get_job_status forever would ever notice.
+# These tests use tiny timeouts (monkeypatched onto the shared `settings` singleton,
+# auto-restored by monkeypatch) so they run fast and deterministically on any machine.
+
+
+@pytest.mark.asyncio
+async def test_stall_watchdog_kills_a_genuinely_silent_job(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(jobs_module.settings, "job_stall_timeout_seconds", 0.3)
+    monkeypatch.setattr(jobs_module.settings, "stall_watchdog_poll_seconds", 0.05)
+    jm = JobManager()
+    job_id, job_dir = jm.new_job_dir("fake_tool")
+    await jm.submit(
+        tool="fake_tool",
+        # Sleeps far longer than the stall timeout and never writes a single byte --
+        # exactly the "undismissed dialog" / "silent license wait" shape.
+        command=[sys.executable, "-c", "import time; time.sleep(30)"],
+        job_dir=job_dir,
+        job_id=job_id,
+    )
+    finished = await jm.wait(job_id, timeout=10)
+    assert finished.state == "failed"
+    assert finished.stall_timeout_killed is True
+    assert finished.runaway_log_killed is False
+
+
+@pytest.mark.asyncio
+async def test_stall_watchdog_does_not_kill_a_job_that_keeps_producing_output(
+    tmp_path, monkeypatch
+):
+    monkeypatch.chdir(tmp_path)
+    # Stall timeout is shorter than the job's total runtime, but the job prints well
+    # inside that window on every iteration -- each print must reset the "silent for
+    # how long" clock, so this must finish as a genuine success, not get killed.
+    monkeypatch.setattr(jobs_module.settings, "job_stall_timeout_seconds", 0.3)
+    monkeypatch.setattr(jobs_module.settings, "stall_watchdog_poll_seconds", 0.05)
+    jm = JobManager()
+    job_id, job_dir = jm.new_job_dir("fake_tool")
+    script = (
+        "import time\n"
+        "for _ in range(6):\n"
+        "    print('still working', flush=True)\n"
+        "    time.sleep(0.1)\n"
+    )
+    await jm.submit(
+        tool="fake_tool",
+        command=[sys.executable, "-c", script],
+        job_dir=job_dir,
+        job_id=job_id,
+    )
+    finished = await jm.wait(job_id, timeout=10)
+    assert finished.state == "succeeded"
+    assert finished.stall_timeout_killed is False
+
+
+@pytest.mark.asyncio
+async def test_stall_watchdog_disabled_when_timeout_is_zero(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(jobs_module.settings, "job_stall_timeout_seconds", 0)
+    jm = JobManager()
+    job_id, job_dir = jm.new_job_dir("fake_tool")
+    await jm.submit(
+        tool="fake_tool",
+        command=[sys.executable, "-c", "pass"],
+        job_dir=job_dir,
+        job_id=job_id,
+    )
+    finished = await jm.wait(job_id, timeout=10)
+    assert finished.state == "succeeded"
+    assert finished.stall_timeout_killed is False
+
+
+def test_record_to_dict_surfaces_runaway_and_stall_kill_reasons(tmp_path):
+    from sigrity_mcp.domains.platform.job_tools import _record_to_dict
+
+    normal = _rec(tmp_path, 0)
+    out = _record_to_dict(normal)
+    assert out["runaway_log_killed"] is False
+    assert out["stall_timeout_killed"] is False
+    assert "note" not in out
+
+    runaway = _rec(tmp_path, 1)
+    runaway.runaway_log_killed = True
+    out = _record_to_dict(runaway)
+    assert out["runaway_log_killed"] is True
+    assert "max_log_bytes" in out["note"]
+
+    stalled = _rec(tmp_path, 1)
+    stalled.stall_timeout_killed = True
+    out = _record_to_dict(stalled)
+    assert out["stall_timeout_killed"] is True
+    assert "silent" in out["note"]
+
+
+# --- dismiss_dialogs wiring (core.win32gui_helper.DismissWatcher auto-start/stop) -------
+#
+# Regression coverage for the real, confirmed-live hang this closes: an interactive
+# Allegro session job (`allegro.exe -s <script> <board>`) can raise a modal startup
+# dialog with nothing present to click it, and previously the only way to avoid an
+# indefinite hang was for the calling LLM agent (or a hand-written script) to separately
+# remember to poll `win32gui_helper.auto_dismiss_dialogs(pid)` concurrently -- which a
+# plain MCP tool caller has no way to do. These tests don't need a real Windows GUI; they
+# swap in `_FakeDismissWatcher` for `win32gui_helper.spawn_dismiss_watcher` and just check
+# the job-lifecycle wiring: started when `dismiss_dialogs=True`, never started otherwise,
+# and always stopped once the job stops being "running" (succeeded/failed/cancelled).
+
+
+@pytest.mark.asyncio
+async def test_submit_with_dismiss_dialogs_starts_and_stops_watcher(
+    tmp_path, monkeypatch, fake_dismiss_watcher
+):
+    monkeypatch.chdir(tmp_path)
+    jm = JobManager()
+    job_id, job_dir = jm.new_job_dir("allegro")
+    await jm.submit(
+        tool="allegro",
+        command=[sys.executable, "-c", "print('ok')"],
+        job_dir=job_dir,
+        job_id=job_id,
+        dismiss_dialogs=True,
+    )
+    assert len(fake_dismiss_watcher.instances) == 1
+    watcher = fake_dismiss_watcher.instances[0]
+    assert watcher.pid == jm.get(job_id).pid
+    assert watcher.stopped is False
+
+    await jm.wait(job_id, timeout=10)
+    # _stop_dismiss_watcher hands the blocking .stop() off to the default executor so it
+    # never blocks the event loop -- give that scheduled call a beat to actually run.
+    for _ in range(50):
+        if watcher.stopped:
+            break
+        await asyncio.sleep(0.05)
+    assert watcher.stopped is True
+
+
+@pytest.mark.asyncio
+async def test_submit_without_dismiss_dialogs_never_starts_watcher(
+    tmp_path, monkeypatch, fake_dismiss_watcher
+):
+    monkeypatch.chdir(tmp_path)
+    jm = JobManager()
+    job_id, job_dir = jm.new_job_dir("allegro_report")
+    await jm.submit(
+        tool="allegro_report",
+        command=[sys.executable, "-c", "print('ok')"],
+        job_dir=job_dir,
+        job_id=job_id,
+    )
+    await jm.wait(job_id, timeout=10)
+    assert fake_dismiss_watcher.instances == []
+
+
+@pytest.mark.asyncio
+async def test_cancel_stops_dismiss_watcher_immediately(tmp_path, monkeypatch, fake_dismiss_watcher):
+    monkeypatch.chdir(tmp_path)
+    jm = JobManager()
+    job_id, job_dir = jm.new_job_dir("allegro")
+    await jm.submit(
+        tool="allegro",
+        command=[sys.executable, "-c", "import time; time.sleep(30)"],
+        job_dir=job_dir,
+        job_id=job_id,
+        dismiss_dialogs=True,
+    )
+    watcher = fake_dismiss_watcher.instances[0]
+    assert watcher.stopped is False
+
+    jm.cancel(job_id)
+    # Hands off to the executor the same way the normal completion path does (see
+    # _stop_dismiss_watcher) -- give the scheduled call a beat to actually run, same as
+    # test_submit_with_dismiss_dialogs_starts_and_stops_watcher above.
+    for _ in range(50):
+        if watcher.stopped:
+            break
+        await asyncio.sleep(0.05)
+    assert watcher.stopped is True
+
+    proc = jm._procs[job_id]
+    await asyncio.wait_for(proc.wait(), timeout=10)
+
+
+def test_dismiss_watcher_stop_is_idempotent_across_cancel_and_watch(tmp_path):
+    # cancel() and _watch()'s completion path both call _stop_dismiss_watcher() for the
+    # same job_id -- the second call must be a harmless no-op (dict.pop default), not an
+    # error, regardless of call order.
+    jm = JobManager()
+    jm._dismiss_watchers["job-1"] = _FakeDismissWatcher(pid=123)
+    jm._stop_dismiss_watcher("job-1")
+    jm._stop_dismiss_watcher("job-1")  # must not raise
+    assert "job-1" not in jm._dismiss_watchers

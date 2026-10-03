@@ -1,6 +1,6 @@
 ---
 name: sigrity-cad
-description: Allegro/OrCAD CAD domain (SPB 22.1) — report/DRC/dbdoctor, SPECCTRA autoroute, Gerber (artwork) export, SKILL PCB authoring, and run_tool_pipeline, all verified live (2026-09-27). Use for board analysis, DRC, SPECCTRA routing, Gerber/manufacturing export, SKILL geometry/padstack/film authoring, and multi-step job pipelines.
+description: Allegro/OrCAD CAD domain (SPB 22.1) — report/DRC/dbdoctor, SPECCTRA autoroute, Gerber (artwork) export, SKILL PCB authoring (including real multi-layer/rigid-flex stackup authoring via generate_multilayer_stackup, verified live 2026-09-30, and real copper shape/plane-pour authoring via allegro_create_copper_shape, verified live 2026-10-02), and run_tool_pipeline, all verified live. Use for board analysis, DRC, SPECCTRA routing, Gerber/manufacturing export, SKILL geometry/padstack/film/stackup/copper-shape authoring, and multi-step job pipelines.
 ---
 
 # Sigrity CAD domain — Allegro PCB (report/DRC/DRC, SPECCTRA, Gerber, SKILL, pipeline)
@@ -91,8 +91,30 @@ wait_for_job(job_id, 300) -> state:"FAILED", returncode:4        #  <-- SEE GOTC
     by the **`.dmp` artifact + SPMHDB-238 log line**, not the `crash` field. `cancel_job` on it returns the
     zombie still `running` (can't kill the detached worker).
 - **#1 mistake**: aborting the route because `state:"failed"`/rc 4, or waiting for `state` on the import.
-  Route success = read `final.sts` for `Completion = 100.00%` + confirm `routed.ses` is non-empty. Import is
-  a known product bug — don't burn time on it.
+  Route success = read `final.sts` for `Completion = 100.00%` + confirm `routed.ses` is non-empty. Import via
+  `run_specctra_import_session` (`spif_batch.exe -i`) is a known product bug (SPMHDB-238 crash) — don't burn
+  time on it.
+- **USE `run_allegro_specctra_import` INSTEAD — CONFIRMED LIVE end-to-end (2026-10-01), this is the real,
+  working import path**:
+  ```
+  run_allegro_specctra_import(board_file="…\\fd.brd", session_file="…\\routed.ses", output_file="…\\fd_imported.brd")
+  wait_for_job(job_id, 90) -> state:"succeeded", rc 0
+  ```
+  then independently verify with `run_allegro_report(board_file="…\\fd_imported.brd", report_code="sum", ...)`
+  (SKILL-free, no modal risk) — expect `Connection Completion: Total(100.00%)` matching the `.ses`'s own stats,
+  and the output file's size/sha1 genuinely different from the pre-import board.
+  - **Do NOT call this tool with an unpatched/older copy of `spif_specctra_tools.py`** — a real, 3-for-3
+    reproducible indefinite hang existed here until 2026-10-01 (0% CPU, no window, `run.log` stuck forever at
+    the 3-line startup banner) caused by a literal typo in the emitted script line (`specctra in "<path>"`,
+    two words — not a real command; the real one is `specctra_in`, one word). If you ever see this tool hang
+    silently again with that exact signature, check `sigrity_mcp/domains/cad/spif_specctra_tools.py` still
+    emits `specctra_in` (not `specctra in`) and still closes the `spif_in` dialog
+    (`setwindow form.spif_in` / `FORM spif_in CLOSE` / `setwindow pcb`) before anything else runs — skipping
+    that close step makes every following command (including the save) silently no-op with a `Finish current
+    command first` error you'll only see in the design's own `allegro.jrl`, never in the job's `run.log`.
+  - See `core.tool_status`'s `allegro` entry (2026-10-01 note) for the full live-repro evidence and the
+    third, unrelated bug found/fixed alongside it (`axlSaveDesign`'s `?noCheck` keyword doesn't exist; the
+    real no-check option is `?mode "nocheck"`).
 
 ## Task 4 — COMPLEX: Gerber (RS274X) end-to-end via SKILL films → artwork
 
@@ -155,6 +177,200 @@ run_tool_pipeline(stop_on_error=true, steps=[
 - **#1 mistake**: passing a value a step didn't return as a placeholder target. `run_*` job tools return only
   `{job_id, state, job_dir, command}` — they do NOT echo back `board_file` or other inputs, so
   `${rep.board_file}` resolves to `{}` / errors. Thread `job_id` (always present); pass other literals directly.
+
+## Task 6 — COMPLEX: real multi-layer (rigid-flex) stackup authoring via `generate_multilayer_stackup`
+
+`generate_18layer_rigid_flex_stackup` only ever wrote human-readable `#`-comment lines — it
+never touched a real board. The real, executing path is `generate_multilayer_stackup`
+(`rigid_flex_stackup_tools.py`), which queues one real `axlXSectionCreate` SKILL call per
+layer into an `allegro_tools` session, same Model B session mechanics as everything else in
+this file. `allegro_create_stackup` (`allegro_tools.py`) was also upgraded in the same pass:
+it used to emit a bare, attribute-less `(axlXSectionCreate nil 'position)` (only ever created
+one unnamed default-material dielectric); it now builds a real
+`make_axlXSection(?name ?layerType ?material ?thickness)` defstruct, so a single call can
+author one fully-specified layer.
+
+```
+start_allegro_session()                                          -> {session_id}
+generate_multilayer_stackup(session_id, layers=[
+    {"name":"L2_GND",  "layer_type":"PLANE",     "material":"COPPER",    "thickness_mil":1.4},
+    {"name":"L3_SIG1", "layer_type":"CONDUCTOR", "material":"COPPER",    "thickness_mil":0.7},
+    ... ])                                                        # queues len(layers) SKILL lines
+allegro_save_design(session_id)                                   # REQUIRED -- nothing persists without this
+allegro_run_session(session_id, board_file="…\\t6_stackup\\fd.brd")
+wait_for_job(job_id, 120) -> state:"succeeded", rc 0   # SEE GOTCHA below re: a modal dialog
+run_allegro_report(board_file="…\\t6_stackup\\fd.brd", report_code="x-section",
+                    output_file="…\\t6_stackup\\xsection.rpt")     # the REAL, independent verify step
+wait_for_job(job_id, 60) -> state:"succeeded", rc 0
+```
+
+- **`layers` is TOP-TO-BOTTOM order** (index 0 = physical top). Each dict:
+  `name` (required), `layer_type` (required; "CONDUCTOR"/"PLANE"/"DIELECTRIC"/"MASK"),
+  `thickness_mil` (real), `material` (real, e.g. "COPPER"/"RA_COPPER"), plus
+  `zone`/`ref_plane`/`hatched_plane` which are **informational only** (see LIMITATION below).
+- **ORDERING GOTCHA (the one that will bite you)**: every layer is queued via
+  `axlXSectionCreate(nil 'bottom <defstruct>)` **in the same order you pass them** — do NOT
+  reverse the list. A literal reading of Cadence's own vendored doc tip
+  (`axlXSectionCreate.txt`: "If populating multiple internal layers, use the 'bottom option
+  and build the stackup from bottom to top") suggests queuing the physically-bottom-most
+  layer first; this was tried and LIVE-VERIFIED WRONG — it produced the exact inverted order
+  (first-queued landed nearest the top, last-queued landed nearest the true bottom).
+  Empirically, each successive `'bottom` insert lands directly adjacent to the board's real
+  outer BOTTOM layer, pushing earlier inserts further up — so queuing chronologically in your
+  own top-to-bottom order is what lands correctly. `'top'`/`'afterBottom` are restricted by
+  Allegro to unnamed dielectric/MASK layers for PCB designs, so `'bottom'` is the only
+  endpoint usable for a real named CONDUCTOR/PLANE stackup.
+- **TOP/BOTTOM NAME-COLLISION GOTCHA**: if your `layers` list reuses the literal names "TOP"/
+  "BOTTOM" (as `build_18layer_rigid_flex_stackup_definition()`'s own layer 1/18 do, matching
+  the board's default outer layer names), those two specific creates are a **silent no-op** —
+  no duplicate, no error, no change to the existing TOP/BOTTOM entry's thickness/material.
+  Confirmed live on the full 18-layer definition: all 16 INTERNAL layers (L2_GND..L17_GND4,
+  including the RA_COPPER flex pair) landed correctly; TOP/BOTTOM stayed exactly as the
+  board's pre-existing defaults. Either drop "TOP"/"BOTTOM"-named entries from `layers`
+  (the physical outer layers already exist) or separately drive `axlXSectionGet(nil "TOP")` +
+  `axlXSectionModify` + `axlXSectionSet` to actually change them (not wrapped by any tool yet).
+- **GOTCHA — modal dialog, now handled automatically (no agent action needed)**: a
+  stackup-authoring `allegro_run_session` launch can raise an unlabeled modal Qt dialog a
+  couple seconds in (before the board even finishes loading) — content-independent, most
+  likely the same general Allegro launch flakiness documented above (product-chooser/
+  license dialogs, historically ~1-in-4), reproduced 4-for-4 in one round of testing and
+  independently re-confirmed live (see `core.win32gui_helper.DismissWatcher`'s docstring
+  for the exact window shape captured: a `Qt5QWindowIcon`-classed popup whose title is
+  identical to the app's own name, with the main shell window's `enabled` bit genuinely
+  flipped to 0 for as long as it's up). Previously this required the calling agent to
+  separately poll `core.win32gui_helper.auto_dismiss_dialogs(pid, timeout=...)`
+  concurrently — that was a real, confirmed-live gap (a production job hung 2.5+ hours on
+  exactly this with no agent-side way to recover). **As of this fix, every
+  `tool="allegro"` session job (i.e. every `allegro_run_session`/`run_allegro_*_import`/
+  zrouter-run call that goes through `core.tclsession.run_session`) automatically starts
+  a background `win32gui_helper.DismissWatcher` for the job's whole lifetime and stops it
+  when the job ends — there is nothing for the calling agent to do.** Dismissal has zero
+  observed effect on correctness — every run's `x-section` read-back matched its input
+  exactly once dismissed.
+- **Verified artifact**: `run_allegro_report(..., report_code="x-section")`'s CSV-style report
+  (`Subclass Name,Type,Material,Thickness (MIL),...`) — this is the ONLY reliable verify step;
+  SKILL return values never surface in the job log for `axlXSectionCreate` (just the Allegro
+  banner). Confirmed live 3 times: a 3-layer test (TOPTEST/PLANETEST/BOTTOMTEST, CONDUCTOR/
+  PLANE/CONDUCTOR, COPPER/COPPER/RA_COPPER, 1.4/1.4/0.7 mil) landed as
+  `TOP, DIELECTRIC, TOPTEST, PLANETEST, BOTTOMTEST, BOTTOM` with every attribute exact; the
+  full 18-layer definition landed all 16 internal layers correctly (see above).
+- **LIMITATION (honest, checked against this install's vendored SKILL docs)**: only
+  `name`/`layerType`/`material`/`thickness` are real, settable xsection attributes (confirmed
+  against `axlXSectionGet.txt`'s own attribute table and the real example
+  `share/pcb/examples/skill/dbcreate/xsection.il`). There is **no SKILL attribute anywhere**
+  for an explicit "reference plane" assignment — searched the full attribute table plus every
+  `axlCNS*`/`axlCns*` Constraint-Manager function on this install. Allegro's impedance
+  calculator infers a signal layer's reference plane from stackup ADJACENCY to a PLANE layer,
+  not from a settable field — so `ref_plane`/`zone`/`hatched_plane` in a layer dict are
+  metadata echoed back for bookkeeping only, not real SKILL calls. Order your layers so the
+  intended plane is physically adjacent to its signal layer.
+- **#1 mistake**: reversing the `layers` list expecting `'bottom` to need bottom-most-first
+  (it's the opposite — see ORDERING GOTCHA), or trusting a `state:"succeeded"` without an
+  independent `x-section` report read-back, or expecting a "TOP"/"BOTTOM"-named entry in your
+  list to actually change the board's real outer layers.
+- **FIXED 2026-10-01 — `layers` arriving as a JSON string no longer errors**: a calling model
+  (observed live: qwen3-max via vLLM, through the real forji-desk app) serialized `layers`
+  (and other `list`/`dict`-typed arguments elsewhere in this suite) as a JSON-encoded *string*
+  (e.g. `"[{\"name\":...}]"`) instead of a native array. FastMCP 4.0.4's strict pydantic
+  argument validation used to reject that outright with a `list_type` `ValidationError` before
+  this tool's body ever ran. A server-wide middleware
+  (`sigrity_mcp/core/argument_coercion_middleware.py`, registered once in `mcp_app.py`) now
+  pre-parses any string-valued argument for a parameter whose schema doesn't accept a plain
+  string, for EVERY tool in the suite — not just this one. So `layers=[...]` and
+  `layers='[...]'` (JSON string) both work identically now; no client-side workaround needed.
+  A parameter that legitimately accepts either a string or a list (e.g. `ref_des: Union[str,
+  list[str]]` elsewhere in this suite) is left alone either way, since a plain string is
+  already valid there.
+
+## Task 7 — COMPLEX: real copper shape / plane pour via `allegro_create_copper_shape`, and the PowerDC pdcVRM investigation it was built to settle
+
+`generate_multilayer_stackup` (Task 6) authors layer STRUCTURE only — a "PLANE"-typed layer it
+creates has zero actual copper on it. `allegro_create_copper_shape` (`axlDBCreateShape`,
+`allegro_geometry_tools.py`) closes that gap: given a layer name, a net name, and an explicit
+closed boundary, it pours a real, solid-filled, net-bound copper shape onto that layer, same
+Model B session mechanics as everything else in this file.
+
+```
+start_allegro_session()                                           -> {session_id}
+generate_multilayer_stackup(session_id, layers=[... incl. {"name":"L2_GND","layer_type":"PLANE",
+    "material":"COPPER","thickness_mil":1.4}, ...])                # Task 6
+allegro_create_copper_shape(session_id, layer="L2_GND", net_name="GND",
+    points=[[0,0],[34000,0],[34000,22000],[0,22000]], dynamic=True) # the board's own real extents
+                                                                     # (from run_allegro_report
+                                                                     # report_code="sum" on THIS board
+                                                                     # -- always read real extents,
+                                                                     # never assume a size)
+allegro_save_design(session_id)
+allegro_run_session(session_id, board_file="…\\fd.brd")
+wait_for_job(job_id, 120) -> state:"succeeded", rc 0
+```
+
+- **`layer` is the bare xsection layer name** (e.g. `"L2_GND"`, matching `generate_multilayer_
+  stackup`'s `name`) — the tool builds the real class/subclass string itself: `dynamic=True`
+  (default) → `"BOUNDARY/<layer>"` (a real connectivity-driven flood-fill pour); `dynamic=False`
+  → `"ETCH/<layer>"` (a plain static filled shape). Per the vendored
+  `axlDBCreateOpenShape.txt` doc: "A static shape is created if you create shape on class ETCH,
+  dynamic shapes are created if class is BOUNDARY … The same rule also applies to
+  axlDBCreateShape."
+- **`points` is REQUIRED — there is deliberately no auto-derive-from-board-outline default.**
+  An earlier design considered defaulting to `(car (axlPolyFromDB (car (axlDBGetShapes "BOARD
+  GEOMETRY/OUTLINE"))))` ("pour the whole board, no coordinates needed") and this was
+  LIVE-TESTED AND DISPROVEN against the real Fault-Detector sample: `axlDBGetShapes("BOARD
+  GEOMETRY/OUTLINE")` returned `nil` — this board's physical outline is drawn as plain LINE/ARC
+  segments, not a shape database object (confirmed: the board has 157 real shapes total, ALL of
+  them `PACKAGE GEOMETRY/*` component silkscreen/assembly/place-bound outlines — zero `BOARD
+  GEOMETRY/*` shapes of any kind). A components-bounding-box fallback
+  (`axlDBGetExtents(axlDBGetDesign()->components nil)`) was also tried live and returned a
+  degenerate `((0.0 0.0) (0.0 0.0))` box. So: read the board's real extents first
+  (`run_allegro_report(..., report_code="sum")` → `Drawing Extents XL/YL/XU/YU`, in mils) and
+  pass them as an explicit rectangle, or pass your own exact outline/sub-region polygon.
+- **Verified LIVE, 3 independent ways** (fresh board copy, real 8-layer stackup with 2 new
+  PLANE layers, pour on `L2_GND`/net `GND`):
+  1. An in-session SKILL query right after creation (`axlDBGetShapes("BOUNDARY/L2_GND")`,
+     captured to a file via SKILL's own `outfile`/`fprintf` since return values never surface in
+     the job log) → 1 real shape dbid, not nil.
+  2. A SECOND, fully independent `allegro.exe` launch (no shared memory with the session that
+     created it) opening the already-SAVED board from disk found the shape on BOTH
+     `BOUNDARY/L2_GND` AND `ETCH/L2_GND` (1 each) — the dynamic/BOUNDARY shape genuinely
+     generates real computed ETCH copper underneath it, matching
+     `axlShapeChangeDynamicType.txt`'s own description of BOUNDARY-class dynamic shapes
+     generating real ETCH-layer geometry.
+  3. Translating the board to `.spd` via the already-confirmed PowerSI BRD-bridge (Task 3 in
+     `sigrity-si`'s SKILL.md: `start_powersi_session(spd_file=brd)` +
+     `powersi_save_document(spd_file=out.spd)` + `powersi_set_frequency_sweep` +
+     `powersi_add_ports_auto` + `powersi_run_session`) produced a `.spd` containing a real
+     `.Shape Plane$L2_GNDpkgshape` / `PatchSignal$L2_GND Shape = Plane$L2_GNDpkgshape Layer =
+     Signal$L2_GND` block with real `Node<n>::GND … Layer = Signal$L2_GND` entries — an entirely
+     separate translation engine (SPDIF) independently confirming the pour is real geometry.
+- **The downstream hypothesis this was built to test — NOT CONFIRMED.** The working theory was
+  that PowerDC `sigrity::add pdcVRM -auto -net {power,ground} -ckt {RefDes} -voltage {v}` fails
+  with `"The net pair '-net {power net name, ground net name}' is not specified."` on
+  `generate_multilayer_stackup`-built boards because there's no real copper for a VRM to bind
+  to. Tested live end-to-end (pour real `GND`-bound copper on `L2_GND` → translate to `.spd` →
+  `start_powerdc_session` → `powerdc_add_vrm(power_net="+15V", ground_net="GND", ref_des="U1",
+  voltage=15.0)` → `powerdc_run_session`): **the exact same error reproduced, byte-for-byte**,
+  read from the real `macro_<ts>_<pid>.log` PowerDC writes next to the attached `.spd` (NOT
+  `list_job_files`/job dir — same PowerDC log-location fingerprint documented in
+  `sigrity-pi`'s SKILL.md). Ruled out across 4 separate live runs, each reproducing the
+  identical error text: real copper present vs the original no-copper board; a net name with a
+  `+` character (`+15V`) vs a plain alnum net (`SUPPLYBUS`) from the same board's real net list;
+  `powerdc_set_simulation_mode` queued after `-attach` (this suite's actual order) vs before it
+  (matching Cadence's own shipped `MB.tcl` sample exactly); `-auto` vs the doc's alternate short
+  spelling `-a`. The emitted Tcl line is byte-for-byte the same SHAPE as every real
+  Cadence-authored sample on this install and matches the official doc format
+  (`doc/pdc_ug/c9_TCL_Create_by_Using_Existing_Components.html`) exactly — so this is not an
+  argument-syntax bug in `powerdc_add_vrm`. **Leading (unconfirmed) hypothesis for a future
+  pass**: every real Cadence sample's power-side value is literally the string `PowerNets`
+  (never an actual board net name), and this suite's own confirmed-live `IR_Package.pdcx`
+  contains literal `PowerNets`/`GroundNets` attribute values in its saved workspace XML —
+  suggesting `-auto -net {X,Y}` resolves against PRE-DEFINED PowerDC Net Classes (set up via the
+  GUI or Analysis Model Manager), not raw net-name strings, so a bare SPDIF-translated `.spd`
+  with no Net Class/AMM setup may never satisfy it regardless of real net names or real copper.
+  See `core.tool_status`'s `powerdc`/`allegro` notes for the complete investigation log.
+- **#1 mistake**: assuming a `pdcVRM` net-pair failure means missing plane copper — it does not,
+  necessarily; here it reproduced identically with real, independently-verified copper present.
+  Don't skip the auto-derive-from-outline default either, expecting it to "just work" — read the
+  board's real extents first (`report_code="sum"`) and pass explicit `points`.
 
 ## Cross-cutting notes (domain-specific, verified this run)
 

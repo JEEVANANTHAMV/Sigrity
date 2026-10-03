@@ -11,6 +11,12 @@ from pathlib import Path
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+# Project root (contains .forjinn/, main.py, pyproject.toml), independent of the
+# launching process's CWD — a caller (e.g. forji-desk's mcp-client.ts) may spawn this
+# server without setting `cwd`, in which case Path.cwd() would resolve to the caller's
+# own working directory instead of this repo.
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+
 
 class SigritySettings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="SIGRITY_", env_file=".env", extra="ignore")
@@ -57,6 +63,47 @@ class SigritySettings(BaseSettings):
     log_watchdog_poll_seconds: float = 2.0
     """How often JobManager polls a running job's log size against `max_log_bytes`."""
 
+    job_stall_timeout_seconds: int = 7200
+    """Safety-net wall-clock watchdog for a job whose log has gone completely silent:
+    if a running job's log file has not grown by a single byte for this many seconds,
+    JobManager force-kills it and marks it "failed" (with `stall_timeout_killed=True` on
+    the job record) instead of leaving it to hang forever with only a human -- or an
+    agent polling `get_job_status` in a loop -- ever noticing. This is the missing piece
+    this suite's `max_log_bytes` runaway-log killer already guards against the opposite
+    shape of the same problem (too much output instead of too little).
+
+    Confirmed-real failure modes this catches that nothing else in this suite does:
+    (1) an interactive Allegro/Capture GUI launch raising a modal dialog
+    `core.win32gui_helper.DismissWatcher` doesn't recognize or fails to dismiss (defense
+    in depth -- DismissWatcher is the primary fix and should catch the known dialog
+    shape well before this fires); (2) a silent FlexNet license-fetch wait with zero
+    console output (see `core.tool_status`'s license-unreliability notes); (3) Celsius3D's
+    own confirmed post-completion idle-stall (see `tool_status.TOOL_STATUS_NOTES["celsius3d"]`)
+    -- the process finishes real work, writes a full result set, then simply never exits
+    on its own (frozen CPU, idle main window, no dialog of any kind) -- a real 2.5+ hour
+    live incident, previously only recoverable by a human finding and killing it by hand.
+
+    Deliberately generous (2 hours, well past the max_log_tail_lines/max_log_bytes
+    scale of "minutes") and measured from "last byte written", not "job start": a real
+    sweep of this suite's own past job logs under `runs/` shows PowerSI and OptimizePI in
+    particular have produced a genuine, fully successful `run.log` of exactly 0 bytes --
+    i.e. these tools can legitimately write NOTHING to console for their entire run,
+    success or failure, so "log size has not changed" is a necessarily weak signal for
+    them specifically; a short timeout would risk killing a real, still-working job with
+    no way to tell the difference from the outside. This must never fire on a job that is
+    genuinely still working, only one that has gone truly, completely silent for the full
+    timeout window -- if the live campaign's real heavier PI/SI/thermal/extraction runs
+    turn out to legitimately exceed 2 hours of total silence, raise this via
+    `SIGRITY_JOB_STALL_TIMEOUT_SECONDS` rather than treat 2 hours as a hard ceiling. Set
+    to 0 to disable entirely."""
+
+    stall_watchdog_poll_seconds: float = 5.0
+    """How often JobManager samples a running job's log size for `job_stall_timeout_seconds`'s
+    "has this gone completely silent" check. Coarser than `log_watchdog_poll_seconds`
+    (which guards a much faster-moving runaway-growth signal) since "did the size change
+    at all since last sample" needs far less frequent sampling than "did it exceed a hard
+    byte cap"."""
+
     skills_dir: Path = Path(".forjinn/skills")
     """Where the domain skill playbooks (`<name>/SKILL.md`) live. Relative to CWD unless
     absolute. Claude Code reads these off disk directly; `list_skills`/`load_skill`
@@ -98,8 +145,13 @@ class SigritySettings(BaseSettings):
     def resolve_skills_dir(self) -> Path:
         """Unlike `resolve_workdir`, never creates the directory — skills are
         version-controlled content, not job scratch space; a missing dir is a
-        deployment error `skill_tools` surfaces explicitly rather than papering over."""
-        return self.skills_dir if self.skills_dir.is_absolute() else Path.cwd() / self.skills_dir
+        deployment error `skill_tools` surfaces explicitly rather than papering over.
+
+        Resolved against this repo's own root, not the launching process's CWD — skills
+        ship with this repo, so they must be found regardless of what directory spawned
+        the server (a real bug: a client launching this server with no explicit `cwd`
+        resolved this to its own working directory and found nothing)."""
+        return self.skills_dir if self.skills_dir.is_absolute() else _PROJECT_ROOT / self.skills_dir
 
 
 settings = SigritySettings()

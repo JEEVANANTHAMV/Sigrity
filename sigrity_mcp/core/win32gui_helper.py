@@ -51,6 +51,7 @@ CONFIRMED BEHAVIOUR ON THIS MACHINE (Sigrity 2024.0):
 
 from __future__ import annotations
 
+import threading
 import time
 from typing import Callable, Optional, Sequence
 
@@ -327,3 +328,96 @@ def launch_and_dismiss(exe: str, args: Sequence[str], cwd: Optional[str] = None,
     )
     dismiss = auto_dismiss_dialogs(proc.pid, timeout=timeout, confirm_words=confirm_words)
     return {"pid": proc.pid, "proc": proc, "dismiss": dismiss}
+
+
+class DismissWatcher:
+    """Background daemon thread that keeps calling `auto_dismiss_dialogs` against one
+    `pid` for as long as the watcher is running, so a dialog is caught and dismissed
+    whenever it appears during the process's lifetime -- not just during one bounded
+    polling window a caller remembered to kick off by hand.
+
+    ROOT CAUSE this exists to fix: an interactive Allegro session job
+    (`allegro.exe -s <script.scr> <board.brd>`, launched via `core.jobs.JobManager.submit`)
+    can raise a short-lived modal dialog during startup -- CONFIRMED live on this machine
+    via a fresh repro against the Fault-Detector reference board: a top-level window
+    (class `Qt5QWindowIcon`, title identical to the app's own name -- Qt's default
+    caption for a `QMessageBox`/similar with no explicit title set, which is why a naive
+    title-text search for something distinctive misses it) appears a fraction of a
+    second into the run, and the MAIN shell window's `enabled` bit flips to 0 (truly
+    WS_DISABLED, i.e. a real native-modal relationship) for as long as it is up. The
+    dialog can disappear again within a couple of seconds on its own in some runs,
+    but there is no guarantee of that -- without something polling fast enough to catch
+    and dismiss it while it is up, the handful of runs where it does NOT self-clear hang
+    the whole job indefinitely with an empty `run.log` (the banner is the only thing ever
+    printed to stdout; everything else goes to Allegro's own journal/trace files, not the
+    job's log). Previously this only ever got dismissed if the calling LLM agent (or a
+    one-off script like `scripts/smoke_multilayer_stackup.py`) remembered to separately
+    poll `auto_dismiss_dialogs(pid)` concurrently -- which a plain MCP tool caller has no
+    way to do. `core.jobs.JobManager.submit(..., dismiss_dialogs=True)` now starts one of
+    these automatically for every interactive Allegro session job and stops it the
+    moment the job ends, so this is no longer something any caller has to remember.
+
+    Runs in a real OS thread (not an asyncio task) deliberately: `auto_dismiss_dialogs`
+    blocks for its whole `dialog_timeout` on every call (it polls to the full deadline
+    even when nothing is found, by design), and `JobManager.submit`/`_watch` run on the
+    single asyncio event loop that every other concurrent MCP tool call shares -- calling
+    it there directly would stall the whole server for `dialog_timeout` seconds at a time.
+    """
+
+    def __init__(
+        self,
+        pid: int,
+        poll_seconds: float = 0.5,
+        dialog_timeout: float = 1.0,
+        confirm_words: Sequence[str] = DEFAULT_CONFIRM_WORDS,
+        on_dialog_found: Optional[Callable[[dict], None]] = None,
+    ) -> None:
+        self.pid = pid
+        self.poll_seconds = poll_seconds
+        self.dialog_timeout = dialog_timeout
+        self.confirm_words = confirm_words
+        self.on_dialog_found = on_dialog_found
+        self.dismissed: list = []
+        self.errors: list = []
+        self._stop = threading.Event()
+        self._thread: Optional[threading.Thread] = None
+
+    def start(self) -> "DismissWatcher":
+        if not _WIN32:
+            # Nothing to watch on a non-Windows dev/CI machine -- stop()/join() below
+            # are safe no-ops since self._thread stays None.
+            return self
+        self._thread = threading.Thread(
+            target=self._run, name=f"dismiss-watcher-{self.pid}", daemon=True
+        )
+        self._thread.start()
+        return self
+
+    def _run(self) -> None:
+        while not self._stop.is_set():
+            try:
+                result = auto_dismiss_dialogs(
+                    self.pid,
+                    timeout=self.dialog_timeout,
+                    confirm_words=self.confirm_words,
+                    on_dialog_found=self.on_dialog_found,
+                )
+                self.dismissed.extend(result["dismissed"])
+                self.errors.extend(result["errors"])
+            except Exception as e:  # pragma: no cover - a watcher must never crash the job
+                self.errors.append(str(e))
+            self._stop.wait(self.poll_seconds)
+
+    def stop(self, join_timeout: float = 5.0) -> None:
+        """Idempotent: safe to call more than once (e.g. once from a job's normal
+        completion path and once from an explicit cancel())."""
+        self._stop.set()
+        if self._thread is not None:
+            self._thread.join(timeout=join_timeout)
+
+
+def spawn_dismiss_watcher(pid: int, **kwargs) -> DismissWatcher:
+    """Create and start a `DismissWatcher` for `pid`. Caller owns the returned object and
+    must call `.stop()` once the watched process's job is done (whether it succeeded,
+    failed, or was cancelled) to stop the background thread."""
+    return DismissWatcher(pid, **kwargs).start()

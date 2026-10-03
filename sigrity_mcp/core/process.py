@@ -67,6 +67,7 @@ async def submit_job(
     tcl_arg_flag: Optional[str] = "-TCL",
     extra_args: list[str] | None = None,
     script_filename: str = "macro.tcl",
+    dismiss_dialogs: bool = False,
 ) -> JobRecord:
     """Write `tcl_script` (if given) into a fresh job directory, then launch `tool` against it.
 
@@ -78,7 +79,11 @@ async def submit_job(
     controls the on-disk name the script is written under within the job directory —
     override it for non-Tcl script languages (e.g. "macro.scr" for an Allegro SKILL
     command-replay script) so `list_job_files`/`read_job_output_file` output isn't
-    misleadingly named.
+    misleadingly named. `dismiss_dialogs=True` starts a background win32 dialog-dismisser
+    for this job's whole lifetime -- see `JobManager.submit`'s docstring and
+    `core.win32gui_helper.DismissWatcher`; pass it for interactive Cadence GUI launches
+    that can raise a modal dialog with nobody present to click it (today: Allegro session
+    jobs, auto-enabled by `core.tclsession.run_session` for `tool="allegro"`).
     Returns immediately once the process has been *started*; use job_manager.status()/wait()
     to track completion.
     """
@@ -95,4 +100,6 @@ async def submit_job(
     argv += list(extra_args or [])
 
     command = [str(exe), *argv]
-    return await job_manager.submit(tool=tool, command=command, job_dir=job_dir, job_id=job_id)
+    return await job_manager.submit(
+        tool=tool, command=command, job_dir=job_dir, job_id=job_id, dismiss_dialogs=dismiss_dialogs
+    )
