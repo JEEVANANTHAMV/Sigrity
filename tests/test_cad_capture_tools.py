@@ -1,7 +1,10 @@
+from dataclasses import dataclass
+
 import pytest
 
 from sigrity_mcp.core.tclsession import tcl_sessions
 from sigrity_mcp.domains.cad.capture_tools import (
+    auto_dismiss_recovery_dialog_if_stuck,
     capture_annotate,
     capture_check_design_rules,
     capture_create_netlist,
@@ -63,3 +66,65 @@ async def test_run_session_builds_positional_argv_and_appends_close_exit(fake_ex
 
     finished = await fake_exe["jobs"].wait(result["job_id"], timeout=10)
     assert finished.state in ("succeeded", "failed")
+
+
+# auto_dismiss_recovery_dialog_if_stuck — regression coverage for a real gap: a job
+# that reaches a TERMINAL state with run.log still empty is a known Capture fast-exit
+# silent-no-op mode (job "succeeded" having done no real work). capture_run_session
+# itself can never observe this (it returns immediately after launch, long before the
+# process can reach a terminal state) -- this function is the first point that
+# actually waits long enough to see it, so the warning belongs here.
+
+
+@dataclass
+class _FakeJobRecord:
+    state: str
+    job_dir: str
+
+
+class _FakeJobManager:
+    def __init__(self, record):
+        self._record = record
+
+    async def wait(self, job_id, timeout):
+        return self._record
+
+
+@pytest.mark.asyncio
+async def test_auto_dismiss_warns_on_succeeded_with_empty_log(tmp_path, monkeypatch):
+    import sigrity_mcp.core.jobs as jobs_module
+
+    (tmp_path / "run.log").write_bytes(b"")
+    record = _FakeJobRecord(state="succeeded", job_dir=str(tmp_path))
+    monkeypatch.setattr(jobs_module, "job_manager", _FakeJobManager(record))
+
+    note = await auto_dismiss_recovery_dialog_if_stuck("fake-job", check_after_seconds=1.0)
+    assert note is not None
+    assert "fast-exit" in note
+    assert "succeeded" in note
+
+
+@pytest.mark.asyncio
+async def test_auto_dismiss_no_warning_when_succeeded_with_real_log_content(tmp_path, monkeypatch):
+    import sigrity_mcp.core.jobs as jobs_module
+
+    (tmp_path / "run.log").write_text("real output here")
+    record = _FakeJobRecord(state="succeeded", job_dir=str(tmp_path))
+    monkeypatch.setattr(jobs_module, "job_manager", _FakeJobManager(record))
+
+    note = await auto_dismiss_recovery_dialog_if_stuck("fake-job", check_after_seconds=1.0)
+    assert note is None
+
+
+@pytest.mark.asyncio
+async def test_auto_dismiss_no_warning_for_failed_state(tmp_path, monkeypatch):
+    # Scope is deliberately limited to the misleading "succeeded" case -- a "failed"
+    # state is already an honest negative signal, nothing misleading to flag.
+    import sigrity_mcp.core.jobs as jobs_module
+
+    (tmp_path / "run.log").write_bytes(b"")
+    record = _FakeJobRecord(state="failed", job_dir=str(tmp_path))
+    monkeypatch.setattr(jobs_module, "job_manager", _FakeJobManager(record))
+
+    note = await auto_dismiss_recovery_dialog_if_stuck("fake-job", check_after_seconds=1.0)
+    assert note is None

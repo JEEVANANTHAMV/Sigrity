@@ -252,16 +252,33 @@ async def auto_dismiss_recovery_dialog_if_stuck(job_id: str, check_after_seconds
     Kept separate from capture_run_session (which must stay a fast, fire-and-forget
     launcher) so callers that already block on a job — like generate_schematic_from_spec —
     can opt in without every capture tool call gaining an unconditional delay.
+
+    Also surfaces a different, real Capture failure mode this same wait naturally
+    catches: a job that reaches a TERMINAL state (`succeeded` or `failed`) with `run.log`
+    still 0 bytes — Capture's `Open <project>` step can fail fast (~0.1s) and report
+    `state="succeeded"`/returncode 0 having done no real work at all, indistinguishable
+    from a real run by job state alone. A caller checking only `capture_run_session`'s
+    immediate return value can never observe this (that call returns right after launch,
+    before the process can possibly have reached a terminal state) — this function is the
+    first point in the pipeline that actually waits long enough to see it.
     """
     import pathlib
 
     from sigrity_mcp.core.jobs import job_manager
 
     record = await job_manager.wait(job_id, timeout=check_after_seconds)
-    if record.state != "running":
-        return None
     log = pathlib.Path(record.job_dir) / "run.log"
-    if log.is_file() and log.stat().st_size > 0:
+    log_is_empty = not log.is_file() or log.stat().st_size == 0
+    if record.state != "running":
+        if record.state == "succeeded" and log_is_empty:
+            return (
+                "Job reported 'succeeded' but run.log is empty (0 bytes) — this matches "
+                "the known Capture fast-exit silent-no-op mode: the script may not have "
+                "run at all. Do not treat this as evidence the script ran; verify the "
+                "design file on disk via a non-Capture path before proceeding."
+            )
+        return None
+    if not log_is_empty:
         return None
     top = _find_window("Capture Custom Launch")
     if top is None:
