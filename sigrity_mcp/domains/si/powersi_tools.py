@@ -44,11 +44,37 @@ Sigrity analysis," this pair of tools IS the general answer — reach for a dedi
 
 from __future__ import annotations
 
+import re
 from typing import Literal, Optional
 
+from sigrity_mcp.core.config import settings
 from sigrity_mcp.core.tclscript import tcl_path, tcl_str
 from sigrity_mcp.core.tclsession import tcl_sessions, run_session
 from sigrity_mcp.mcp_app import mcp
+
+_FREQ_SUFFIX_RE = re.compile(
+    r"^\s*([0-9]*\.?[0-9]+(?:[eE][+-]?[0-9]+)?)\s*([kKmMgG]?)\s*([Hh][Zz])?\s*$"
+)
+_FREQ_SUFFIX_FACTOR = {"": 1.0, "k": 1e3, "K": 1e3, "m": 1e6, "M": 1e6, "g": 1e9, "G": 1e9}
+
+
+def _to_plain_hz(value: str, param: str) -> str:
+    """PowerSI's `-start`/`-end` take plain Hz numbers; a unit-suffixed string like
+    '1MHz' is mis-parsed and produces the misleading error 'The ending frequency
+    should not be smaller than the starting frequency' regardless of the real values.
+    Converts k/M/G-suffixed input to plain Hz; rejects anything unparseable up front
+    instead of letting a confusing failure surface after a job launch."""
+    m = _FREQ_SUFFIX_RE.match(value)
+    if not m:
+        raise ValueError(
+            f"{param}={value!r} is not a plain Hz number or a k/M/G-suffixed number "
+            "(e.g. '1e6' or '1GHz'). PowerSI requires plain Hz."
+        )
+    number, suffix, _hz_literal = m.groups()
+    factor = _FREQ_SUFFIX_FACTOR[suffix]
+    if factor == 1.0:
+        return number
+    return f"{float(number) * factor:.10g}"
 
 _MODES = Literal[
     "extraction", "resonance", "spatial", "layout",
@@ -90,6 +116,10 @@ async def powersi_set_frequency_sweep(
 ) -> dict:
     """Define the frequency sweep range for the simulation.
 See `.forjinn/skills/sigrity-si/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+    start = _to_plain_hz(start, "start")
+    end = _to_plain_hz(end, "end")
+    if float(end) < float(start):
+        raise ValueError(f"end ({end}) is smaller than start ({start}) -- PowerSI would reject this.")
     afs_flag = " -AFS" if use_afs else ""
     tcl_sessions.add_line(
         session_id,
@@ -236,7 +266,34 @@ async def powersi_run_session(
 ) -> dict:
     """Write out the session's accumulated Tcl macro and launch PowerSI against it as a background job.
 See `.forjinn/skills/sigrity-si/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
-    tcl_sessions.add_line(session_id, "sigrity::begin simulation {!}")
+    session = tcl_sessions.add_line(session_id, "sigrity::begin simulation {!}")
+    lines = session.script._lines
+    open_idx = next((i for i, l in enumerate(lines) if l.startswith("sigrity::open document")), None)
+    source_is_spd = False
+    if open_idx is not None:
+        m = re.search(r"\{([^}]*)\}", lines[open_idx])
+        if m:
+            source_is_spd = m.group(1).lower().endswith(".spd")
+    save_idx = next((i for i, l in enumerate(lines) if l.startswith("sigrity::save ")), None)
+    late_save_warning = None
+    if not source_is_spd:
+        if save_idx is None:
+            raise ValueError(
+                "This session opened a non-.spd design; PowerSI refuses to simulate a "
+                "design that hasn't been saved to native SPD form first, and the "
+                "failure is SILENT (rc 0, empty Options.xml only, no .sNp produced). "
+                "Call powersi_save_document(session_id, <spd_path>) right after "
+                "start_powersi_session and before any other step, then re-run."
+            )
+        if open_idx is not None and save_idx != open_idx + 1:
+            late_save_warning = (
+                "sigrity::save is not the line immediately after sigrity::open document "
+                "in this session's composed macro; only save-as-the-very-next-step is "
+                "verified to work -- a later save has been observed to also silently "
+                "produce no output. Prefer calling powersi_save_document immediately "
+                "after start_powersi_session."
+            )
+
     fmt_flag = {"touchstone": "-ft", "bnp": "-fb", "both": "-fbt"}[output_format]
     record = await run_session(
         session_id,
@@ -245,9 +302,28 @@ See `.forjinn/skills/sigrity-si/SKILL.md` for the full verified playbook, pitfal
         build_args=["-b", fmt_flag],
         extra_args=[spd_file] if spd_file else None,
     )
-    return {
+    result = {
         "job_id": record.job_id,
         "state": record.state,
         "job_dir": record.job_dir,
         "command": record.command,
     }
+    if late_save_warning:
+        result["warning"] = late_save_warning
+
+    # run_session (like submit_job) returns immediately after launch -- record.state is
+    # "running" here almost every time, not a terminal state, so this cannot scan for
+    # finished artifacts yet. artifact_dir itself IS knowable up front (PowerSI always
+    # writes to the configured workdir root, never job_dir) -- report it unconditionally
+    # so the caller knows where to look once they confirm completion separately via
+    # wait_for_job/get_job_status.
+    result["artifact_dir"] = str(settings.resolve_workdir())
+    result["note"] = (
+        "PowerSI writes its real artifacts (*_S.<N>p, *_S.ckt, *_Options.xml, "
+        "*_PowerSI.err) to artifact_dir (the configured workdir root), NOT job_dir -- "
+        "after confirming this job reached a terminal state (wait_for_job/"
+        "get_job_status), judge success by a non-empty *_S.<N>p there, never by "
+        "run.log or list_job_files (a perfect run and a missing-save failure both "
+        "yield rc 0 and an empty log)."
+    )
+    return result

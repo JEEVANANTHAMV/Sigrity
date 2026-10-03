@@ -29,6 +29,14 @@ def _record_to_dict(record) -> dict:
         "job_dir": record.job_dir,
         "log_path": record.log_path,
         "license_issue_suspected": record.license_issue_suspected,
+        "license_issue_suspected_note": (
+            "This only reports whether a license-related keyword string appears in the "
+            "last 1 MB of run.log -- on this install it is NOT a license health check: "
+            "confirmed False on both healthy artifact-producing runs (e.g. PowerSI "
+            "fetching a real license despite lmstat reporting the server unreachable) "
+            "and on empty-log runs alike. Judge tool health by the produced artifact, "
+            "never by this flag."
+        ),
         # Both booleans below default False and were previously set on JobRecord but
         # never surfaced past this function to any MCP tool caller -- a caller polling
         # get_job_status/wait_for_job on a job JobManager force-killed for a runaway

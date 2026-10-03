@@ -310,6 +310,10 @@ def test_record_to_dict_surfaces_runaway_and_stall_kill_reasons(tmp_path):
     assert out["runaway_log_killed"] is False
     assert out["stall_timeout_killed"] is False
     assert "note" not in out
+    # Regression: license_issue_suspected is confirmed False on both healthy and
+    # empty-log runs alike on this install, so its clarifying note must always
+    # accompany it, not just appear when something looks wrong.
+    assert "NOT a license health check" in out["license_issue_suspected_note"]
 
     runaway = _rec(tmp_path, 1)
     runaway.runaway_log_killed = True
