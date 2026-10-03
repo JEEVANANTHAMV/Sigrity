@@ -33,3 +33,5 @@ async def test_run_aurora_workflow(fake_exe):
     assert result["command"][2].endswith("aurora_workflow.scr")
     assert result["command"][3] == "board.brd"
     assert result["workflow_type"] == "Crosstalk"
+    assert result["expected_result_file_ext"] == ".xtalkida"
+    assert "built_untested" in result["note"]

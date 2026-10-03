@@ -30,6 +30,25 @@ async def test_run_workspace_with_spd_override(fake_exe):
 
 
 @pytest.mark.asyncio
+async def test_run_workspace_surfaces_artifacts_dir_not_job_dir(fake_exe, tmp_path):
+    # Regression: XtractIM writes all real output next to the input .ximx, not job_dir
+    # -- a caller checking only job_dir would mis-harvest every successful run.
+    workspace = tmp_path / "subdir" / "workspace.xml"
+    result = await run_xtractim_workspace(str(workspace))
+    assert result["artifacts_dir"] == str(workspace.parent)
+    assert result["artifacts_dir"] != result["job_dir"]
+    assert "NOT job_dir" in result["note"]
+
+
+@pytest.mark.asyncio
+async def test_run_workspace_artifacts_dir_follows_spd_override(fake_exe, tmp_path):
+    workspace = tmp_path / "ws" / "workspace.xml"
+    override = tmp_path / "override_dir" / "new.spd"
+    result = await run_xtractim_workspace(str(workspace), spd_override=str(override))
+    assert result["artifacts_dir"] == str(override.parent)
+
+
+@pytest.mark.asyncio
 async def test_start_session_opens_document():
     result = await start_xtractim_session(spd_file=r"C:\design\board.spd")
     preview = await preview_tcl_session(result["session_id"])
@@ -74,6 +93,8 @@ async def test_run_session_builds_correct_argv(fake_exe):
     result = await xtractim_run_session(sid)
     assert result["command"][1] == "-b"
     assert "-tcl" in result["command"]
+    assert "incomplete setup" in result["note"]
+    assert "rc 0" in result["note"]
 
     fresh = await fake_exe["jobs"].wait(result["job_id"], timeout=10)
     assert fresh.state in ("succeeded", "failed")

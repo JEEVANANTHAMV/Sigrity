@@ -32,6 +32,20 @@ from sigrity_mcp.core.tclscript import tcl_path, tcl_str
 from sigrity_mcp.core.tclsession import run_session, tcl_sessions
 from sigrity_mcp.mcp_app import mcp
 
+
+def _require_clarity3d_input_format(design_file: str) -> None:
+    """Clarity3DWorkbench.exe rejects any format other than .3dem/.spdb with 'File
+    format is not supported.' and then segfaults, leaving the job state stuck at
+    'running' forever (no exit code is ever set) -- a much worse failure mode than a
+    clean validation error. Fail fast here instead."""
+    if not design_file.lower().endswith((".3dem", ".spdb")):
+        raise ValueError(
+            f"design_file {design_file!r} is not a .3dem/.spdb. Clarity3DWorkbench "
+            "rejects other formats (.spd/.dsn/.dsp) with 'File format is not "
+            "supported.' and then segfaults, leaving the job state stuck at 'running' "
+            "with no exit code. Obtain a real .3dem/.spdb first."
+        )
+
 _NET_TYPE_CODES = {"UnnamedNet": 0, "Power": 1, "Ground": 2, "Signal": 3}
 
 
@@ -62,6 +76,7 @@ def _vertex(vertex: list) -> str:
 async def start_clarity3d_session(design_file: str, tcl_version: int = 6) -> dict:
     """Begin a new Clarity3D automation session by opening a 3D EM design (.3dem).
 See `.forjinn/skills/sigrity-extraction/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+    _require_clarity3d_input_format(design_file)
     session = tcl_sessions.create("clarity3d_workbench")
     sid = session.session_id
     tcl_sessions.add_line(sid, f"sigrity::configure version -version {{{tcl_version}}}")
@@ -205,6 +220,7 @@ See `.forjinn/skills/sigrity-extraction/SKILL.md` for the full verified playbook
 async def clarity3d_run_session(session_id: str, design_file: str) -> dict:
     """Write out the session's accumulated Tcl macro and launch Clarity3D Workbench against it as a background job.
 See `.forjinn/skills/sigrity-extraction/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+    _require_clarity3d_input_format(design_file)
     tcl_sessions.add_line(session_id, f"sigrity::begin simulation -fileName {tcl_path(design_file)}")
     tcl_sessions.add_line(session_id, f"sigrity::end simulation -fileName {tcl_path(design_file)}")
     record = await run_session(

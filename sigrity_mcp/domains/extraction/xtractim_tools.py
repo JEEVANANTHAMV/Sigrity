@@ -36,6 +36,7 @@ list_job_files, read_job_output_file) to track/retrieve the run.
 
 from __future__ import annotations
 
+import os
 from typing import Literal, Optional
 
 from sigrity_mcp.core.process import submit_job
@@ -52,7 +53,23 @@ See `.forjinn/skills/sigrity-extraction/SKILL.md` for the full verified playbook
     if spd_override:
         args.append(spd_override)
     record = await submit_job(tool="xtractim", build_args=args)
-    return {"job_id": record.job_id, "state": record.state, "job_dir": record.job_dir, "command": record.command}
+    artifacts_base = spd_override if spd_override else workspace_xml
+    artifacts_dir = os.path.dirname(os.path.abspath(artifacts_base))
+    return {
+        "job_id": record.job_id,
+        "state": record.state,
+        "job_dir": record.job_dir,
+        "command": record.command,
+        "artifacts_dir": artifacts_dir,
+        "note": (
+            "XtractIM workspace mode writes ALL results (EPAResult_*.eparesult, "
+            "*NetLoopInd.csv, *PinInductanceAll_{LC,LB}.csv, *PinRLofEachNet_*.csv, "
+            "*_XtractIM.err, Ref_Files/, and its own solver log <layout>_<ts>_<pid>.log) "
+            "into artifacts_dir -- NOT job_dir. job_dir will contain only job.json plus "
+            "a 0-byte run.log even on a fully successful run; harvest from "
+            "artifacts_dir instead."
+        ),
+    }
 
 
 @mcp.tool
@@ -174,4 +191,17 @@ See `.forjinn/skills/sigrity-extraction/SKILL.md` for the full verified playbook
         tcl_arg_flag="-tcl",
         build_args=["-b"],
     )
-    return {"job_id": record.job_id, "state": record.state, "job_dir": record.job_dir, "command": record.command}
+    return {
+        "job_id": record.job_id,
+        "state": record.state,
+        "job_dir": record.job_dir,
+        "command": record.command,
+        "note": (
+            "XtractIM session mode exits rc 0 even when 'begin simulation' aborts "
+            "internally with 'incomplete setup' (no RLC output produced). Do NOT treat "
+            "state='succeeded' + returncode=0 as proof of a real extraction: read the "
+            "macro log for 'incomplete setup'/'stackup' text and confirm RLC artifacts "
+            "exist before consuming results. For a complete, artifact-producing run, "
+            "prefer run_xtractim_workspace with a pre-built .ximx."
+        ),
+    }

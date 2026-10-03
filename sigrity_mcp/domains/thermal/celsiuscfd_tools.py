@@ -28,6 +28,7 @@ anywhere in the shipped doc tree beyond this confirmed sequence.
 
 from __future__ import annotations
 
+import os
 import pathlib
 import shutil
 
@@ -81,4 +82,23 @@ See `.forjinn/skills/sigrity-celsius/SKILL.md` for the full verified playbook, p
     tcl_sessions.add_line(session_id, f"sigrity::end simulation -fileName {path}")
     tcl_sessions.add_line(session_id, "sigrity::close exe")
     record = await run_session(session_id, tool="celsiuscfd", tcl_arg_flag="-tcl")
-    return {"job_id": record.job_id, "state": record.state, "job_dir": record.job_dir, "command": record.command}
+    project_dir = os.path.dirname(os.path.abspath(project_file))
+    stem = os.path.splitext(os.path.basename(project_file))[0]
+    results_dir = os.path.join(project_dir, f"{stem}_EX_CFD")
+    return {
+        "job_id": record.job_id,
+        "state": record.state,
+        "job_dir": record.job_dir,
+        "command": record.command,
+        "results_dir": results_dir,
+        "note": (
+            "CelsiusCFD is treated as subject to the same re-run-in-place hang risk as "
+            "Celsius3D (same product family; NOT independently confirmed for CFD). "
+            "clean_prior_results=True (the default) strips any stale results_dir before "
+            "launch -- keep it on, and prefer a fresh project copy per run. If a CFD "
+            "idle-variant ever surfaces (mirroring Celsius3D), do NOT gate on "
+            "state=='succeeded' or returncode: the real completion signal is the .cfd + "
+            "summary files present at real size in results_dir (next to project_file, "
+            "NOT in job_dir)."
+        ),
+    }

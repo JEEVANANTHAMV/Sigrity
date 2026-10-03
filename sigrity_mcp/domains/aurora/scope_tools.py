@@ -113,12 +113,29 @@ See `.forjinn/skills/sigrity/SKILL.md` for the full verified playbook, pitfalls,
         extra_args=[board_file],
         script_filename="aurora_workflow.scr",
     )
+    result_ext = {
+        "Impedance": ".impida", "Coupling": ".cplida", "Crosstalk": ".xtalkida",
+        "ReturnPath": ".rpida", "Reflection": ".rfltida", "IRDrop": ".irida",
+    }.get(workflow_type)
     return {
         "job_id": record.job_id,
         "state": record.state,
         "job_dir": record.job_dir,
         "command": record.command,
         "workflow_type": workflow_type,
+        "expected_result_file_ext": result_ext,
+        "note": (
+            "run_aurora_workflow is built_untested: the Aurora-specific FORM field names "
+            "(workflow_type, start_analysis, form.workflow) are a best-effort "
+            "transcription from the doc set, never confirmed end-to-end against a real "
+            "board to show the check ran and wrote its result file. Do NOT gate on "
+            "state=='succeeded' or returncode -- a clean board save does not mean the "
+            "Aurora check worked. The only proof the check produced a result is the "
+            f"presence of the proprietary Aurora result file ({result_ext}) at real size "
+            "next to the board; absence means treat the Aurora step as a silent no-op. "
+            "For decision-critical signoff, prefer the confirmed standalone equivalents "
+            "from get_in_design_analysis_alternatives instead."
+        ),
     }
 
 

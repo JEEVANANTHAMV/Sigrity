@@ -84,3 +84,30 @@ async def test_run_session_builds_correct_argv_and_flag_order(fake_exe):
     # session should be auto-closed after running
     with pytest.raises(Exception):
         tcl_sessions.get(sid)
+
+
+# Regression coverage for a real failure mode: Clarity3DWorkbench.exe rejects any
+# format other than .3dem/.spdb with "File format is not supported." and then
+# segfaults, leaving the job state stuck at "running" forever (no exit code ever
+# set) -- a much worse failure than a clean, fast validation error.
+
+
+@pytest.mark.asyncio
+async def test_start_session_rejects_non_3dem_format():
+    with pytest.raises(ValueError, match="not a .3dem/.spdb"):
+        await start_clarity3d_session(design_file="board.spd")
+
+
+@pytest.mark.asyncio
+async def test_run_session_rejects_non_3dem_format(fake_exe):
+    session = await start_clarity3d_session(design_file="test2.3dem")
+    sid = session["session_id"]
+    with pytest.raises(ValueError, match="not a .3dem/.spdb"):
+        await clarity3d_run_session(sid, design_file="board.dsn")
+    await close_tcl_session(sid)
+
+
+@pytest.mark.asyncio
+async def test_start_session_accepts_spdb_format():
+    result = await start_clarity3d_session(design_file="design.spdb")
+    await close_tcl_session(result["session_id"])

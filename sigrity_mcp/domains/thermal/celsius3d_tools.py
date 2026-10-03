@@ -63,6 +63,7 @@ geometry. Extend this module if a real project surfaces additional confirmed
 
 from __future__ import annotations
 
+import os
 import pathlib
 import shutil
 
@@ -106,4 +107,25 @@ See `.forjinn/skills/sigrity-celsius/SKILL.md` for the full verified playbook, p
     tcl_sessions.add_line(session_id, f"sigrity::end simulation -fileName {path}")
     tcl_sessions.add_line(session_id, "sigrity::close exe")
     record = await run_session(session_id, tool="celsius3d", tcl_arg_flag="-tcl")
-    return {"job_id": record.job_id, "state": record.state, "job_dir": record.job_dir, "command": record.command}
+    project_dir = os.path.dirname(os.path.abspath(project_file))
+    stem = os.path.splitext(os.path.basename(project_file))[0]
+    results_dir = os.path.join(project_dir, f"{stem}_SS_W")
+    return {
+        "job_id": record.job_id,
+        "state": record.state,
+        "job_dir": record.job_dir,
+        "command": record.command,
+        "results_dir": results_dir,
+        "note": (
+            "Celsius3D does NOT reliably self-exit after a successful solve -- it idles "
+            "with an 'Unsaved Project' Qt window that cannot be dismissed by message "
+            "posting. Do NOT gate on state=='succeeded' or returncode; the process may "
+            "never self-exit even on success. The real completion signal is SR3d.dat + "
+            "case_Result_Summary.dat/.json present at real size in results_dir (next to "
+            "project_file, NOT in job_dir). Once those exist at real size, it is safe to "
+            "force-kill the now-idle Celsius3D.exe process (pid on this record) -- the "
+            "work is already on disk. This stall can happen even on a completely fresh, "
+            "never-run project dir, so clean_prior_results=True is necessary but not "
+            "sufficient to avoid it."
+        ),
+    }

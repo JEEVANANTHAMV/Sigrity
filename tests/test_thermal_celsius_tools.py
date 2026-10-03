@@ -23,6 +23,10 @@ async def test_celsius3d_session_composes_confirmed_sequence(fake_exe):
     assert result["command"][1] == "-tcl"
     # session should be closed by run_session's close_after=True default
     assert sid not in [s.session_id for s in tcl_sessions.list_sessions()]
+    # Regression: Celsius3D does not reliably self-exit, so the caller needs a
+    # machine-readable pointer to the real completion artifact, not just state/rc.
+    assert result["results_dir"].endswith("case_SS_W")
+    assert "state" in result["note"] and "results_dir" in result["note"]
 
 
 @pytest.mark.asyncio
@@ -45,6 +49,8 @@ async def test_celsiuscfd_session_composes_confirmed_sequence(fake_exe):
 
     result = await celsiuscfd_run_session(sid, "pcb.3dth")
     assert result["job_id"]
+    assert result["results_dir"].endswith("pcb_EX_CFD")
+    assert "clean_prior_results" in result["note"]
 
 
 @pytest.mark.asyncio
