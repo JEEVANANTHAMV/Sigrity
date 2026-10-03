@@ -69,7 +69,7 @@ TOOL_STATUS: dict[str, ToolStatus] = {
     "cap2xml": "known_blocked",
     "dml2con": "known_blocked",
     "apd2con": "known_blocked",
-    "abcd": "known_blocked",
+    "abcd": "confirmed_live",
     "bem2d3": "built_untested",
     "xcitepi": "confirmed_live",
     "optimizepi": "confirmed_live",
@@ -665,10 +665,6 @@ TOOL_STATUS_NOTES: dict[str, str] = {
     "validation). Doubly blocked here: no `.apd` sample file exists anywhere in the "
     "install either, so even a working license would need an APD design obtained "
     "separately to exercise this tool.",
-    "abcd": "Confirmed via `abcd.exe -help`'s full self-printed usage banner (real "
-    "flag names/semantics). Cascades and de-embeds Touchstone S-parameter files; requires "
-    "identical port counts, matching frequency points, 50-ohm reference impedance, and "
-    "a space-free -filepath directory to avoid C++ solver crashes.",
     "bem2d3": "Confirmed via `bem2d3.exe -help`'s full self-printed usage banner (real "
     "flag names/semantics, tool's own banner still calls itself 'BEM2D2' internally), "
     "but not run against a real geometry input file on this machine.",
@@ -777,16 +773,22 @@ TOOL_STATUS_NOTES: dict[str, str] = {
     "fix would mean driving it via `sigrity::do exec \"...spdsim.exe\" -as \"file.spd\" "
     "&` INSIDE a PowerSI Tcl session (powersi_tools.py) rather than as its own "
     "submit_job call — not yet implemented.",
-    "abcd": "ATTEMPTED LIVE against three different real Touchstone file combinations "
-    "(two 4-port .s4p files cascaded — segfaulted, exit 139; a single 2-port capacitor "
-    ".s2p with -tsfile alone — silent no-op, no output, no error; two 2-port capacitor "
-    ".s2p files cascaded via -lefttsfile/-righttsfile, both relative and absolute "
-    "-filepath — also silent no-op). Demoted from built_untested to known_blocked: "
-    "confirmed real via -help, but every real invocation tried either crashed or did "
-    "nothing, with zero diagnostic output either way — root cause not isolated, "
-    "possibly a frequency-grid/port-count compatibility requirement between the files "
-    "that isn't obvious from the tool's own error reporting (which in this case is "
-    "simply absent).",
+    "abcd": "Confirmed live for 2-port cascade and de-embed. The apparent silent "
+    "no-op seen on every earlier attempt (rc 0, no output, no error, zero diagnostic "
+    "output) was root-caused, not a broken binary: `abcd.exe` only resolves its file "
+    "arguments against `-filepath`'s value when that value ends in a trailing path "
+    "separator -- `run_touchstone_deembed` now normalizes this automatically, so no "
+    "caller needs to remember it. With a correct invocation, a real de-embed run "
+    "produces a well-formed Touchstone output file whose values genuinely differ from "
+    "the input (verified by reading the produced file, not just the exit code -- abcd "
+    "exits 0 even on the no-op, so rc alone is never proof it ran). `-help` alone "
+    "(no following token) prints only \"command line contains too few arguments\" to "
+    "its own log; `-help <anything>` prints the real usage banner to stdout. 4-port "
+    "S-parameter files remain unverified either way: an earlier real segfault was seen "
+    "on a specific 4-port magnitude/angle-format file, but a later attempt to re-test "
+    "it found the original input files no longer present (so that attempt proved "
+    "nothing about the segfault either way) -- treat 4-port work as "
+    "untested-pending-real-inputs, not confirmed broken or confirmed working.",
     "allegro_checkplus": "`doc/checkplus/chap2.html`'s own title is "
     "'Setting Up Allegro Design Entry HDL Rules Checker' — checkplus is a rules "
     "checker for Design Entry HDL / Concept-HDL (a separate, legacy Cadence SCHEMATIC "

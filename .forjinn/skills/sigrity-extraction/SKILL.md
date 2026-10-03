@@ -238,39 +238,37 @@ license or HPC issue. Record it as a known-blocked state, don't burn time retryi
 
 ---
 
-## Task 5 — `run_touchstone_deembed` (abcd) — **documented defect, re-verified**
+## Task 5 — `run_touchstone_deembed` (abcd) — confirmed live for 2-port, with a real gotcha
 
-Reproduced with the same inputs the module docstring calls out as the
-"does not crash but also does nothing" case (RI 4-port pair):
+The earlier "effectively broken, no input class works" verdict for this tool was
+wrong — root-caused and fixed. `abcd.exe` only resolves its `-tsfile`/`-lefttsfile`/
+`-righttsfile`/`-duttsfile` arguments against `-filepath`'s value when that value ends
+in a trailing path separator; without one it silently does nothing (rc 0, no output,
+no error, `run.log` stays 0 bytes). `run_touchstone_deembed` now normalizes this
+automatically, so this is no longer something a caller needs to work around:
 
 ```
 run_touchstone_deembed(
     file_path="C:\Users\aicoe\Desktop\Sigrity\runs\t5_abcd",
-    touchstone_file="app1_drv.S4P",          # RI 4-port, 1e6–2e9 Hz, 50 Ω
-    right_touchstone_file="CoupledLines_SplitPlane.s4p",  # RI 4-port, same format
-    dut_touchstone_file="dut.s4p")
-→ { "job_id":"abcd-d3ec5ac472", "state":"running" }
-wait_for_job(job_id="abcd-d3ec5ac472", timeout_seconds=180)
-→ { "state":"succeeded", "returncode":0, "license_issue_suspected":false }   # 2 s
-list_job_files("abcd-d3ec5ac472")
-→ { "file_count":2, "files":["job.json","run.log"] }   # no dut.s4p anywhere
+    left_touchstone_file="cap.s2p",
+    right_touchstone_file="cap.s2p",
+    dut_touchstone_file="dut.s2p")
+→ { "job_id":"abcd-...", "state":"running" }
+wait_for_job(...) → { "state":"succeeded", "returncode":0 }
+read_job_output_file(job_id, "dut.s2p")  # real, well-formed Touchstone output,
+# header "! Cadence S Parameter Output From ABCD Version 1.0", values genuinely
+# differ from the input
 ```
 
-`abcd` returned rc 0 and wrote **nothing** — `run.log` is 0 bytes, `dut.s4p` does not
-exist in the job dir or next to the inputs. This matches the module docstring:
-"every other tested combination exits 0 but does NOT write the output file at all"
-(0/12 attempts across 2-port/4-port-RI/10-port).
+**Still verify the output file, don't trust rc 0 alone**: abcd exits 0 even on a
+no-op, so a "succeeded" job with `returncode: 0` is not by itself proof the de-embed
+ran — always confirm `dut_touchstone_file` exists and is non-empty.
 
-**`file_path` must be a directory with no spaces** — it's the base dir all other files are
-resolved against. Passing a file path or a spaced directory will make abcd fail
-silently or not at all.
-
-**Mistake #1 for abcd:** trusting rc 0. On this install (Sigrity 2024.0), `abcd` is
-effectively broken for every input class except the MA/dB 4-port case — where it
-segfaults (rc 0xC0000005) instead. **There is no input class on this machine that makes
-abcd produce a non-empty `dut_touchstone_file`.** Do not put abcd in a pipeline and claim
-the cascade/de-embed step ran; there is no way to distinguish "ran and was a no-op" from
-"segfaulted" by returncode alone, and both are wrong.
+**4-port S-parameter files remain unverified** (not confirmed broken, not confirmed
+working): a real segfault was once seen on a specific 4-port magnitude/angle-format
+file, but a later attempt to re-test it found the original input files no longer
+present on this machine, so nothing was actually re-proven either way. If 4-port work
+is needed, obtain real 4-port files first and test before relying on it.
 
 ---
 
@@ -282,9 +280,10 @@ the cascade/de-embed step ran; there is no way to distinguish "ran and was a no-
 | XtractIM .spd (for session mode) | `...\xtractim\Wirebond_EPA.spd` (+ `Wirebond_Pinbased.ximx`, `FlipChip_net-based.spd`/`.xml`, `wirebond.spd` in same dir) |
 | Dsn2Spd .dsn | `C:\Cadence\Sigrity2024.0\share\Translators\Samples\Dsn2Spd\demo.dsn` |
 | Clarity3D sample | NONE on this machine — `clarity3d_run_session` requires a `.3dem` (verified: recursive `*.3dem` search under `share` returns nothing); the only Clarity3D-labeled file `share\PostInstallationCheck\clarity\43micro.spd` is an XtractIM 3D EM design and is rejected by the tool (see Task 4) |
-| Touchstone RI 4-port (safe for abcd) | `C:\Cadence\Sigrity2024.0\share\SpeedXP\Samples\Broadband SPICE\app1_drv.S4P` |
-| Touchstone RI 4-port (safe for abcd) | `...\Broadband SPICE\CoupledLines_SplitPlane.s4p` |
-| Touchstone MA/dB 4-port (segfaults abcd) | `...\Broadband SPICE\channel.s4p` |
+| Touchstone 2-port (confirmed working with abcd) | real Murata capacitor `.s2p` samples under `share\SpeedXP\` |
+| Touchstone RI 4-port (unverified with abcd, not a known crash) | `C:\Cadence\Sigrity2024.0\share\SpeedXP\Samples\Broadband SPICE\app1_drv.S4P` |
+| Touchstone RI 4-port (unverified with abcd, not a known crash) | `...\Broadband SPICE\CoupledLines_SplitPlane.s4p` |
+| Touchstone MA/dB 4-port (once segfaulted abcd; unverified since) | `...\Broadband SPICE\channel.s4p` |
 
 ## One-line summary per tool (for quick recall)
 
@@ -294,7 +293,9 @@ the cascade/de-embed step ran; there is no way to distinguish "ran and was a no-
   — use Task 1 mode instead if you already have a good `.ximx`.
 - `clarity3d_run_session(sid, design_file)` → needs `.3dem`, not available on this machine;
   feeding `.spd`/`.dsn` segfaults with empty log; record as known-blocked.
-- `run_touchstone_deembed(file_path, dut, leftts, rightts)` → rc 0, **no output file ever
-  produced** on this install; the tool is unusable, don't put it in a pipeline.
+- `run_touchstone_deembed(file_path, dut, leftts, rightts)` → confirmed live for 2-port
+  cascade/de-embed (the tool auto-normalizes `file_path` to end in a trailing
+  separator, the one thing abcd itself requires); 4-port remains unverified. Always
+  check the output file, not just rc 0 — abcd exits 0 on a no-op too.
 - `run_xhatch_field_solver(in, out, -xhatchmode y, ...)` → `bem2d3.exe`, standalone 2D
   solver for rigid-flex x-hatched ground; not exercised in this report, same job-pattern.
