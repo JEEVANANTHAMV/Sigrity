@@ -35,3 +35,36 @@ def test_load_skill_works_from_unrelated_cwd(tmp_path, monkeypatch):
     result = _run(skill_tools.load_skill("sigrity-cad"))
     assert "error" not in result
     assert "content" in result and len(result["content"]) > 0
+
+
+# --- Distinguishing "skills dir missing" from "skills dir exists but wrong layout" --
+#
+# Regression coverage for a real gap: an explicitly-set-but-wrong SIGRITY_SKILLS_DIR
+# used to produce the same generic empty-list error regardless of WHY it was empty,
+# making the actual misconfiguration easy to miss.
+
+
+def test_list_skills_reports_missing_directory_distinctly(tmp_path, monkeypatch):
+    missing = tmp_path / "does_not_exist"
+    monkeypatch.setattr(settings, "skills_dir", missing)
+    result = _run(skill_tools.list_skills())
+    assert result["skills"] == []
+    assert "does not exist" in result["error"]
+    assert str(missing) in result["error"]
+
+
+def test_list_skills_reports_wrong_layout_distinctly(tmp_path, monkeypatch):
+    empty_dir = tmp_path / "empty_skills_dir"
+    empty_dir.mkdir()
+    monkeypatch.setattr(settings, "skills_dir", empty_dir)
+    result = _run(skill_tools.list_skills())
+    assert result["skills"] == []
+    assert "no skill subdirectories" in result["error"]
+
+
+def test_load_skill_unknown_name_reports_missing_directory_distinctly(tmp_path, monkeypatch):
+    missing = tmp_path / "does_not_exist"
+    monkeypatch.setattr(settings, "skills_dir", missing)
+    result = _run(skill_tools.load_skill("sigrity-cad"))
+    assert result["available_skills"] == []
+    assert "does not exist" in result["error"]

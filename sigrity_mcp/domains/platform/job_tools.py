@@ -46,6 +46,7 @@ def _record_to_dict(record) -> dict:
         # tool-facing dict every other field already does.
         "runaway_log_killed": record.runaway_log_killed,
         "stall_timeout_killed": getattr(record, "stall_timeout_killed", False),
+        "failure_note": getattr(record, "failure_note", ""),
     }
     if out["runaway_log_killed"]:
         out["note"] = (

@@ -68,3 +68,70 @@ async def test_pipeline_rejects_too_many_steps():
     steps = [{"tool": "get_aurora_scope_notice", "args": {}}] * 51
     result = await run_tool_pipeline(steps)
     assert "error" in result
+
+
+# --- ok/kind discriminator -----------------------------------------------------------
+#
+# Regression coverage for a real ambiguity: a raised step (no "result" key) and a
+# normal step whose own result payload happens to contain an "error" key both used to
+# be indistinguishable from "a step that genuinely succeeded" by key-presence alone.
+# "ok"/"kind" give an explicit discriminator every step now carries.
+
+
+@pytest.mark.asyncio
+async def test_pipeline_ok_step_has_kind_ok():
+    steps = [{"tool": "get_aurora_scope_notice", "args": {}}]
+    result = await run_tool_pipeline(steps)
+    assert result["results"][0]["ok"] is True
+    assert result["results"][0]["kind"] == "ok"
+
+
+@pytest.mark.asyncio
+async def test_pipeline_raised_step_has_kind_raised():
+    steps = [{"tool": "not_a_real_tool", "args": {}}]
+    result = await run_tool_pipeline(steps)
+    assert result["results"][0]["ok"] is False
+    assert result["results"][0]["kind"] == "raised"
+
+
+@pytest.mark.asyncio
+async def test_pipeline_missing_tool_key_has_kind_raised():
+    steps = [{"args": {}}]
+    result = await run_tool_pipeline(steps)
+    assert result["results"][0]["ok"] is False
+    assert result["results"][0]["kind"] == "raised"
+
+
+@pytest.mark.asyncio
+async def test_pipeline_succeeded_count_uses_ok_not_error_key_presence():
+    steps = [
+        {"tool": "get_aurora_scope_notice", "args": {}},
+        {"tool": "not_a_real_tool", "args": {}},
+    ]
+    result = await run_tool_pipeline(steps, stop_on_error=False)
+    assert result["succeeded_count"] == 1
+    assert result["failed_count"] == 1
+
+
+# --- unknown-argument-name guard ----------------------------------------------------
+#
+# Regression coverage for a real documented trap: a wrong argument name for a
+# *required* parameter used to surface as FastMCP's own "missing_argument" error,
+# which names the field the caller forgot, not the wrong name they actually sent --
+# confusing when the caller DID send a value, just under the wrong key.
+
+
+@pytest.mark.asyncio
+async def test_pipeline_unknown_argument_name_gets_a_did_you_mean_hint():
+    steps = [{"tool": "get_license_feature_status", "args": {"feature": "PowerSI"}}]
+    result = await run_tool_pipeline(steps)
+    assert result["results"][0]["ok"] is False
+    assert result["results"][0]["kind"] == "raised"
+    assert "feature_name" in result["results"][0]["error"]
+
+
+@pytest.mark.asyncio
+async def test_pipeline_correct_argument_names_are_unaffected():
+    steps = [{"tool": "get_license_feature_status", "args": {"feature_name": "PowerSI"}}]
+    result = await run_tool_pipeline(steps)
+    assert result["results"][0]["ok"] is True

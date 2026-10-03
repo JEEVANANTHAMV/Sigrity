@@ -131,6 +131,15 @@ class JobRecord:
     `list_job_files`/output content before assuming nothing happened, don't trust
     state="failed" alone."""
 
+    failure_note: str = ""
+    """Populated only for one narrow, well-defined ambiguous-failure shape: a negative
+    (NT-status-range) return code, no license keyword in the log, and a near-empty
+    (<4KB) log -- too little signal to tell a silent license abort, a crash, a
+    modal-dialog hang, and a watchdog kill apart. Empty string for every other
+    failure, so its presence is itself a precise signal. See the assignment site in
+    `_watch` for the full note text and `core.tool_status`'s per-tool notes for any
+    known negative-rc signature this specific tool has."""
+
     def save(self) -> None:
         Path(self.job_dir, "job.json").write_text(json.dumps(asdict(self), indent=2), encoding="utf-8")
 
@@ -312,6 +321,23 @@ class JobManager:
             record.license_issue_suspected = any(m in tail for m in _LICENSE_MARKERS)
         except OSError:
             pass
+        if (
+            record.state == "failed"
+            and (record.returncode or 0) < 0
+            and not record.license_issue_suspected
+            and _safe_stat_size(log_path) < 4096
+        ):
+            record.failure_note = (
+                "Negative return code with a near-empty log and no license markers — "
+                "the cause is AMBIGUOUS (silent license abort vs. crash vs. modal-"
+                "dialog hang vs. watchdog kill). license_issue_suspected=False here "
+                "means 'no license text in the log', NOT 'not a license problem'. Do "
+                "not auto-retry on this flag alone. Run the inspection trio: "
+                "tail_job_log(job_id), check_design_lock(design_path) (a silent "
+                "Allegro failure typically orphans a .lck), and check for real "
+                "artifacts in the input file's own directory. See core.tool_status's "
+                "per-tool note for this tool's known negative-rc signature, if any."
+            )
         record.save()
 
     def get(self, job_id: str) -> JobRecord:

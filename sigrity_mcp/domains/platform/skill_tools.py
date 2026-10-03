@@ -79,13 +79,21 @@ def _resolve_skill_path(name: str) -> Optional[Path]:
 async def list_skills() -> dict:
     """List every domain skill playbook available (name + one-line description each) — call this first, especially on a non-stdio connection where you cannot read `.forjinn/skills/` off disk directly.
 Then call load_skill(name) for the domain(s) your task actually needs before calling its tools."""
+    root = _skills_root()
     files = list(_iter_skill_files())
     if not files:
-        return {
-            "skills": [],
-            "error": f"No skill files found under {_skills_root()} — check the "
-            "SIGRITY_SKILLS_DIR setting / server working directory.",
-        }
+        if not root.is_dir():
+            error = (
+                f"Skills directory does not exist: {root} — SIGRITY_SKILLS_DIR (or "
+                "the default .forjinn/skills relative to the repo root) resolves to "
+                "a missing path. Unset SIGRITY_SKILLS_DIR to use the built-in default."
+            )
+        else:
+            error = (
+                f"No <name>/SKILL.md files found under {root} — the directory exists "
+                f"but has no skill subdirectories. Expected layout: {root}/<name>/SKILL.md."
+            )
+        return {"skills": [], "error": error}
     return {"skills": [{"name": s["name"], "description": s["description"]} for s in map(_parse_skill_file, files)]}
 
 
@@ -95,6 +103,12 @@ async def load_skill(name: str) -> dict:
 Use this in place of reading `.forjinn/skills/<name>/SKILL.md` off disk when you have no filesystem access to this machine."""
     path = _resolve_skill_path(name)
     if path is None:
+        root = _skills_root()
+        if not root.is_dir():
+            return {
+                "error": f"Skills directory does not exist: {root} (SIGRITY_SKILLS_DIR misconfigured?)",
+                "available_skills": [],
+            }
         available = sorted(p.parent.name for p in _iter_skill_files())
         return {"error": f"No skill named '{name}'.", "available_skills": available}
     parsed = _parse_skill_file(path)

@@ -546,3 +546,67 @@ async def test_cancel_outcome_already_terminal(tmp_path, monkeypatch):
 
     record, outcome = await jm.cancel(job_id)
     assert outcome == "already-terminal"
+
+
+# --- failure_note: ambiguous negative-rc + near-empty-log + no-license-marker ------
+#
+# Regression coverage for a real documented gap: this exact combination (confirmed on
+# a real Allegro returncode=-536870904 signature) used to be recorded with no signal
+# distinguishing it from any other "failed" job -- license_issue_suspected=False there
+# means "no license text seen", not "not a license problem", and nothing said so.
+
+
+@pytest.mark.asyncio
+async def test_failure_note_set_for_negative_rc_near_empty_log_no_license_markers(
+    tmp_path, monkeypatch
+):
+    monkeypatch.chdir(tmp_path)
+    jm = JobManager()
+    job_id, job_dir = jm.new_job_dir("fake_tool")
+    await jm.submit(
+        tool="fake_tool",
+        command=[sys.executable, "-c", "import sys; sys.exit(-1)"],
+        job_dir=job_dir,
+        job_id=job_id,
+    )
+    finished = await jm.wait(job_id, timeout=10)
+    assert finished.state == "failed"
+    assert finished.returncode < 0
+    assert finished.license_issue_suspected is False
+    assert "AMBIGUOUS" in finished.failure_note
+    assert "inspection trio" in finished.failure_note
+
+
+@pytest.mark.asyncio
+async def test_failure_note_empty_when_license_marker_present(tmp_path, monkeypatch):
+    # Same negative-rc shape, but the log DOES mention a license keyword -- this is
+    # the one case the suite already has a real signal for, so failure_note should
+    # stay empty rather than adding a redundant, less-specific one.
+    monkeypatch.chdir(tmp_path)
+    jm = JobManager()
+    job_id, job_dir = jm.new_job_dir("fake_tool")
+    await jm.submit(
+        tool="fake_tool",
+        command=[sys.executable, "-c", "print('FlexNet: license not available'); import sys; sys.exit(-1)"],
+        job_dir=job_dir,
+        job_id=job_id,
+    )
+    finished = await jm.wait(job_id, timeout=10)
+    assert finished.license_issue_suspected is True
+    assert finished.failure_note == ""
+
+
+@pytest.mark.asyncio
+async def test_failure_note_empty_for_positive_rc_failure(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    jm = JobManager()
+    job_id, job_dir = jm.new_job_dir("fake_tool")
+    await jm.submit(
+        tool="fake_tool",
+        command=[sys.executable, "-c", "import sys; sys.exit(1)"],
+        job_dir=job_dir,
+        job_id=job_id,
+    )
+    finished = await jm.wait(job_id, timeout=10)
+    assert finished.state == "failed"
+    assert finished.failure_note == ""
