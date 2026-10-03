@@ -7,7 +7,7 @@ description: Sigrity Celsius (Thermal) - Celsius2D/3D/CFD verified sequences, th
 
 Live-exercised end-to-end on this machine (Sigrity 2024.0) against the Cadence
 `PostInstallationCheck` samples. Every call below was actually made; states,
-timestamps, and artifact sizes are real. Confirmed 2026-09-26.
+timestamps, and artifact sizes are real.
 
 ## Sample projects (all pre-built — these tools RUN, they do not AUTHOR)
 | Domain | Input | Also present |
@@ -172,7 +172,7 @@ configuration, not a failure; the `.cfd` is still generated.
 input project (not the job_dir). For Celsius3D specifically, declare done when
 `SR3d.dat`/`case_Result_Summary.dat` exist at real size, then `Stop-Process` the idle PID.
 
-### Other mistakes actually hit this session
+### Other mistakes to watch for
 - Passing a **placeholder/stale `session_id`** â†’ `Error: No open script session â€¦ It may
   have already been run/closed, or never created`. Fix: capture the id from
   `start_*_session` and reuse that exact string; do the whole composeâ†’run in one server

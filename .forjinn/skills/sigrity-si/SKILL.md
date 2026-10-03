@@ -1,14 +1,13 @@
 ---
 name: sigrity-si
-description: Sigrity SI (Signal Integrity) tool sequences — PowerSI S-parameter extraction (.spd AND .brd input), BroadbandSPICE netlist fit + passivity/causality check. Verified live on this machine (PowerSI 2026-09-26; BroadbandSPICE 2026-09-27). Use for S-param extraction, BRD-to-SPD conversion, or SPICE circuit fitting of Touchstone networks.
+description: Sigrity SI (Signal Integrity) tool sequences — PowerSI S-parameter extraction (.spd AND .brd input), BroadbandSPICE netlist fit + passivity/causality check. Verified live on this machine. Use for S-param extraction, BRD-to-SPD conversion, or SPICE circuit fitting of Touchstone networks.
 ---
 
 # Sigrity SI domain — PowerSI + BroadbandSPICE
 
 Platform/job rules (invincible ones) inherit from the parent `sigrity` skill: `run_*`/`*_run_session` never
 block (poll `wait_for_job`), and `state:"succeeded"` never means work happened — always verify artifacts.
-Below, what is true for THIS domain, verified end-to-end on live runs (PowerSI: 2026-09-26;
-BroadbandSPICE: 2026-09-27).
+Below, what is true for THIS domain, verified end-to-end on live runs.
 
 ## Task 1 — EASY: session create / preview / close (no run)
 
@@ -98,12 +97,12 @@ wait_for_job(job_id, timeout_seconds=240) -> state:"succeeded", rc 0
   exact filename: `list_job_files(job_id)` won't show it (it's in `runs/`, not the job dir) — instead
   glob `C:\Users\aicoe\Desktop\Sigrity\runs\<basename>_S.*p` after the job ends.
 
-## Task 4 — BroadbandSPICE: netlist fit + passivity/causality check (VERIFIED LIVE 2026-09-27)
+## Task 4 — BroadbandSPICE: netlist fit + passivity/causality check (VERIFIED LIVE)
 
-This section was verified end-to-end live on 2026-09-27 by running `BroadbandSPICE.exe` directly
-(MCP `run_broadbandspice_*` tools were NOT available in that session) from
-`C:\Users\aicoe\Desktop\Sigrity\runs\bbs_smoke\`, the exact CLI the MCP wrapper would emit. All the
-"non-functional / FALSE POSITIVE" warnings in the earlier draft of this section are RETRACTED — the
+This section was verified end-to-end live by running `BroadbandSPICE.exe` directly
+(the MCP `run_broadbandspice_*` tools were not available at the time) from
+`C:\Users\aicoe\Desktop\Sigrity\runs\bbs_smoke\`, the exact CLI the MCP wrapper would emit. Earlier
+"non-functional / FALSE POSITIVE" warnings about this tool are RETRACTED — the
 tool works and writes real artifacts, next to the CWD, not in any job dir.
 
 ### 4a. Circuit-model fit (SPICE netlist from a Touchstone) — VERIFIED
@@ -117,11 +116,11 @@ wait_for_job(job_id, timeout_seconds=180) -> state:"succeeded", rc 0
    # CLI under the hood: BroadbandSPICE.exe -b -Precision -HSPICE -i200 -uf125.0 <s2p>,
    # run with CWD = directory being verified (live: runs\bbs_smoke)
 ```
-Equivalently, direct verified CLI (what was actually executed 2026-09-27, `cd` = working dir):
+Equivalently, direct verified CLI (`cd` = working dir):
 `C:\Cadence\Sigrity2024.0\tools\bin\BroadbandSPICE.exe -b -Precision -HSPICE -i200 -uf125.0 <dir>\spiral_10GHz.s2p`
 
 - **Result state**: rc 0, completes in <1 s for this 2-port 11.6 KB input.
-- **Verified artifacts (live 2026-09-27, in `runs\bbs_smoke\BBSResult_spiral_10GHz\`)** — ALL
+- **Verified artifacts (live, in `runs\bbs_smoke\BBSResult_spiral_10GHz\`)** — ALL
   present, non-zero:
   - `spiral_10GHz_BBSckt.txt` — **2,192 bytes** — the REAL HSPICE subcircuit netlist (read it:
     `.subckt spiral_10GHz_BBSckt 1 2 ref` + 13 `G*` LAPLACE elements + R/V/F/G port stubs + `.ends`).
@@ -133,7 +132,7 @@ Equivalently, direct verified CLI (what was actually executed 2026-09-27, `cd` =
   - Plus parent dir: `spiral_10GHz.log` (**699 B**) — full progress: "Precision model extraction
     completed", "BBS circuit extracted: spiral_10GHz_BBSckt.txt", "Simulation Time: 0.04 Sec."
 - **The `-HSPICE` flag changes the OUTPUT FILE NAME**: with it, a netlist named
-  `<netlist_name>_BBSckt.sp` also appears (reproduced live on 2026-09-26:
+  `<netlist_name>_BBSckt.sp` also appears (reproduced live:
   `C:\Users\aicoe\Desktop\Sigrity\runs\bbs_spiiral_hsp_BBSckt.sp`, 2,212 B, identical `.subckt`
   body); the content is the same subcircuit either way — pick the name you want by choosing the
   input's basename for the netlist_format switch.
@@ -158,7 +157,7 @@ wait_for_job(job_id, timeout_seconds=180) -> state:"succeeded", rc 0
 ```
 
 - **Result state**: rc 0.
-- **Verified artifact (live 2026-09-27)**: `runs\bbs_smoke\BBSResult_app1_drv\S-parameter Checking Report.htm`
+- **Verified artifact (live)**: `runs\bbs_smoke\BBSResult_app1_drv\S-parameter Checking Report.htm`
   — **42,263 bytes** — the full verdict report (NOT a 0-byte log). Read it; the verdict for
   `app1_drv.S4P` is: Matrix dimension **4x4** | Passivity **No non-passive points / No violation** |
   Causality **No non-causal points / No violation** | Reciprocity **No violation** | Lowest freq
@@ -213,7 +212,7 @@ wait_for_job(job_id, timeout_seconds=180) -> state:"succeeded", rc 0
 8. **BroadbandSPICE writes next to the CWD, never into the job dir** (unlike PowerSI, whose output
    goes to `runs/` root). The `BBSResult_<input_basename>/` result folder, the `<name>.log`, and the
    `*_BBSckt.sp`/`.txt` netlist all appear in the working directory the CLI was launched from
-   (verified live 2026-09-27). Stage inputs in a scratch CWD (e.g. `runs\bbs_smoke\`) and check THERE
+   (verified live). Stage inputs in a scratch CWD (e.g. `runs\bbs_smoke\`) and check THERE
    — `list_job_files(job_id)` is a dead end for BBS output.
 
 ## Sample paths (confirmed to exist on this machine)

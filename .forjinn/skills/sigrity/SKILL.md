@@ -31,7 +31,7 @@ reuse of a closed id → `{"error": "No open script session ..."}`.
    **A DIFFERENT, more common failure looks similar but needs a different fix**: any tool call —
    `wait_for_job`, `run_tool_pipeline`, `start_allegro_session`, etc. — can come back as an outright
    tool ERROR reading `Error calling <tool>: MCP request timed out after 30000ms: tools/call` (confirmed
-   recurring: 15 occurrences across 9 separate campaign conversations). This is the MCP CLIENT's own
+   recurring: observed 15 times across 9 independent runs). This is the MCP CLIENT's own
    flat 30-second cap on one request/response round trip — it fires even when you passed a much larger
    `timeout_seconds`, and it tells you NOTHING about whether the underlying job succeeded, failed, or is
    still running. Do not resubmit the same job (you may now have two running against the same files) —
@@ -103,7 +103,7 @@ worse, hangs ~20 min. The traps verified live: file tools are `source_file`/`des
 (`"1e6"`, NOT `"1MHz"`); Celsius/Clarity3D `*_run_session` require the project/design path AGAIN
 as a second arg.
 
-**FIXED 2026-10-01 — `list`/`dict` arguments sent as JSON strings now work.** If the calling
+**FIXED — `list`/`dict` arguments sent as JSON strings now work.** If the calling
 model emits a `list[...]`/`dict[...]`-typed argument (e.g. `generate_multilayer_stackup`'s
 `layers`, `run_tool_pipeline`'s `steps`) as a JSON-encoded *string* rather than a native
 array/object — a real, observed quirk of some open-weight models' tool-call emission (e.g.

@@ -1,16 +1,16 @@
 ---
 name: sigrity-pi
-description: Sigrity Power Integrity — PowerDC (IR-drop), XcitePI (chip package/GDS parasitic + IOME), OptimizePI (decap placement / PDN impedance). Verified LIVE 2026-09-27 end-to-end via the in-proc MCP client: PowerDC full IR-drop (signed-off report + saved .pdcx), XcitePI IOME (108 MB GDS extraction), OptimizePI (batch -tcl mode — and the one hard limitation found live: it has no simulation-run trigger, so the WhatIf artifact is a GUI-only output). One section per tool group; each task carries its #1 mistake.
+description: Sigrity Power Integrity — PowerDC (IR-drop), XcitePI (chip package/GDS parasitic + IOME), OptimizePI (decap placement / PDN impedance). Verified LIVE end-to-end via the in-proc MCP client: PowerDC full IR-drop (signed-off report + saved .pdcx), XcitePI IOME (108 MB GDS extraction), OptimizePI (batch -tcl mode — and the one hard limitation found live: it has no simulation-run trigger, so the WhatIf artifact is a GUI-only output). One section per tool group; each task carries its #1 mistake.
 ---
 
-# Sigrity PI — PowerDC / XcitePI / OptimizePI  (verified 2026-09-27)
+# Sigrity PI — PowerDC / XcitePI / OptimizePI  (verified live)
 
 Domain: the three Power Integrity products. Parent rules in `sigrity/SKILL.md` still apply verbatim —
 `*_run_session`/`run_*` never block (poll `wait_for_job`/`get_job_status`); `state:"succeeded"`+rc 0
 ≠ work happened (always check the **staged input dir**, never `job_dir` alone); stage with
 `copy_file(source_file=..., destination_file=..., overwrite=true)` first.
 
-All three tasks below were run LIVE on 2026-09-27 against the real `SIGRITY_LICENSE_MANAGER_HOME`
+All three tasks below were run LIVE against the real `SIGRITY_LICENSE_MANAGER_HOME`
 license, driving the MCP tools through the in-proc client (`runs/mcp_client.py`, fastmcp 4.0.4,
 `Client(sigrity_mcp.server.mcp)`) — the same `tools/call` path the suite's `run_tool_pipeline` uses,
 so every `${name.field}` reference resolves server-side across the whole flow in one process.
@@ -19,13 +19,13 @@ so every `${name.field}` reference resolves server-side across the whole flow in
 
 ## 1. PowerDC IR-drop  —  EASY, VERIFIED LIVE (job `powerdc-94f7a7ec49`, rc 0, 3.9 s)
 
-**REAL MISTAKE, already cost a full scenario redo in a 20-scenario campaign (2026-10-02):** the
+**REAL MISTAKE, has already cost a full scenario redo in a multi-scenario run:** the
 `.spd`/`.pdcx` paths below (`IR_Package.spd`/`IR_Package.pdcx`) are Cadence's own shipped
 `PostInstallationCheck` SAMPLE, here only to demonstrate the call shape — they are NOT your task's
-board. One campaign run copy-pasted this example's `start_powerdc_session(spd_file=...)` call
-without substituting its own scenario's translated `.spd` path, got a clean `state:"succeeded"`,
-and only much later discovered the whole analysis had run against Cadence's unrelated sample
-package instead of the real board — the result had to be thrown out and the scenario redone from
+board. Copy-pasting this example's `start_powerdc_session(spd_file=...)` call
+without substituting your own scenario's translated `.spd` path still returns a clean `state:"succeeded"`,
+with the mistake discovered only much later — the whole analysis had run against Cadence's unrelated sample
+package instead of the real board — forcing the result to be thrown out and the scenario redone from
 scratch. **Before trusting any PowerDC/PI/SI/thermal result, re-read back the exact file path you
 passed to `start_*_session`/`*_attach_layout` and confirm it is your own staged, scenario-specific
 file, not a path remembered from this document.**
@@ -53,7 +53,7 @@ get_job_status(run.job_id)                                                      
 actual run trigger) — you do NOT add it. `PowerDC.exe -b -tcl <macro.tcl>` is the CLI; the `-tcl`
 batch switch is empirically WORKING on this install (despite not being in the public docs).
 
-**Verified artifacts (live 2026-09-27, in the STAGED dir, all newer than the 07:44:35 job start, NOT in job_dir):**
+**Verified artifacts (live, in the STAGED dir, all newer than the 07:44:35 job start, NOT in job_dir):**
 | File | Size | What it is |
 |---|---|---|
 | `powerdc_smoke\ir_report.html` | **19,766 B** (490 lines) | The `sigrity::do pdcReport` sign-off HTML — real report body, not a 0-byte stub |
@@ -114,7 +114,7 @@ wait_for_job(run.job_id, timeout_seconds=600)   # re-call while still "running" 
 `xpi_set_spice_option -pin -rc` (the confirmed macro's `-pin` flag + rc). The `xpi_start`/`xpi_close_design`/
 `xpi_exit` terminators are appended by `xcitepi_run_session` for you — do NOT queue them manually.
 
-**Verified artifacts (live 2026-09-27, in `xcitepi_smoke\`, as XcitePI progressed):**
+**Verified artifacts (live, in `xcitepi_smoke\`, as XcitePI progressed):**
 | File / dir | Size | What it is |
 |---|---|---|
 | `xcitepi_smoke\demo_decap_074639.dat` | **4,683,119 B** | Layout/geometry DB re-generated from the 108 MB GDS |
@@ -125,11 +125,11 @@ wait_for_job(run.job_id, timeout_seconds=600)   # re-call while still "running" 
 
 **Completion checklist (from Cadence's own `xcitepi\.config` post-install success record — these are
 the artifacts a FINISHED run is graded on):** `demo_decap.xpi` | `demo_decap` (IOME result) |
-`demo_decap.sp` | `demo_decap_RLCK.sp`. A prior full run in the same dir (2026-09-18) left the
+`demo_decap.sp` | `demo_decap_RLCK.sp`. A prior full run in the same dir left the
 expected sizes to cross-check against: `demo_decap.sp` **612,103 B**, `demo_decap_RLCK.sp` **612,129 B**
 (per-pin netlist + RLCK companion), `demo_decap_IOMESimResult.txt` **52 B**, `demo_decap_174041.dat`
-**1,173,508 B**. My live run (started 07:46:00, pid 6944) was observed actively extracting
-(CPU 1074→1125 s across a 60 s window, ~85 % busy) and WILL emit the same set once `xpi_start`
+**1,173,508 B**. A live run (started 07:46:00, pid 6944) was observed actively extracting
+(CPU 1074→1125 s across a 60 s window, ~85 % busy) and will emit the same set once `xpi_start`
 completes — the 108 MB GDS extraction is the long pole, not a hang. Job state stays legitimately
 `"running"` on the real extraction; do not `cancel_job` it as "stuck".
 
@@ -214,8 +214,8 @@ has no completed simulation to report on. `sigrity::update deviceOPTI` also requ
 (the `OptimizeSetupTable`), which `optimizepi_attach_layout` does NOT load (it only `open document`
 attaches a `.spd`; passing the `.opix` as the "spd" gives `SPDLinks.exe failed to translate {…}.opix`).
 So the `.config`'s `demo_WhatIfResult.dat` is produced by an **interactive GUI WhatIf run**, and is
-**not reproducible through the current `-b -tcl` MCP toolset**. The prior interactive run of this
-exact demo (a 2026-09-18 log left in the staged dir) confirms the same demo opens the `.opix` and
+**not reproducible through the current `-b -tcl` MCP toolset**. A prior interactive run of this
+exact demo (a log left in the staged dir) confirms the same demo opens the `.opix` and
 reports `Invalid Capacitor circuit (C2). Capacitor ID is not set.` — a known demo-data quirk (the
 `.opix` `DecapLibPrefPath` points at a build-machine path).
 

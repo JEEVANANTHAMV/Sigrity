@@ -1,6 +1,6 @@
 ---
 name: sigrity-extraction
-description: Sigrity Extraction domain — layout translators to .spd, XtractIM (EPA package extraction, workspace & session modes), Clarity3D (3D EM), T2B, and abcd/bem2d3 utility solvers. Verified 2026-09-26, easy-to-complex: exact minimal call sequences, verified artifacts, and the exact failure modes.
+description: Sigrity Extraction domain — layout translators to .spd, XtractIM (EPA package extraction, workspace & session modes), Clarity3D (3D EM), T2B, and abcd/bem2d3 utility solvers. Verified live, easy-to-complex: exact minimal call sequences, verified artifacts, and the exact failure modes.
 ---
 
 # Sigrity Extraction — verified sequences (Sigrity 2024.0)
@@ -9,7 +9,7 @@ Extraction = the domain that turns layout (`.dsn`/`.gds`/`.ndd`/`.asc`/`.rif`/`.
 then extracts parasitics: XtractIM (2.5D/pg/EPA), Clarity3D (full-wave 3D), T2B (SPICE), plus the
 standalone `abcd` (touchstone de-embed) and `bem2d3` (2D field) utility solvers.
 
-All sequences below were exercised live on this machine 2026-09-26, EASY → COMPLEX.
+All sequences below were exercised live on this machine, EASY → COMPLEX.
 Job control (7 tools: `get_job_status` / `wait_for_job` / `tail_job_log` / `list_job_files` /
 `read_job_output_file` / `cancel_job` / `list_all_jobs`) is in the platform skill.
 
@@ -181,7 +181,7 @@ its own workspace file to a different dir, the two won't line up and you get the
 
 ## Task 4 — COMPLEX: Clarity3D (full-wave 3D EM FEM)
 
-**Known-blocked on this machine. Verified 2026-09-26: fails before it can run.**
+**Known-blocked on this machine. Verified: fails before it can run.**
 
 The sequence you'd use (matches the repo unit-test's happy path exactly):
 ```
@@ -240,7 +240,7 @@ license or HPC issue. Record it as a known-blocked state, don't burn time retryi
 
 ## Task 5 — `run_touchstone_deembed` (abcd) — **documented defect, re-verified**
 
-Reproduced on 2026-09-26 with the same inputs the module docstring calls out as the
+Reproduced with the same inputs the module docstring calls out as the
 "does not crash but also does nothing" case (RI 4-port pair):
 
 ```
@@ -274,7 +274,7 @@ the cascade/de-embed step ran; there is no way to distinguish "ran and was a no-
 
 ---
 
-## Sample files (all verified present on this machine 2026-09-26)
+## Sample files (all verified present on this machine)
 
 | Purpose | Path |
 |---|---|

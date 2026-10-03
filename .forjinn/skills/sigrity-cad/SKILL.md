@@ -1,6 +1,6 @@
 ---
 name: sigrity-cad
-description: Allegro/OrCAD CAD domain (SPB 22.1) — report/DRC/dbdoctor, SPECCTRA autoroute, Gerber (artwork) export, SKILL PCB authoring (including real multi-layer/rigid-flex stackup authoring via generate_multilayer_stackup, verified live 2026-09-30, and real copper shape/plane-pour authoring via allegro_create_copper_shape, verified live 2026-10-02), and run_tool_pipeline, all verified live. Use for board analysis, DRC, SPECCTRA routing, Gerber/manufacturing export, SKILL geometry/padstack/film/stackup/copper-shape authoring, and multi-step job pipelines.
+description: Allegro/OrCAD CAD domain (SPB 22.1) — report/DRC/dbdoctor, SPECCTRA autoroute, Gerber (artwork) export, SKILL PCB authoring (including real multi-layer/rigid-flex stackup authoring via generate_multilayer_stackup, verified live, and real copper shape/plane-pour authoring via allegro_create_copper_shape, verified live), and run_tool_pipeline, all verified live. Use for board analysis, DRC, SPECCTRA routing, Gerber/manufacturing export, SKILL geometry/padstack/film/stackup/copper-shape authoring, and multi-step job pipelines.
 ---
 
 # Sigrity CAD domain — Allegro PCB (report/DRC/DRC, SPECCTRA, Gerber, SKILL, pipeline)
@@ -8,7 +8,7 @@ description: Allegro/OrCAD CAD domain (SPB 22.1) — report/DRC/dbdoctor, SPECCT
 Platform/job rules inherit from the parent `sigrity` skill: `run_*`/`*_run_session` never block
 (poll `wait_for_job`/`get_job_status`), `state` is a liar in BOTH directions (verify artifacts),
 and `list_job_files` is NOT where most results live. Below is what is true for THIS domain,
-verified end-to-end on live runs on 2026-09-27 (SPB_22.1 at `C:\Cadence\SPB_22.1`).
+verified end-to-end on live runs (SPB_22.1 at `C:\Cadence\SPB_22.1`).
 
 Sample board (routed, ground truth = 81 components, 2 DRC errors / 1 short, DRC state OUT OF DATE,
 251 pins, 75 nets, 191 drills, 100% connection completion):
@@ -94,7 +94,7 @@ wait_for_job(job_id, 300) -> state:"FAILED", returncode:4        #  <-- SEE GOTC
   Route success = read `final.sts` for `Completion = 100.00%` + confirm `routed.ses` is non-empty. Import via
   `run_specctra_import_session` (`spif_batch.exe -i`) is a known product bug (SPMHDB-238 crash) — don't burn
   time on it.
-- **USE `run_allegro_specctra_import` INSTEAD — CONFIRMED LIVE end-to-end (2026-10-01), this is the real,
+- **USE `run_allegro_specctra_import` INSTEAD — CONFIRMED LIVE end-to-end, this is the real,
   working import path**:
   ```
   run_allegro_specctra_import(board_file="…\\fd.brd", session_file="…\\routed.ses", output_file="…\\fd_imported.brd")
@@ -103,8 +103,8 @@ wait_for_job(job_id, 300) -> state:"FAILED", returncode:4        #  <-- SEE GOTC
   then independently verify with `run_allegro_report(board_file="…\\fd_imported.brd", report_code="sum", ...)`
   (SKILL-free, no modal risk) — expect `Connection Completion: Total(100.00%)` matching the `.ses`'s own stats,
   and the output file's size/sha1 genuinely different from the pre-import board.
-  - **Do NOT call this tool with an unpatched/older copy of `spif_specctra_tools.py`** — a real, 3-for-3
-    reproducible indefinite hang existed here until 2026-10-01 (0% CPU, no window, `run.log` stuck forever at
+  - **Do NOT call this tool with an unpatched/older copy of `spif_specctra_tools.py`** — doing so reproduces
+    a real, 3-for-3 indefinite hang (0% CPU, no window, `run.log` stuck forever at
     the 3-line startup banner) caused by a literal typo in the emitted script line (`specctra in "<path>"`,
     two words — not a real command; the real one is `specctra_in`, one word). If you ever see this tool hang
     silently again with that exact signature, check `sigrity_mcp/domains/cad/spif_specctra_tools.py` still
@@ -112,7 +112,7 @@ wait_for_job(job_id, 300) -> state:"FAILED", returncode:4        #  <-- SEE GOTC
     (`setwindow form.spif_in` / `FORM spif_in CLOSE` / `setwindow pcb`) before anything else runs — skipping
     that close step makes every following command (including the save) silently no-op with a `Finish current
     command first` error you'll only see in the design's own `allegro.jrl`, never in the job's `run.log`.
-  - See `core.tool_status`'s `allegro` entry (2026-10-01 note) for the full live-repro evidence and the
+  - See `core.tool_status`'s `allegro` entry (specctra-import note) for the full live-repro evidence and the
     third, unrelated bug found/fixed alongside it (`axlSaveDesign`'s `?noCheck` keyword doesn't exist; the
     real no-check option is `?mode "nocheck"`).
 
@@ -268,7 +268,7 @@ wait_for_job(job_id, 60) -> state:"succeeded", rc 0
   (it's the opposite — see ORDERING GOTCHA), or trusting a `state:"succeeded"` without an
   independent `x-section` report read-back, or expecting a "TOP"/"BOTTOM"-named entry in your
   list to actually change the board's real outer layers.
-- **FIXED 2026-10-01 — `layers` arriving as a JSON string no longer errors**: a calling model
+- **FIXED — `layers` arriving as a JSON string no longer errors**: a calling model
   (observed live: qwen3-max via vLLM, through the real forji-desk app) serialized `layers`
   (and other `list`/`dict`-typed arguments elsewhere in this suite) as a JSON-encoded *string*
   (e.g. `"[{\"name\":...}]"`) instead of a native array. FastMCP 4.0.4's strict pydantic
@@ -382,7 +382,7 @@ wait_for_job(job_id, timeout_seconds=60) -> state:"succeeded", returncode:0   (~
 - **Verified artifact**: the `output_file` path, a `!`-delimited flat text dump (header row prefixed `A!`,
   a `J!` metadata row, then one `S!...` row per record). `view_type="drc"` genuinely lists real DRC
   violations (confirmed: real Package-to-Package / Line-to-Line spacing errors on the sample board).
-- **FIXED 2026-10-02, was a real 100%-repro bug**: `view_type` in `{bom,nets,components,pins,testpoints,drc}`
+- **FIXED, was a real 100%-repro bug**: `view_type` in `{bom,nets,components,pins,testpoints,drc}`
   builds a command file from a built-in template — those templates used to contain invented
   view-name/field-name keywords (`NETS`, `COMPONENTS`, `PINS`, `COMP_LOCATION_X`, ...) that extracta.exe
   rejects outright with `ERROR(SPMHDX-10): Illegal view name.` for every single view_type, 100% of the
@@ -391,7 +391,7 @@ wait_for_job(job_id, timeout_seconds=60) -> state:"succeeded", returncode:0   (~
   view this tool doesn't cover, copy another real file from that directory rather than guessing a
   keyword — extracta's command-file syntax is NOT self-explanatory and wrong keywords fail silently at
   the job-result level.
-- **#1 mistake, the reason this bug went undiagnosed for 10+ calls in a single conversation**: the real
+- **#1 mistake, the reason this bug is easy to misdiagnose across repeated calls**: the real
   error (`Illegal view name`) is ONLY in `extract.log`, and extracta.exe writes that file into its own
   process's cwd — which is the **job's own `job_dir`** (same directory as `run.log`/`job.json`), NOT next
   to `board_file`/`output_file`. `run.log` itself only ever says the unhelpful "Extract ended ... see
@@ -401,11 +401,11 @@ wait_for_job(job_id, timeout_seconds=60) -> state:"succeeded", returncode:0   (~
 
 ## Task 9 — COMPLEX: real routing-quality analysis and surgical manual rip-up-and-refix
 
-Investigated live (2026-10-02) whether this suite can (a) analyze routing quality beyond
+This suite was investigated live for whether it can (a) analyze routing quality beyond
 pass/fail DRC and (b) surgically rip up and refix ONE bad route without redoing the whole
 board. Used the real routed Fault-Detector sample (`scenario_6/fd.brd`: 81 components, 75
 nets, 163 connections, 2 pre-existing DRC errors incl. 1 real short) copied into a private
-`runs/routing_capability_investigation/` scratch dir — never touch the live campaign's own
+`runs/routing_capability_investigation/` scratch dir — never touch the live working
 copy.
 
 **Routing-quality signals that already existed and are real**: `run_allegro_report(...,
@@ -541,7 +541,7 @@ neighborhood, wherever on the board it is) — but the length objective itself l
 exactly. See `runs/routing_capability_investigation/t3_length_matching/` for the full
 before/after evidence of all of the above.
 
-## Cross-cutting notes (domain-specific, verified this run)
+## Cross-cutting notes (domain-specific, verified live)
 
 - **Three different non-terminal state lies, three different completions**:
   - `run_allegro_batch_drc` → `get_job_status` stays `running`/`rc null` forever → read `batch_drc.log`/`dbdoctor.log`.
