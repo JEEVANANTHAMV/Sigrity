@@ -19,6 +19,17 @@ so every `${name.field}` reference resolves server-side across the whole flow in
 
 ## 1. PowerDC IR-drop  —  EASY, VERIFIED LIVE (job `powerdc-94f7a7ec49`, rc 0, 3.9 s)
 
+**REAL MISTAKE, already cost a full scenario redo in a 20-scenario campaign (2026-10-02):** the
+`.spd`/`.pdcx` paths below (`IR_Package.spd`/`IR_Package.pdcx`) are Cadence's own shipped
+`PostInstallationCheck` SAMPLE, here only to demonstrate the call shape — they are NOT your task's
+board. One campaign run copy-pasted this example's `start_powerdc_session(spd_file=...)` call
+without substituting its own scenario's translated `.spd` path, got a clean `state:"succeeded"`,
+and only much later discovered the whole analysis had run against Cadence's unrelated sample
+package instead of the real board — the result had to be thrown out and the scenario redone from
+scratch. **Before trusting any PowerDC/PI/SI/thermal result, re-read back the exact file path you
+passed to `start_*_session`/`*_attach_layout` and confirm it is your own staged, scenario-specific
+file, not a path remembered from this document.**
+
 Stage both files (`.spd` = the circuit/layout, `.pdcx` = the workspace that gets rewritten):
 ```
 copy_file(source_file="C:\Cadence\Sigrity2024.0\share\PostInstallationCheck\powerdc\IR_Package.spd",

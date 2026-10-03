@@ -7,7 +7,9 @@ from sigrity_mcp.domains.cad.allegro_geometry_tools import (
     allegro_create_simple_padstack,
     allegro_create_trace,
     allegro_create_via,
+    allegro_delete_connect,
     allegro_get_module_instance_location,
+    allegro_get_net_length,
     allegro_place_module_instance,
 )
 from sigrity_mcp.domains.cad.allegro_tools import start_allegro_session
@@ -18,10 +20,27 @@ from sigrity_mcp.domains.platform.session_tools import close_tcl_session, previe
 async def test_create_trace_appends_path_and_start():
     session = await start_allegro_session()
     sid = session["session_id"]
-    await allegro_create_trace(sid, [[0, 0], [100, 0], [100, 100]], "TOP", "GND")
+    result = await allegro_create_trace(sid, [[0, 0], [100, 0], [100, 100]], "TOP", "GND", width=5.0)
+    assert result["skill_layer"] == "ETCH/TOP"
+    assert result["width"] == 5.0
     preview = await preview_tcl_session(sid)
     assert "axlPathStart" in preview["script"]
-    assert '"TOP"' in preview["script"] and '"GND"' in preview["script"]
+    assert '"ETCH/TOP"' in preview["script"] and '"GND"' in preview["script"]
+    # width must be threaded into axlPathStart as its second argument, not omitted
+    # (omitting it is the live-confirmed zero-width-copper bug this fix closes).
+    assert "(list 100 100)) 5.0)" in preview["script"]
+    await close_tcl_session(sid)
+
+
+@pytest.mark.asyncio
+async def test_create_trace_passes_full_class_subclass_string_as_is():
+    session = await start_allegro_session()
+    sid = session["session_id"]
+    result = await allegro_create_trace(sid, [[0, 0], [100, 0]], "BOUNDARY/L2_GND", "GND", width=8.0)
+    assert result["skill_layer"] == "BOUNDARY/L2_GND"
+    preview = await preview_tcl_session(sid)
+    assert '"BOUNDARY/L2_GND"' in preview["script"]
+    assert "8.0)" in preview["script"]
     await close_tcl_session(sid)
 
 
@@ -30,7 +49,7 @@ async def test_create_trace_requires_two_points():
     session = await start_allegro_session()
     sid = session["session_id"]
     with pytest.raises(ValueError):
-        await allegro_create_trace(sid, [[0, 0]], "TOP", "GND")
+        await allegro_create_trace(sid, [[0, 0]], "TOP", "GND", width=5.0)
     await close_tcl_session(sid)
 
 
@@ -176,6 +195,45 @@ async def test_create_copper_shape_rejects_too_few_points():
     sid = session["session_id"]
     with pytest.raises(ValueError):
         await allegro_create_copper_shape(sid, "TOP", "GND", points=[[0, 0], [1, 1]])
+    await close_tcl_session(sid)
+
+
+@pytest.mark.asyncio
+async def test_delete_connect_default_ripup():
+    session = await start_allegro_session()
+    sid = session["session_id"]
+    result = await allegro_delete_connect(sid, "NET", "N00885")
+    assert result["ripup"] is True
+    preview = await preview_tcl_session(sid)
+    assert (
+        "skill (axlDeleteObject (car (axlSelectByName \"NET\" \"N00885\")) 'ripup)"
+        in preview["script"]
+    )
+    await close_tcl_session(sid)
+
+
+@pytest.mark.asyncio
+async def test_delete_connect_no_ripup_logic_only():
+    session = await start_allegro_session()
+    sid = session["session_id"]
+    result = await allegro_delete_connect(sid, "NET", "GND", ripup=False)
+    assert result["ripup"] is False
+    preview = await preview_tcl_session(sid)
+    assert (
+        'skill (axlDeleteObject (car (axlSelectByName "NET" "GND")))' in preview["script"]
+    )
+    await close_tcl_session(sid)
+
+
+@pytest.mark.asyncio
+async def test_get_net_length():
+    session = await start_allegro_session()
+    sid = session["session_id"]
+    await allegro_get_net_length(sid, "N00885")
+    preview = await preview_tcl_session(sid)
+    assert (
+        'skill (axlDBGetLength (car (axlSelectByName "NET" "N00885")))' in preview["script"]
+    )
     await close_tcl_session(sid)
 
 

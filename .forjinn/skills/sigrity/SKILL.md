@@ -28,6 +28,16 @@ reuse of a closed id → `{"error": "No open script session ..."}`.
    `wait_for_job` is session-local to the server process that launched the job — if it errors
    "not tracking", fall back to `get_job_status` polling (or re-issue the whole flow inside one
    `run_tool_pipeline`, where the wait always resolves).
+   **A DIFFERENT, more common failure looks similar but needs a different fix**: any tool call —
+   `wait_for_job`, `run_tool_pipeline`, `start_allegro_session`, etc. — can come back as an outright
+   tool ERROR reading `Error calling <tool>: MCP request timed out after 30000ms: tools/call` (confirmed
+   recurring: 15 occurrences across 9 separate campaign conversations). This is the MCP CLIENT's own
+   flat 30-second cap on one request/response round trip — it fires even when you passed a much larger
+   `timeout_seconds`, and it tells you NOTHING about whether the underlying job succeeded, failed, or is
+   still running. Do not resubmit the same job (you may now have two running against the same files) —
+   the `job_id` from the original submission still works; recover with `get_job_status(job_id)` (or
+   `list_all_jobs(state="running")` if you've lost track of the id) to read the real state, then go back
+   to polling/waiting normally.
 2. **`state` is a liar in BOTH directions.** `succeeded`+rc0 ≠ the work happened (PowerSI batch run
    missing its final trigger exits 0 in ~3s with zero output; abcd silently no-ops) AND
    `running` ≠ stuck (batch_drc/ibischk launchers exit while `job.json` still says running;

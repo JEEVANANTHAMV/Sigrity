@@ -372,6 +372,175 @@ wait_for_job(job_id, 120) -> state:"succeeded", rc 0
   Don't skip the auto-derive-from-outline default either, expecting it to "just work" — read the
   board's real extents first (`report_code="sum"`) and pass explicit `points`.
 
+## Task 8 — EASY once you know the real keywords: `run_allegro_extracta` (BOM/nets/components/pins/DRC dump)
+
+```
+run_allegro_extracta(board_file="…\\t8_extract\\fd.brd", view_type="bom", output_file="…\\t8_extract\\fd_bom.txt")
+  -> {job_id, state:"running", job_dir, command:[extracta.exe,<brd>,<cmdfile>,<outfile>], command_file}
+wait_for_job(job_id, timeout_seconds=60) -> state:"succeeded", returncode:0   (~0.3 s)
+```
+- **Verified artifact**: the `output_file` path, a `!`-delimited flat text dump (header row prefixed `A!`,
+  a `J!` metadata row, then one `S!...` row per record). `view_type="drc"` genuinely lists real DRC
+  violations (confirmed: real Package-to-Package / Line-to-Line spacing errors on the sample board).
+- **FIXED 2026-10-02, was a real 100%-repro bug**: `view_type` in `{bom,nets,components,pins,testpoints,drc}`
+  builds a command file from a built-in template — those templates used to contain invented
+  view-name/field-name keywords (`NETS`, `COMPONENTS`, `PINS`, `COMP_LOCATION_X`, ...) that extracta.exe
+  rejects outright with `ERROR(SPMHDX-10): Illegal view name.` for every single view_type, 100% of the
+  time. Now fixed to use real keywords copied from Cadence's own shipped `share/pcb/text/views/*.txt`
+  files (`COMPONENT`, `LOGICAL_PIN`, `COMPONENT_PIN`, `COMPOSITE_PAD`, `DRC_ERROR`). If you ever need a
+  view this tool doesn't cover, copy another real file from that directory rather than guessing a
+  keyword — extracta's command-file syntax is NOT self-explanatory and wrong keywords fail silently at
+  the job-result level.
+- **#1 mistake, the reason this bug went undiagnosed for 10+ calls in a single conversation**: the real
+  error (`Illegal view name`) is ONLY in `extract.log`, and extracta.exe writes that file into its own
+  process's cwd — which is the **job's own `job_dir`** (same directory as `run.log`/`job.json`), NOT next
+  to `board_file`/`output_file`. `run.log` itself only ever says the unhelpful "Extract ended ... see
+  extract.log for errors." with no path. On any `allegro_extracta` failure, `list_job_files(job_id)` +
+  `read_job_output_file(job_id, relative_path="extract.log")` — not a guess at the input directory — is
+  the only way to see why.
+
+## Task 9 — COMPLEX: real routing-quality analysis and surgical manual rip-up-and-refix
+
+Investigated live (2026-10-02) whether this suite can (a) analyze routing quality beyond
+pass/fail DRC and (b) surgically rip up and refix ONE bad route without redoing the whole
+board. Used the real routed Fault-Detector sample (`scenario_6/fd.brd`: 81 components, 75
+nets, 163 connections, 2 pre-existing DRC errors incl. 1 real short) copied into a private
+`runs/routing_capability_investigation/` scratch dir — never touch the live campaign's own
+copy.
+
+**Routing-quality signals that already existed and are real**: `run_allegro_report(...,
+report_code="drc")` gives exact violation coordinates/required-vs-actual values/element
+names; SPECCTRA's own `final.sts` gives board-TOTAL length/via/ratio stats (no per-net
+breakdown); `report_code="vialist_net"` gives per-net via counts (0 on an all-TOP/BOTTOM
+board like this sample). **What was missing**: a per-net REAL MEASURED LENGTH query (only
+`allegro_get_net_constraint`/`axlCnsNetFlattened` existed, which returns a RULE value like
+`MAX_VIAS`, never a measured length) — this is what you need to actually check
+length-matching compliance (not just "DRC passed").
+
+**What was missing for manual override**: a delete/rip-up tool at all.
+
+### Two new tools built and confirmed live
+
+- **`allegro_get_net_length(session_id, net_name)`** (`axlDBGetLength`,
+  `allegro_geometry_tools.py`) — real measured net length, works on partially-routed nets
+  too. CONFIRMED LIVE via outfile/fprintf capture (SKILL return values never surface in the
+  job log — same caveat as every other `axl*` query in this suite): `X8_length=2447.5`,
+  `N03774_length=5177.5` on the real sample board.
+- **`allegro_delete_connect(session_id, object_type, object_name, ripup=True)`**
+  (`axlDeleteObject`, same file) — deletes a named object by `(car (axlSelectByName
+  object_type object_name))`, same resolver `allegro_assign_net` uses. CONFIRMED LIVE, but
+  **DO NOT use `object_type="NET"` expecting a non-destructive rip-up** — `axlDeleteObject`
+  on a NET dbid deletes the net's LOGICAL IDENTITY ENTIRELY (live-reproduced: net count
+  75→74, its pins went Unused, and a follow-up `allegro_create_trace(...,
+  net_name="<deleted net>")` silently created NOTHING, since `axlDBCreatePath` returns nil
+  for a nonexistent net per its own doc). **The real, non-destructive rip-up-for-reroute
+  mechanism is the ALREADY-EXISTING `allegro_assign_net(object_type="PIN", object_name=
+  "<a pin on the net>", net_name="<that pin's own current net>", ripup=True)`** —
+  CONFIRMED LIVE: this strips the net's connected clines (net goes to
+  `unconnected=1`/ratsnest, confirmed via `axlDBGetConnect`/net-attribute queries) while
+  leaving the net and all its pins fully intact. Use `allegro_delete_connect` for what it's
+  actually for (deleting a stray component/via/film/etc. outright), not for this workflow.
+
+### Two real bugs found (and fixed) in the existing `allegro_create_trace`
+
+Found while exercising the rip-up-and-refix cycle above — both now fixed, covered by
+tests, and independently re-verified live:
+1. **Layer string**: passed the bare layer name (`"TOP"`) straight to `axlDBCreatePath`'s
+   `t_layer` arg. The vendored doc's own example uses `"ETCH/TOP"`. Bare `"TOP"` silently
+   created NOTHING (nil return, 0 segments, `Missing Connections: 1`) even on `rc 0`. Now
+   fixed: builds `"ETCH/<layer>"` automatically (same as `allegro_create_copper_shape`).
+2. **Width**: called `axlPathStart(points)` with no width arg — per `axlPathStart.txt`,
+   that argument IS the trace width, defaulting to 0 if omitted. Live-confirmed
+   `width=0.0` on every segment of a tool-created trace (via `axlDBGetConnect`'s own
+   `seg->width`), producing real new "Minimum Neck Width" DRC violations and spurious
+   near-0-clearance spacing hits against unrelated nearby copper (a 0-width line consumes
+   none of the real clearance budget). Now fixed: `width` is a REQUIRED parameter (no
+   silent default) threaded straight into `axlPathStart`.
+
+### End-to-end manual-override result
+
+```
+start_allegro_session()
+allegro_assign_net(session_id, "PIN", "<a pin on the bad net>", "<that net's own name>", ripup=True)
+allegro_create_trace(session_id, points=[...corrected path...], layer="TOP", net_name="<net>", width=5.0)
+allegro_save_design(session_id)
+allegro_run_session(session_id, board_file=...)
+wait_for_job(...)
+run_allegro_batch_drc(board_file=...) ; wait_for_job(..., timeout_seconds=15)   # read batch_drc.log, don't trust state
+run_allegro_report(..., report_code="drc")   # confirm the ONE targeted violation is gone, nothing new
+run_allegro_report(..., report_code="sum")   # confirm Nets/Pins/Connection Completion unchanged
+```
+Using the corrected tools, a real 0 MIL "Line to Line Spacing" short (net X8 vs net
+N03774, exact DRC marker `(11762.5, 17005.0)`) was independently located via a live
+`axlDBGetConnect` segment-geometry query that matched the DRC coordinate to the mil, then
+DEFINITIVELY fixed: every corrected attempt showed `Short DRC` 1→0, `DRC Errors` dropped
+by exactly 1 (leaving only the pre-existing, unrelated Package-to-Package violation),
+`Missing Connections: 0`, `Connection Completion: 100.00%`, Nets(75)/Pins(251) unchanged.
+
+**Honest limitation found, not a tool-chain gap**: net X8 turned out to be one lane of a
+tightly-packed 8-line parallel mux bus (X1-X8) running directly through a separately dense
+analog feedback-network pocket (4+ other nets weaving through the same small area).
+Picking a fully clean ALTERNATE route by hand required discovering each neighbor one at a
+time via live `axlDBGetConnect` queries; even a carefully-reasoned, maximally-surgical
+reroute still left double-digit new spacing violations against previously-unseen
+neighbors in this specific spot — the same problem a human hand-routing this exact area
+would hit. The mechanical loop itself (rip-up → create → save → run → batch_drc → report)
+is fast (each full cycle well under a few seconds for DRC/report, ~5-6s for the Allegro
+session) and genuinely practical for iterate-and-recheck — but it does not replace an
+autorouter's or a human's keepout awareness for a dense board region.
+
+**GOTCHA — a single `allegro_run_session` hung for minutes** (vs the usual ~5-6s) during
+this investigation with no modal dialog detected (`DismissWatcher`'s own window-enumeration
+found zero dialog windows, just the normal main Allegro window) — a DIFFERENT symptom from
+the previously-documented ~137s-watchdog and dialog-hang modes. Treat a session that's
+still `running` well past ~30s as suspect; verify the board file's own mtime/diff before
+trusting any report run immediately afterward, since a report job run while the Allegro
+session is still mid-save will read STALE (pre-fix) board state with no error of its own.
+
+### Scaled to a harder case: length-matching, and a THIRD real gotcha (multi-branch net rip-up hang)
+
+Queried real per-net lengths for 4 structurally-analogous "matched leg" nets of a
+repeating LED-driver sub-circuit: `N08416=13062.5`, `N08752=10567.51`, `N08984=8052.5`,
+`N09192=12677.5` mil — a real, large, unmatched spread. Compared against a real
+`get_high_speed_constraint_preset("DDR4")` tolerance (`addr_ctrl_to_clk_length_match_mils
+=25.0` mil) to confirm the suite can genuinely detect a length-matching violation (here,
+thousands of mils outside a 25 mil budget).
+
+**Gotcha #3 (new, distinct from the session-hang above)**: attempting the fix on the
+shortest net (`N08984`, a real 4-pin/MULTI-BRANCH net) — ripping up just one branch via
+`allegro_assign_net(ripup=True)` then recreating it with `allegro_create_trace` — made
+`allegro_run_session` hang for MINUTES (vs the usual ~5-6s), REPRODUCED 2-FOR-2 on fresh
+board copies. `DismissWatcher`'s window enumeration found zero dialog windows (just the
+normal, still-`Responding=True` main Allegro window), ruling out the already-documented
+modal-dialog explanation. Not root-caused (candidate: recreating one branch of a net whose
+OTHER branches/pins are still attached at a shared junction may trigger an expensive
+connectivity/cline-merge recompute). **`allegro_assign_net(ripup=True)` +
+`allegro_create_trace` is CONFIRMED reliable (~5-6s, every time) only for a simple 2-pin/
+single-branch net** (as used for the DRC fix above) — treat a multi-branch net's rip-up-
+and-refix as higher risk until this is root-caused.
+
+Switched to a simple single-branch pair instead: `N02684`=3100.0 mil, `N08580`=2400.0 mil
+(both `nBranches=1`). Ripped up `N08580`, recreated it with a meander calculated to add
+exactly 700 mil (closing the gap to `N02684`).
+
+**Gotcha #4 (a geometry-design mistake, not a tool bug)**: the first meander attempt
+accidentally RETRACED part of its own path (two segments coincident on the same Y, one
+re-walking part of the other's X range) — `axlDBCreatePath` silently returned nil for
+this (0 segments, `Missing Connections: 1` — same FAILURE SIGNATURE as the layer-string
+bug, but a different cause). Lesson: when hand-designing a meander/detour, verify no two
+segments share both an axis value (same X or same Y) AND an overlapping range on the
+other axis — that's a self-overlap, and `axlDBCreatePath` rejects it silently just like a
+missing/wrong layer string, with no error anywhere in the job log. A corrected,
+non-overlapping meander ran in the normal ~5-6s and `axlDBGetLength` confirmed the new
+length as EXACTLY `3100.0` mil — matching `N02684` to the mil (0 mil residual, well
+inside the 25 mil budget) — with `Missing Connections: 0`/`Connection Completion:
+100.00%`/correct Nets(75)/Pins(251). 4 new minor spacing violations appeared against
+previously-unsurveyed neighbors in this new local area (same lesson as the main DRC-fix
+case: picking a fully keepout-clean path by hand requires surveying the SPECIFIC local
+neighborhood, wherever on the board it is) — but the length objective itself landed
+exactly. See `runs/routing_capability_investigation/t3_length_matching/` for the full
+before/after evidence of all of the above.
+
 ## Cross-cutting notes (domain-specific, verified this run)
 
 - **Three different non-terminal state lies, three different completions**:

@@ -53,6 +53,31 @@ library-path configuration, even though it's referenced by name in the design al
 Not yet confirmed working end-to-end against a module_def_name that does resolve this
 way — `allegro_get_module_instance_location` (read-only) remains `built_untested`.
 
+`allegro_delete_connect` (`axlDeleteObject` with the `'ripup` mode flag) closes the other
+real gap this project's own prior campaign never tested: a MANUAL, SURGICAL rip-up of one
+bad net's etch, as a precursor to re-routing just that net with `allegro_create_trace`
+instead of redoing the whole board. Confirmed real via the vendored
+`axlDeleteObject.txt` doc: `axlDeleteObject(lo_dbid 'ripup)` is documented as "ripup of
+associated etch via the ripup option (same as Allegro delete command ripup option)" —
+the dbid is obtained the same `(car (axlSelectByName <type> <name>))` way
+`allegro_assign_net` already uses. `object_type="NET"` is the primary, tested granularity
+(there is no SKILL "select the one CLINE segment nearest this DRC coordinate" primitive
+on this install — `axlSelectByName` only finds named objects: NET/COMPONENT/PIN/REFDES/
+etc., never a bare unnamed etch segment by location), matching this project's own task
+framing of "rip up and refix one bad trace/net" at net granularity rather than requiring
+a sub-net segment selector that does not exist here. See this tool's own docstring for
+the live rip-up-and-refix test.
+
+`allegro_get_net_length` (`axlDBGetLength`) closes the routing-QUALITY-analysis gap: none
+of this suite's existing report codes or `axlCNS*` constraint queries
+(`allegro_get_net_constraint`) return a net's actual measured routed etch length — only
+its CONSTRAINT/RULE value (e.g. `MAX_VIAS`, `PROPAGATION_DELAY`). `axlDBGetLength`, per
+its own vendored doc, is the real "calculate the length of the given object" primitive
+(works on a NET, CLINE, SEGMENT, or RATSNEST dbid) — this is what actually lets an agent
+compare two real nets' routed lengths against a length-matching tolerance (e.g. a DDR
+address/data skew budget from `get_high_speed_constraint_preset`), not just confirm DRC
+is clean. See this tool's own docstring for the live length-matching test.
+
 `allegro_create_copper_shape` (`axlDBCreateShape`) closes a real, high-leverage gap found
 in a later pass: `generate_multilayer_stackup`/`allegro_create_stackup`
 (`rigid_flex_stackup_tools.py`/`allegro_tools.py`) author layer STRUCTURE (name/type/
@@ -87,21 +112,83 @@ def _point_list(points: list[list[float]]) -> str:
     return "(list " + " ".join(f"(list {p[0]} {p[1]})" for p in points) + ")"
 
 
+def _etch_layer_arg(layer: str) -> str:
+    """Build the real `t_layer` class/subclass string `axlDBCreatePath` requires.
+
+    BUG FIX (found live 2026-10-02, via this project's own routing-capability
+    investigation): the original implementation passed the caller's bare layer name
+    (e.g. `"TOP"`) straight through as `t_layer`. The vendored `axlDBCreatePath.txt` doc's
+    own worked example uses the full class/subclass string instead (`axlDBCreatePath(path
+    "ETCH/TOP" "gnd")` — note "ETCH/TOP", not bare "TOP"), the same convention
+    `allegro_create_copper_shape` already builds correctly for shapes
+    (`"BOUNDARY/<layer>"`/`"ETCH/<layer>"`). LIVE-REPRODUCED on the real Fault-Detector
+    sample: calling this tool with the old bare-`"TOP"` behavior against a real ripped-up
+    net, then saving/running/independently re-verifying via `run_allegro_report(...,
+    report_code="sum")`, showed `axlDBCreatePath` silently returning nil — NO path was
+    created at all (0 segments on either pin, `Missing Connections: 1`), even though the
+    call itself raised no error and the job still exited rc 0 (another instance of this
+    suite's "SKILL return values/errors never surface in the job log" problem). Switching
+    to the real `"ETCH/<layer>"` form fixed it: the same points/net on the same board
+    produced a real connected path, independently confirmed by `Missing Connections: 0`,
+    the new path appearing in a pin's `axlDBGetConnect` traversal, and the targeted DRC
+    violation clearing with no new ones. Tolerant of a caller who already passes a full
+    class/subclass string (containing `/`) — only bare names get `"ETCH/"` prepended.
+    """
+    return layer if "/" in layer else f"ETCH/{layer}"
+
+
 @mcp.tool
 async def allegro_create_trace(
     session_id: str,
     points: list[list[float]],
     layer: str,
     net_name: str,
+    width: float,
 ) -> dict:
     """Create a routed trace (a \"path\"/cline) on a given etch layer and net, within the current Allegro SKILL session.
+
+    `layer` is the BARE etch layer name (e.g. `"TOP"`, `"BOTTOM"`, or an internal
+    signal-layer xsection name like `"L3_SIG1"`) — this tool builds the real
+    `"ETCH/<layer>"` class/subclass string itself (see `_etch_layer_arg`'s docstring for
+    the live bug this fixes: the bare name alone silently creates nothing). Pass a full
+    `"ETCH/<layer>"`/other class string directly if you already have one; it is used
+    as-is.
+
+    `width` (board/design units, e.g. mils) is REQUIRED — a second, independent real bug
+    found live in the same routing-capability investigation that found the layer-string
+    bug above: the original implementation called `axlPathStart(points)` with NO second
+    argument. Per the vendored `axlPathStart.txt` doc, that second argument (`f_width`)
+    "becomes the default width for all ... segments" — omitting it does not mean "inherit
+    the net's/board's default trace width" as might be assumed; it silently creates
+    **zero-width copper**. LIVE-CONFIRMED on the real Fault-Detector sample: a trace
+    created the old way, independently re-queried via `axlDBGetConnect`'s own
+    `segments`/`width` attributes, showed `width=0.0` on every one of its 7 segments, and
+    `run_allegro_batch_drc` + `run_allegro_report(..., report_code="drc")` flagged it with
+    real new "Minimum Neck Width" (required 5 MIL, actual 0 MIL) and near-zero "Line to
+    Line"/"Line to Pin Spacing" violations against nearby copper that a properly-widthed
+    trace would not have triggered (a 0-width line consumes none of the real clearance
+    budget, so it reads as sitting almost exactly on top of neighboring copper/pins even
+    when its center-line path was chosen to clear them). Passing a real `width` (e.g. this
+    board's own actual `5.0` mil, read from `run_allegro_report(...,
+    report_code="sum")`'s "Trace Width By Layer" table) produced a normal, DRC-clean
+    trace with no neck-width violations. There is deliberately no silent default here —
+    always read the board's real existing trace width for the layer/net you're routing on
+    rather than guessing.
 See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
     if len(points) < 2:
         raise ValueError("A trace needs at least two points.")
-    path_expr = f"(axlPathStart {_point_list(points)})"
-    expr = f"(axlDBCreatePath {path_expr} {skill_str(layer)} {skill_str(net_name)})"
+    path_expr = f"(axlPathStart {_point_list(points)} {width})"
+    skill_layer = _etch_layer_arg(layer)
+    expr = f"(axlDBCreatePath {path_expr} {skill_str(skill_layer)} {skill_str(net_name)})"
     tcl_sessions.add_line(session_id, _skill_line(expr))
-    return {"session_id": session_id, "point_count": len(points), "layer": layer, "net_name": net_name}
+    return {
+        "session_id": session_id,
+        "point_count": len(points),
+        "layer": layer,
+        "skill_layer": skill_layer,
+        "net_name": net_name,
+        "width": width,
+    }
 
 
 @mcp.tool
@@ -200,6 +287,53 @@ See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfa
         "object_type": object_type,
         "object_name": object_name,
         "net_name": net_name,
+    }
+
+
+@mcp.tool
+async def allegro_delete_connect(
+    session_id: str,
+    object_type: str,
+    object_name: str,
+    ripup: bool = True,
+) -> dict:
+    """Delete a named database object (typically a NET) with etch rip-up (`axlDeleteObject`), within the current Allegro SKILL session.
+
+    The manual-override "rip it up" half of a surgical fix-one-route workflow: find the
+    dbid by name the same way `allegro_assign_net` does
+    (`(car (axlSelectByName object_type object_name))`), then
+    `axlDeleteObject(dbid 'ripup)`. Per the vendored `axlDeleteObject.txt` doc, the
+    `'ripup` mode is "same as the Allegro delete command ripup option" — it erases the
+    object's routed etch rather than just the logical connection, so a net ripped up this
+    way goes back to unrouted ratsnest and can be cleanly re-routed with
+    `allegro_create_trace` (same pattern `allegro_create_copper_shape` demonstrates for
+    authoring, just in reverse).
+
+    `object_type="NET"` (by net name) is the primary, live-tested granularity — there is
+    no SKILL primitive on this install to select a single unnamed CLINE/SEGMENT by
+    location (e.g. "the trace nearest this DRC violation's coordinate"); `axlSelectByName`
+    only resolves named objects (NET/COMPONENT/PIN/REFDES/GROUP/...). So "surgical" here
+    means net-granularity rip-up-and-refix (matching this project's own stated goal of
+    fixing "one bad trace/net" without redoing the whole board), not sub-net segment
+    surgery. `ripup=False` falls back to a bare `axlDeleteObject(dbid)` (logic-only
+    delete, per the doc: "Deletion of nets is LOGIC only, and leaves the physical
+    objects") if you deliberately want that distinction.
+
+    VERIFY, don't trust this tool's return value: SKILL return values never surface in
+    the job log (see this module's docstring) — after `allegro_save_design` +
+    `allegro_run_session`, independently confirm via `run_allegro_report(...,
+    report_code="sum")` (nets/pins/connections unchanged, the net now shows as
+    ratsnest/unrouted) or `run_allegro_batch_drc` (the target violation gone).
+See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+    select_expr = f"(car (axlSelectByName {skill_str(object_type)} {skill_str(object_name)}))"
+    mode_arg = " 'ripup" if ripup else ""
+    expr = f"(axlDeleteObject {select_expr}{mode_arg})"
+    tcl_sessions.add_line(session_id, _skill_line(expr))
+    return {
+        "session_id": session_id,
+        "object_type": object_type,
+        "object_name": object_name,
+        "ripup": ripup,
     }
 
 
@@ -334,3 +468,37 @@ See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfa
     expr = f'(axlGetModuleInstanceLocation (car (axlSelectByName "GROUP" {skill_str(instance_name)})))'
     tcl_sessions.add_line(session_id, _skill_line(expr))
     return {"session_id": session_id, "instance_name": instance_name}
+
+
+@mcp.tool
+async def allegro_get_net_length(session_id: str, net_name: str) -> dict:
+    """Queue a read-only query of a net's real measured routed etch length (`axlDBGetLength`), within the current Allegro SKILL session.
+
+    This is the routing-QUALITY-analysis counterpart to `allegro_get_net_constraint`
+    (which only ever returns a RULE/constraint value, e.g. `MAX_VIAS`, never an actual
+    measured length). Per the vendored `axlDBGetLength.txt` doc: "Calculate the length of
+    the given object which may be a NET, CLINE, SEGMENT, or RATSNEST. If a net is
+    partially routed includes sum of all ratsnest manhattan lengths" — so this returns a
+    real number for both fully- and partially-routed nets, in board (design) units
+    (typically mils), not a design-rule limit.
+
+    Resolves the net the same `(car (axlSelectByName "NET" net_name))` way
+    `allegro_assign_net`/`allegro_delete_connect` do. The real use case this was built
+    for: length-matching compliance — query two (or more) nets this way, compare the
+    returned values against a tolerance from `get_high_speed_constraint_preset`
+    (e.g. `intra_pair_length_match_mils`/`addr_ctrl_to_clk_length_match_mils`), and decide
+    whether a net needs to be ripped up (`allegro_delete_connect`) and re-routed
+    (`allegro_create_trace`) to come back into tolerance — not just whether DRC is clean.
+
+    VERIFY, don't trust this tool's return value: SKILL return values never surface in
+    the job log for a bare query like this one either (see this module's docstring) —
+    capture the real number via SKILL's own `outfile`/`fprintf` in the same session (the
+    same technique this module's docstring describes being used to verify
+    `allegro_create_trace`/`allegro_create_simple_padstack`'s real dbid returns), e.g.
+    `(let ((f (outfile "lengths.txt" "a"))) (fprintf f "%s %L\\n" net_name (axlDBGetLength
+    (car (axlSelectByName "NET" net_name)))) (close f))`, then read that file after the
+    job completes.
+See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+    expr = f'(axlDBGetLength (car (axlSelectByName "NET" {skill_str(net_name)})))'
+    tcl_sessions.add_line(session_id, _skill_line(expr))
+    return {"session_id": session_id, "net_name": net_name}

@@ -49,64 +49,88 @@ See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfa
     return {"job_id": record.job_id, "state": record.state, "job_dir": record.job_dir, "command": record.command}
 
 
+# CONFIRMED LIVE 2026-10-02: the view-name/field-name keywords below are copied from
+# Cadence's own shipped extract command files (`share/pcb/text/views/*.txt` -- e.g.
+# bom_rep.txt, net_rep.txt, cmp_rep.txt, cpin_bv.txt, tstpoint.txt, drc_rep.txt), NOT
+# invented. This replaces an earlier version of this dict that used made-up view names
+# ("NETS", "COMPONENTS", "PINS", "TESTPOINTS", "DRC") and made-up field names
+# ("DEVICE", "VALUE", "TOLERANCE", "COMP_LOCATION_X/Y", "COMP_ROTATION", "COMP_MIRRORED",
+# "TESTPOINT_NAME", "DRC_ERROR_NAME", ...) that extracta.exe genuinely rejects outright
+# with `ERROR(SPMHDX-10): Illegal view name.` (confirmed live via the real per-job
+# extract.log -- NOT run.log, which only ever says "see extract.log for errors" --
+# extract.log is written to the submitted job's own job_dir/cwd, not next to
+# board_file/output_file, which is why this failure went undiagnosed across many calls
+# during the campaign: nothing ever read the real extract.log). Live-reproduced with the
+# OLD templates (10 consecutive run_allegro_extracta + wait_for_job calls, every one
+# failing with returncode 2, across two separate campaign conversations) and fixed by
+# switching to these real view/field names, confirmed working end-to-end against a real
+# sample board (zero errors in extract.log, real non-empty output file, returncode 0).
 EXTRACTION_TEMPLATES: dict[str, str] = {
     "bom": (
-        "COMPONENTS\n"
+        "COMPONENT\n"
+        "COMP_BOM_IGNORE = ''\n"
+        "SYM_NAME\n"
+        "COMP_DEVICE_TYPE\n"
+        "COMP_VALUE\n"
+        "COMP_TOL\n"
+        "COMP_CLASS\n"
+        "REFDES_SORT\n"
         "REFDES\n"
-        "DEVICE\n"
-        "VALUE\n"
-        "TOLERANCE\n"
-        "CLASS\n"
-        "PACKAGE\n"
-        "END\n"
     ),
     "nets": (
-        "NETS\n"
+        "LOGICAL_PIN\n"
+        "NET_NAME_SORT\n"
         "NET_NAME\n"
-        "PIN_NUMBER\n"
+        "REFDES_SORT\n"
         "REFDES\n"
+        "PIN_NUMBER_SORT\n"
+        "PIN_NUMBER\n"
+        "FUNC_DES_SORT\n"
+        "FUNC_DES\n"
         "PIN_NAME\n"
-        "END\n"
     ),
     "components": (
-        "COMPONENTS\n"
+        "COMPONENT\n"
+        "REFDES_SORT\n"
         "REFDES\n"
         "COMP_DEVICE_TYPE\n"
+        "COMP_VALUE\n"
+        "COMP_TOL\n"
         "COMP_PACKAGE\n"
-        "COMP_LOCATION_X\n"
-        "COMP_LOCATION_Y\n"
-        "COMP_ROTATION\n"
-        "COMP_MIRRORED\n"
-        "END\n"
+        "SYM_X\n"
+        "SYM_Y\n"
+        "SYM_ROTATE\n"
+        "SYM_MIRROR\n"
     ),
     "pins": (
-        "PINS\n"
-        "PIN_NAME\n"
-        "PIN_NUMBER\n"
+        "COMPONENT_PIN\n"
+        "REFDES_SORT\n"
+        "PIN_NUMBER_SORT\n"
         "REFDES\n"
-        "NET_NAME\n"
+        "PIN_NUMBER\n"
         "PIN_X\n"
         "PIN_Y\n"
-        "PIN_ROTATION\n"
+        "PAD_STACK_NAME\n"
+        "NET_NAME\n"
         "END\n"
     ),
     "testpoints": (
-        "TESTPOINTS\n"
-        "TESTPOINT_NAME\n"
-        "TESTPOINT_GRID\n"
-        "TESTPOINT_LOCATION_X\n"
-        "TESTPOINT_LOCATION_Y\n"
+        "COMPOSITE_PAD\n"
+        "TEST_POINT != ''\n"
+        "CLASS\n"
         "NET_NAME\n"
+        "NET_PROBE_NUMBER\n"
+        "REFDES\n"
+        "PIN_NUMBER\n"
+        "PIN_X\n"
+        "PIN_Y\n"
+        "VIA_X\n"
+        "VIA_Y\n"
+        "TEST_POINT\n"
         "END\n"
     ),
     "drc": (
-        "DRC\n"
-        "DRC_ERROR_NAME\n"
-        "DRC_LOCATION_X\n"
-        "DRC_LOCATION_Y\n"
-        "DRC_LAYER\n"
-        "DRC_VIOLATION_DETAILS\n"
-        "END\n"
+        "DRC_ERROR\n"
     ),
 }
 
