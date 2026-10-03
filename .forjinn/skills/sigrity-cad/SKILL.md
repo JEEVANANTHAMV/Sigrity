@@ -534,6 +534,21 @@ connectivity/cline-merge recompute). **`allegro_assign_net(ripup=True)` +
 single-branch net** (as used for the DRC fix above) — treat a multi-branch net's rip-up-
 and-refix as higher risk until this is root-caused.
 
+Re-confirmed in a dedicated follow-up investigation (3rd/4th real reproduction of the
+exact same hang, including a fresh 3-pin net picked specifically as the simplest
+possible multi-branch case). No chat-level workaround was found: per-branch rip-up
+(rather than whole-net), switching to `get_job_status`/`wait_for_job` polling instead
+of raw process checks, and per-object delete-and-recreate via `allegro_delete_connect`
+(instead of `ripup=True`) were all tried and still hit the same hang. The one real fix
+that came out of this is server-side, not a calling-pattern workaround: Allegro/Capture
+interactive sessions now get a 5-minute stall timeout (`core.tclsession`'s
+`ALLEGRO_SESSION_STALL_TIMEOUT_SECONDS`) instead of the global 2-hour default used for
+long batch simulations, so a session that hits this hang is force-killed and clearly
+flagged (`stall_timeout_killed=True` on the job record) within minutes instead of
+spinning silently for hours. Treat a multi-branch net's rip-up-and-refix as something
+that may need to be retried branch-by-branch or abandoned after a stall-kill, not as
+something currently fixable from the chat layer.
+
 Switched to a simple single-branch pair instead: `N02684`=3100.0 mil, `N08580`=2400.0 mil
 (both `nBranches=1`). Ripped up `N08580`, recreated it with a meander calculated to add
 exactly 700 mil (closing the gap to `N02684`).
