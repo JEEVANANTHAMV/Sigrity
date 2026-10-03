@@ -1,0 +1,30 @@
+# Manual Reroute in Dense Area Produces New Spacing Violations
+
+**Slug**: `manual-reroute-dense-area-spacing-violations`
+**Tool(s) affected**: `allegro_create_trace`, `allegro_assign_net` (rip-up), `run_allegro_batch_drc`, `run_allegro_report` — the full manual rip-up-and-refix workflow
+**Status category**: `known_blocked`
+**Pipeline stage**: design
+
+## Symptom
+
+When a manual rip-up-and-refix is performed in a **dense board area** (a region with many nearby copper objects, multiple nets weaving through a small area), the corrected tools work mechanically (rip-up, create, save, run, DRC, report — each step fast, under a few seconds for DRC/report, ~5-6s for the Allegro session), but the newly-routed path produces **double-digit new spacing violations** against previously-unseen neighbors in that dense pocket. The targeted original violation is fixed (e.g., `Short DRC` 1→0, `DRC Errors` drops by exactly 1), but the new path's geometry, even when maximally surgical (reusing 3 of the original 4 safe segments, deviating by as little as geometrically possible), still collides with adjacent copper that was not surveyed before the reroute. This is a genuine, board-density-dependent limitation of MANUAL point-coordinate rerouting — the same problem a human hand-routing this exact area would face. It is NOT a gap in the tool chain, which performed exactly as asked at every step.
+
+## Root Cause
+
+Dense board areas have many nearby copper objects (traces, pads, planes) that are not visible from the DRC report alone (which only shows existing violations, not the full "keepout map"). Picking a fully clean ALTERNATE route by hand requires discovering each neighbor one at a time via live `axlDBGetConnect` queries (surveying the local neighborhood segment by segment). Even a carefully-reasoned, maximally-surgical reroute that reuses the original safe segments and deviates minimally may still produce new spacing violations because:
+1. The DRC report shows violations on the OLD path, not on the intended NEW path.
+2. The local neighborhood in a dense area has copper on multiple layers and in multiple directions.
+3. The `axlDBGetConnect` query reveals neighbors one at a time; there is no single query that returns "all copper within X mils of this polyline."
+4. The iterate-and-recheck loop (rip-up → create → save → run → batch_drc → report → read new violations → adjust) is practical (fast, under a few seconds per cycle) but may require multiple iterations, and in a sufficiently dense area may never find a fully clean path by hand.
+
+This is the same limitation a human designer faces when hand-routing in a dense area: the tool chain is not the bottleneck, the geometric complexity of the dense region is.
+
+## Evidence
+
+- `sigrity_mcp/core/tool_status.py:338-350` — "HONEST LIMITATION FOUND: net X8 turned out to be one lane of a tightly-packed 8-line parallel mux bus (X1-X8, pin-adjacent on U5/U8) running directly through a separately-dense analog feedback-network pocket (nets N03774/N03806/N02125/N01060/C4's N21503/N21197, each weaving through the same ~600x1200 mil area) -- picking a fully clean ALTERNATE reroute geometry by hand required discovering each of these neighbors one at a time via live `axlDBGetConnect` queries (this project's own equivalent of \"read the keepout map before routing\"), and even a carefully-reasoned, maximally-surgical reroute (reusing 3 of the original 4 safe segments, deviating by as little as geometrically possible) still left double-digit new spacing violations against previously-unseen neighbors in this specific pocket. This is a genuine, board-density-dependent limitation of MANUAL point-coordinate rerouting (same as a human hand-routing this exact spot would face) -- not a gap in the tool chain itself, which performed exactly as asked at every step (rip-up, create, save, run, verify were all fast -- each DRC+report re-check cycle took under 2 seconds -- making the iterate-and-recheck workflow itself genuinely practical)."
+- `.forjinn/skills/sigrity-cad/SKILL.md:481-491` (Task 9, Honest limitation) — "Honest limitation found, not a tool-chain gap: net X8 turned out to be one lane of a tightly-packed 8-line parallel mux bus (X1-X8) running directly through a separately dense analog feedback-network pocket (4+ other nets weaving through the same small area). Picking a fully clean ALTERNATE route by hand required discovering each neighbor one at a time via live `axlDBGetConnect` queries; even a carefully-reasoned, maximally-surgical reroute still left double-digit new spacing violations against previously-unseen neighbors in this specific spot — the same problem a human hand-routing this exact area would hit. The mechanical loop itself (rip-up → create → save → run → batch_drc → report) is fast (each full cycle well under a few seconds for DRC/report, ~5-6s for the Allegro session) and genuinely practical for iterate-and-recheck — but it does not replace an autorouter's or a human's keepout awareness for a dense board region."
+- `sigrity_mcp/core/tool_status.py:344-350` — "4 new minor spacing violations did appear against previously-unsurveyed neighbors in this new local area (same class of finding as the main DRC-fix case: picking a fully keepout-clean path by hand still requires surveying the specific local neighborhood, even in a seemingly simpler part of the board) -- the LENGTH objective itself was hit exactly."
+
+## Pipeline Impact
+
+Affects any manual rip-up-and-refix pipeline operating in a dense board area. The mechanical loop works (tools are fast, reliable at each step), but the GEOMETRIC problem of finding a clean alternate path in a dense region is not solvable by the tool chain alone. The iterate-and-recheck workflow is practical and faster than a human would manage, but it may require many iterations and may not converge to a fully clean path in the densest regions. For dense areas, the SPECCTRA autorouter (which has global keepout/spacing awareness) is the more appropriate tool.
