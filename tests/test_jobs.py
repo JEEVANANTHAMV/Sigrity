@@ -255,6 +255,52 @@ async def test_stall_watchdog_disabled_when_timeout_is_zero(tmp_path, monkeypatc
     assert finished.stall_timeout_killed is False
 
 
+@pytest.mark.asyncio
+async def test_stall_timeout_seconds_override_kills_sooner_than_global_default(
+    tmp_path, monkeypatch
+):
+    # Regression coverage for the per-job override: a job whose per-call
+    # stall_timeout_seconds is short must be killed even while the global default
+    # stays long -- this is how tclsession.run_session tightens the watchdog for
+    # Allegro/Capture interactive sessions without affecting every other job type.
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(jobs_module.settings, "job_stall_timeout_seconds", 3600)
+    monkeypatch.setattr(jobs_module.settings, "stall_watchdog_poll_seconds", 0.05)
+    jm = JobManager()
+    job_id, job_dir = jm.new_job_dir("fake_tool")
+    await jm.submit(
+        tool="fake_tool",
+        command=[sys.executable, "-c", "import time; time.sleep(30)"],
+        job_dir=job_dir,
+        job_id=job_id,
+        stall_timeout_seconds=0.3,
+    )
+    finished = await jm.wait(job_id, timeout=10)
+    assert finished.state == "failed"
+    assert finished.stall_timeout_killed is True
+
+
+@pytest.mark.asyncio
+async def test_stall_timeout_seconds_override_none_keeps_global_default(tmp_path, monkeypatch):
+    # The flip side: passing no override must fall back to the global default exactly
+    # as before this change (no regression for every non-Allegro/Capture job type).
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(jobs_module.settings, "job_stall_timeout_seconds", 0.3)
+    monkeypatch.setattr(jobs_module.settings, "stall_watchdog_poll_seconds", 0.05)
+    jm = JobManager()
+    job_id, job_dir = jm.new_job_dir("fake_tool")
+    await jm.submit(
+        tool="fake_tool",
+        command=[sys.executable, "-c", "import time; time.sleep(30)"],
+        job_dir=job_dir,
+        job_id=job_id,
+        stall_timeout_seconds=None,
+    )
+    finished = await jm.wait(job_id, timeout=10)
+    assert finished.state == "failed"
+    assert finished.stall_timeout_killed is True
+
+
 def test_record_to_dict_surfaces_runaway_and_stall_kill_reasons(tmp_path):
     from sigrity_mcp.domains.platform.job_tools import _record_to_dict
 

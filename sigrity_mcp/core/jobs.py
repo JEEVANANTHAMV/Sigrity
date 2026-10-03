@@ -112,6 +112,7 @@ class JobManager:
         job_dir: Path,
         job_id: str,
         dismiss_dialogs: bool = False,
+        stall_timeout_seconds: int | None = None,
     ) -> JobRecord:
         """`dismiss_dialogs=True` starts a `win32gui_helper.DismissWatcher` against this
         job's pid for its whole lifetime -- for interactive Cadence GUI launches (Allegro
@@ -120,6 +121,11 @@ class JobManager:
         docstring for the confirmed live failure mode this closes. Batch-only tools
         (report.exe, batch_drc.exe, ...) never pass this -- they have no GUI to dismiss
         a dialog from in the first place.
+
+        `stall_timeout_seconds` overrides `settings.job_stall_timeout_seconds` for this
+        one job -- pass `None` (the default) to keep the global default. See
+        `core.tclsession.run_session`'s use of this for why Allegro/Capture interactive
+        sessions need a much shorter override than long batch simulations.
         """
         log_path = job_dir / "run.log"
         record = JobRecord(
@@ -149,7 +155,7 @@ class JobManager:
                 pass  # never let watcher setup block/break the job launch itself
         record.save()
 
-        asyncio.create_task(self._watch(job_id, proc, log_file))
+        asyncio.create_task(self._watch(job_id, proc, log_file, stall_timeout_seconds))
         return record
 
     def _stop_dismiss_watcher(self, job_id: str) -> None:
@@ -164,7 +170,13 @@ class JobManager:
             except RuntimeError:  # no running loop (e.g. cancel() called from sync code)
                 watcher.stop()
 
-    async def _watch(self, job_id: str, proc: asyncio.subprocess.Process, log_file) -> None:
+    async def _watch(
+        self,
+        job_id: str,
+        proc: asyncio.subprocess.Process,
+        log_file,
+        stall_timeout_seconds: int | None = None,
+    ) -> None:
         log_path = Path(log_file.name)
         runaway_flag = {"killed": False}
         stall_flag = {"killed": False}
@@ -196,7 +208,11 @@ class JobManager:
             # `settings.job_stall_timeout_seconds`'s docstring for exactly which real
             # failure modes this is a last-resort safety net for (DismissWatcher /
             # a license wait / Celsius3D's confirmed post-completion idle-stall).
-            limit = settings.job_stall_timeout_seconds
+            limit = (
+                settings.job_stall_timeout_seconds
+                if stall_timeout_seconds is None
+                else stall_timeout_seconds
+            )
             if limit <= 0:
                 return  # disabled
             last_size = -1

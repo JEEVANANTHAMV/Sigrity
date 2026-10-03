@@ -151,15 +151,25 @@ async def test_run_session_auto_enables_dismiss_dialogs_only_for_allegro_and_cap
     Cadence exe that pops modal dialogs even from the command line, and core.tool_status's
     "capture" note documents three distinct real dialogs seen on this exact install.
     Every other tool is left alone.
+
+    Also locks down the same `tool in ("allegro", "capture")` check applying a short
+    (300s) `stall_timeout_seconds` override in place of the global 2-hour default -- a
+    real, repeated failure mode (ripping up and re-routing a multi-branch net) hangs
+    these sessions indefinitely with the log gone silent, and the global default would
+    leave that running for two hours before anything noticed.
     """
     import sigrity_mcp.core.process as process_module
-    from sigrity_mcp.core.tclsession import tcl_sessions
+    from sigrity_mcp.core.tclsession import (
+        ALLEGRO_SESSION_STALL_TIMEOUT_SECONDS,
+        tcl_sessions,
+    )
 
     seen = {}
     real_submit_job = process_module.submit_job
 
     async def _spy_submit_job(*args, **kwargs):
         seen["dismiss_dialogs"] = kwargs.get("dismiss_dialogs", False)
+        seen["stall_timeout_seconds"] = kwargs.get("stall_timeout_seconds")
         return await real_submit_job(*args, **kwargs)
 
     monkeypatch.setattr(process_module, "submit_job", _spy_submit_job)
@@ -169,6 +179,7 @@ async def test_run_session_auto_enables_dismiss_dialogs_only_for_allegro_and_cap
     await run_session(allegro_session.session_id, tool="allegro", tcl_arg_flag="-s",
                        extra_args=["board.brd"], script_filename="macro.scr")
     assert seen["dismiss_dialogs"] is True
+    assert seen["stall_timeout_seconds"] == ALLEGRO_SESSION_STALL_TIMEOUT_SECONDS
 
     seen.clear()
     capture_session = tcl_sessions.create("capture")
@@ -176,9 +187,11 @@ async def test_run_session_auto_enables_dismiss_dialogs_only_for_allegro_and_cap
     await run_session(capture_session.session_id, tool="capture", tcl_arg_flag=None,
                        build_args=["-product=OrCAD Capture"], script_filename="macro.tcl")
     assert seen["dismiss_dialogs"] is True
+    assert seen["stall_timeout_seconds"] == ALLEGRO_SESSION_STALL_TIMEOUT_SECONDS
 
     seen.clear()
     other_session = tcl_sessions.create("powersi")
     tcl_sessions.add_line(other_session.session_id, "puts hello")
     await run_session(other_session.session_id, tool="powersi")
     assert seen["dismiss_dialogs"] is False
+    assert seen["stall_timeout_seconds"] is None

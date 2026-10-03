@@ -68,6 +68,7 @@ async def submit_job(
     extra_args: list[str] | None = None,
     script_filename: str = "macro.tcl",
     dismiss_dialogs: bool = False,
+    stall_timeout_seconds: int | None = None,
 ) -> JobRecord:
     """Write `tcl_script` (if given) into a fresh job directory, then launch `tool` against it.
 
@@ -84,6 +85,8 @@ async def submit_job(
     `core.win32gui_helper.DismissWatcher`; pass it for interactive Cadence GUI launches
     that can raise a modal dialog with nobody present to click it (today: Allegro session
     jobs, auto-enabled by `core.tclsession.run_session` for `tool="allegro"`).
+    `stall_timeout_seconds` overrides the global silent-log watchdog timeout for this one
+    job -- see `JobManager.submit`'s docstring.
     Returns immediately once the process has been *started*; use job_manager.status()/wait()
     to track completion.
     """
@@ -101,5 +104,10 @@ async def submit_job(
 
     command = [str(exe), *argv]
     return await job_manager.submit(
-        tool=tool, command=command, job_dir=job_dir, job_id=job_id, dismiss_dialogs=dismiss_dialogs
+        tool=tool,
+        command=command,
+        job_dir=job_dir,
+        job_id=job_id,
+        dismiss_dialogs=dismiss_dialogs,
+        stall_timeout_seconds=stall_timeout_seconds,
     )

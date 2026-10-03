@@ -109,6 +109,17 @@ TclSessionManager = ScriptSessionManager
 
 tcl_sessions = ScriptSessionManager()
 
+# Interactive Allegro/Capture GUI session jobs normally complete in ~5-20s (confirmed
+# live: axlDBCreateNet ~5.6s, load+query+exit ~20s; even the most complex documented
+# stackup/routing session finished in ~1-3 minutes). The global `job_stall_timeout_seconds`
+# default (2 hours) is tuned for long batch simulations (XcitePI, PowerSI, PowerDC) and is
+# far too long for this class of job: a real, repeatedly-confirmed failure mode (ripping
+# up and re-routing a multi-branch/multi-pin net) hangs the session indefinitely with the
+# log gone completely silent, and nothing catches it for two hours. 300s gives every
+# documented legitimate session several times its normal runtime margin while still
+# surfacing this specific hang in minutes instead of hours.
+ALLEGRO_SESSION_STALL_TIMEOUT_SECONDS = 300
+
 
 async def run_session(
     session_id: str,
@@ -141,6 +152,17 @@ async def run_session(
     with nothing for any of those call sites (or the LLM agent calling them) to remember
     to do.
 
+    The same `tool in ("allegro", "capture")` check also applies
+    `ALLEGRO_SESSION_STALL_TIMEOUT_SECONDS` (300s) in place of the global 2-hour stall
+    watchdog default -- a real, repeatable failure mode (ripping up and re-routing a
+    multi-branch/multi-pin net) hangs these sessions indefinitely with the log gone
+    completely silent, and the 2-hour default would leave that running for hours before
+    anything noticed. No working chat-level fix for the hang itself was found (per-branch
+    rip-up, shorter-timeout polling, and per-object delete-and-recreate were all tried and
+    still hit the same hang); this at least bounds the damage and reports it clearly
+    (`stall_timeout_killed=True` on the job record) instead of relying on a caller to
+    notice zero log growth on their own.
+
     `capture_run_session` (`tool="capture"`) gets the same treatment for the same class
     of bug: `win32gui_helper`'s own module docstring explicitly names orCAD Capture
     alongside Allegro as a Cadence exe that "initialise[s] a Qt or classic-Win32 GUI even
@@ -170,6 +192,9 @@ async def run_session(
         extra_args=extra_args,
         script_filename=script_filename,
         dismiss_dialogs=(tool in ("allegro", "capture")),
+        stall_timeout_seconds=(
+            ALLEGRO_SESSION_STALL_TIMEOUT_SECONDS if tool in ("allegro", "capture") else None
+        ),
     )
     if close_after:
         tcl_sessions.close(session_id)
