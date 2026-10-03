@@ -291,15 +291,16 @@ closed boundary, it pours a real, solid-filled, net-bound copper shape onto that
 Model B session mechanics as everything else in this file.
 
 ```
+allegro_get_board_extent_points(board_file="…\\fd.brd", margin=500.0)
+  -> {points:[[7500,13900],[14700,13900],[14700,19200],[7500,19200]], real_pin_extent:{...}}
 start_allegro_session()                                           -> {session_id}
 generate_multilayer_stackup(session_id, layers=[... incl. {"name":"L2_GND","layer_type":"PLANE",
     "material":"COPPER","thickness_mil":1.4}, ...])                # Task 6
 allegro_create_copper_shape(session_id, layer="L2_GND", net_name="GND",
-    points=[[0,0],[34000,0],[34000,22000],[0,22000]], dynamic=True) # the board's own real extents
-                                                                     # (from run_allegro_report
-                                                                     # report_code="sum" on THIS board
-                                                                     # -- always read real extents,
-                                                                     # never assume a size)
+    points=[[7500,13900],[14700,13900],[14700,19200],[7500,19200]], dynamic=True) # from the
+                                                                     # extent-points call above,
+                                                                     # NOT report_code="sum"'s
+                                                                     # "Drawing Extents" (see below)
 allegro_save_design(session_id)
 allegro_run_session(session_id, board_file="…\\fd.brd")
 wait_for_job(job_id, 120) -> state:"succeeded", rc 0
@@ -321,9 +322,22 @@ wait_for_job(job_id, 120) -> state:"succeeded", rc 0
   them `PACKAGE GEOMETRY/*` component silkscreen/assembly/place-bound outlines — zero `BOARD
   GEOMETRY/*` shapes of any kind). A components-bounding-box fallback
   (`axlDBGetExtents(axlDBGetDesign()->components nil)`) was also tried live and returned a
-  degenerate `((0.0 0.0) (0.0 0.0))` box. So: read the board's real extents first
-  (`run_allegro_report(..., report_code="sum")` → `Drawing Extents XL/YL/XU/YU`, in mils) and
-  pass them as an explicit rectangle, or pass your own exact outline/sub-region polygon.
+  degenerate `((0.0 0.0) (0.0 0.0))` box. **Do not substitute `run_allegro_report(...,
+  report_code="sum")`'s "Drawing Extents" either** — this was tried and independently
+  disproven on two structurally different real boards: both reported a byte-identical
+  `Drawing Extents` box regardless of their very different real component/pin footprints
+  (one board's real parts occupied ~18% of that box's area), and both also showed `Layout
+  area (sq in): 0.00` on the same report — conclusive that this figure is the inherited
+  drawing SHEET/canvas size, not board-specific geometry. Using it as a pour boundary
+  risks covering a huge empty area far outside the actual board. The verified-safe
+  default is `allegro_get_board_extent_points(board_file=...)`
+  (`allegro_extraction_tools.py`): it runs a real pins-view extraction, takes the real
+  min/max of `PIN_X`/`PIN_Y`, and expands by a margin — genuinely board-specific,
+  always available, and provably contains the real board content (a `dynamic=True`
+  pour's flood-fill only covers copper connected to its net, so a boundary larger than
+  the true edge is safe, not harmful). It returns a populated-region box, not the literal
+  physical edge, on boards whose parts don't fill their full sheet — pass your own exact
+  outline/sub-region polygon when that distinction matters.
 - **Verified LIVE, 3 independent ways** (fresh board copy, real 8-layer stackup with 2 new
   PLANE layers, pour on `L2_GND`/net `GND`):
   1. An in-session SKILL query right after creation (`axlDBGetShapes("BOUNDARY/L2_GND")`,
@@ -369,8 +383,9 @@ wait_for_job(job_id, 120) -> state:"succeeded", rc 0
   See `core.tool_status`'s `powerdc`/`allegro` notes for the complete investigation log.
 - **#1 mistake**: assuming a `pdcVRM` net-pair failure means missing plane copper — it does not,
   necessarily; here it reproduced identically with real, independently-verified copper present.
-  Don't skip the auto-derive-from-outline default either, expecting it to "just work" — read the
-  board's real extents first (`report_code="sum"`) and pass explicit `points`.
+- **#2 mistake**: defaulting `points` to `report_code="sum"`'s "Drawing Extents" box, expecting
+  it to represent the real board edge — it doesn't (see above); use
+  `allegro_get_board_extent_points` instead, or your own exact outline.
 
 ## Task 8 — EASY once you know the real keywords: `run_allegro_extracta` (BOM/nets/components/pins/DRC dump)
 

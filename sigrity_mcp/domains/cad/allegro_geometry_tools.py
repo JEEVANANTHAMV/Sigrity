@@ -403,6 +403,15 @@ async def allegro_create_copper_shape(
     `axlDBComposeShapesFromLines` first, not wrapped by this tool) or any sub-region
     polygon you want poured.
 
+    For a safe "whole populated board" default without hand-authoring coordinates, call
+    `allegro_get_board_extent_points` (domains.cad.allegro_extraction_tools) first and
+    pass its `points` straight through here — it derives a real, board-specific
+    rectangle from the board's actual placed pin extents plus a margin, verified safer
+    than the obvious "Drawing Extents"/`sum`-report bounding box (which is the
+    inherited drawing sheet size, not board geometry — confirmed on two structurally
+    different real boards reporting byte-identical extents). See that tool's own
+    docstring for the full reasoning.
+
     The shape is always solid-filled (`l_r_fill = t`) — an unfilled "pour" isn't real
     copper. Voids/keepouts are NOT handled by this minimal-scope tool; for anything beyond
     "cover this boundary solid on one layer/net", hand-write SKILL from the real worked

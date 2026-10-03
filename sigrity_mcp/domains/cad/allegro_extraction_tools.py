@@ -189,3 +189,100 @@ async def run_allegro_extracta(
         "command_file": cmd_file_path,
     }
 
+
+@mcp.tool
+async def allegro_get_board_extent_points(
+    board_file: str,
+    margin: float = 500.0,
+    timeout_seconds: float = 60.0,
+) -> dict:
+    """Derive a safe default copper-pour/shape boundary from the board's real placed
+    component/pin extents, for callers of `allegro_create_copper_shape` who don't want
+    to hand-supply an explicit polygon.
+
+    `allegro_create_copper_shape`'s `points` parameter is deliberately required with no
+    built-in default (see that tool's own docstring) because a real board's physical
+    outline is typically drawn as plain LINE/ARC segments, not a shape database object —
+    `axlDBGetShapes("BOARD GEOMETRY/OUTLINE")` returns `nil` on boards that don't define
+    one, and this was independently confirmed on two structurally different real boards
+    through three separate mechanisms (axlDB live query, extracta text dump, IDF export):
+    none of them has a readable closed-polygon outline.
+
+    The `run_allegro_extracta`/`run_allegro_report` "Drawing Extents" figure (also
+    always available) is NOT a safe substitute: it is the board's inherited drawing
+    SHEET/canvas size, not board-specific geometry — confirmed by two structurally
+    different real boards reporting byte-identical "Drawing Extents" while their real
+    populated areas differed completely. Using it as a pour boundary risks covering a
+    huge empty area far outside the actual board.
+
+    This tool instead runs a real `run_allegro_extracta(view_type="pins")` job against
+    `board_file`, parses the real `PIN_X`/`PIN_Y` columns, takes their min/max, and
+    expands by `margin` (board units, typically mils) on every side — a rectangle that
+    is (a) genuinely board-specific geometry, (b) always available via an existing
+    non-UI tool, and (c) provably contains the real board content. It is a
+    "populated-region" bounding box, not the literal physical board edge: on a board
+    whose parts are sparsely placed in one corner of a larger sheet, this box covers
+    the populated region, not the full sheet. For a `dynamic=True` (BOUNDARY-class)
+    pour this is safe either way — the flood fill only covers copper connected to its
+    net, so a boundary larger than the true edge cannot create copper in empty space.
+    Callers wanting an exact custom shape or a true whole-board pour on a board that
+    DOES define a real outline should still pass their own explicit `points`.
+
+    Returns `points` as a closed 4-corner rectangle
+    `[[XL-margin, YL-margin], [XU+margin, YL-margin], [XU+margin, YU+margin],
+    [XL-margin, YU+margin]]`, ready to pass straight into `allegro_create_copper_shape`.
+    """
+    extraction = await run_allegro_extracta(board_file=board_file, view_type="pins")
+    job_id = extraction["job_id"]
+
+    from sigrity_mcp.core.jobs import job_manager
+
+    record = await job_manager.wait(job_id, timeout=timeout_seconds)
+    if record.state != "succeeded":
+        return {
+            "error": f"pins extraction job {job_id} did not succeed (state={record.state})",
+            "job_id": job_id,
+        }
+
+    output_path = extraction["output_file"]
+    try:
+        with open(output_path, "r", encoding="utf-8", errors="replace") as f:
+            lines = f.readlines()
+    except OSError as exc:
+        return {"error": f"could not read extracta output '{output_path}': {exc}", "job_id": job_id}
+
+    xs: list[float] = []
+    ys: list[float] = []
+    for line in lines:
+        if not line.startswith("S!"):
+            continue
+        fields = line.split("!")
+        # pins view column order: S!REFDES_SORT!PIN_NUMBER_SORT!REFDES!PIN_NUMBER!PIN_X!PIN_Y!...
+        if len(fields) < 7:
+            continue
+        try:
+            xs.append(float(fields[5]))
+            ys.append(float(fields[6]))
+        except ValueError:
+            continue
+
+    if not xs or not ys:
+        return {
+            "error": "no S! pin rows with numeric PIN_X/PIN_Y found in extracta output "
+            f"'{output_path}' — board may have zero placed pins",
+            "job_id": job_id,
+            "output_file": output_path,
+        }
+
+    xl, xu = min(xs) - margin, max(xs) + margin
+    yl, yu = min(ys) - margin, max(ys) + margin
+    points = [[xl, yl], [xu, yl], [xu, yu], [xl, yu]]
+    return {
+        "points": points,
+        "real_pin_extent": {"xl": min(xs), "yl": min(ys), "xu": max(xs), "yu": max(ys)},
+        "margin": margin,
+        "pin_count": len(xs),
+        "job_id": job_id,
+        "output_file": output_path,
+    }
+
