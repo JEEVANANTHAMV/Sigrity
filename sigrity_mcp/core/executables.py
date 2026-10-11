@@ -59,8 +59,8 @@ CAD_EXECUTABLES: dict[str, str] = {
     # --- Design data extraction (confirmed live CLI, see allegro_extraction_tools.py) ---
     "allegro_designextractor": "designextractor.exe",
     "allegro_extracta": "extracta.exe",
-    # --- Interchange translators (real CLI, confirmed license-gated on this machine —
-    # see interchange_tools.py and core.tool_status) ---
+    # --- Interchange translators (real CLI, blocked on this build by a SPB Translators
+    # capability gate, NOT a license problem — see interchange_tools.py and core.tool_status) ---
     "con2xml": "con2xml.exe",
     "cap2xml": "cap2xml.exe",
     "dml2con": "dml2con.exe",
@@ -165,6 +165,33 @@ EXECUTABLES: dict[str, str] = {
 }
 
 
+#: Logical names of the tools that, on this PREMIUM / no-license-required install,
+#: launch a GUI (open a workbench/work window) and block on interactive startup
+#: dialogs ("Product Choices", welcome, "what would you like to do?" ...) even
+#: when driven from the command line. Their console log is empty by nature, so the
+#: console-oriented job watcher in `core.jobs` misreads a GUI tool's normal startup
+#: as "no output for N seconds -> stall" and the negative-rc/empty-log heuristic as a
+#: "license issue". `core.gui_tool_runner.is_gui_tool` / `submit_job` route these
+#: through the screenshot+dismiss path instead. Keep in sync with
+#: `GUI_TOOL_EXE_NAMES` in core.gui_tool_runner (that set is the source of truth for
+#: exe-stem matching; this set is keyed by logical name for tool-facing messages).
+GUI_TOOL_NAMES: frozenset[str] = frozenset({
+    "powerdc",
+    "powersi",
+    "xtractim",
+    "clarity3d_workbench",
+    "optimizepi",
+    "xcitepi",
+    "xcitepi_console",
+    "broadbandspice",
+    "spdsim",
+    "spdsim_console",
+    "powertree",
+    "optimality",
+    "celsius3d",
+})
+
+
 def _registries() -> list[tuple[dict[str, str], Path, str]]:
     """Each registry paired with the base dir its filenames resolve against and a
     human-readable hint for the error message when a file is missing. Order matters only
@@ -190,7 +217,7 @@ def resolve(name: str) -> Path:
 
     Checks the Sigrity Suite, FlexNet license-manager, and Allegro/OrCAD registries in
     turn. Raises ExecutableNotFoundError if the name is unknown in all three, or if the
-    exe is not present on disk (e.g. a differently-licensed/installed edition).
+    exe is not present on disk (e.g. a differently-installed/edited edition).
     """
     for registry, base_dir, hint in _registries():
         if name in registry:
