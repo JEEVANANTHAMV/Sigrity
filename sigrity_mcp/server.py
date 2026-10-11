@@ -10,3 +10,7 @@ from sigrity_mcp.mcp_app import mcp
 from sigrity_mcp.domains import aurora, cad, extraction, pi, platform, si, sourcing, thermal  # noqa: E402,F401
 
 __all__ = ["mcp"]
+
+
+if __name__ == "__main__":
+    mcp.run(transport="stdio")
