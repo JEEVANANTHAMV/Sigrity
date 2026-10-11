@@ -1,4 +1,4 @@
----
+﻿---
 name: sigrity
 description: Drive the local Cadence Sigrity 2024.0 + Allegro/OrCAD SPB 22.1 install through its 181-tool MCP suite. Use for any Sigrity/Allegro/Cadence EDA task — board analysis, SI/PI/thermal simulation, extraction, DRC, placement, routing, manufacturing export, project creation, or job/license introspection. Always start here to learn which tool to call, the minimal call sequence, and which sample file to use.
 ---
@@ -123,6 +123,69 @@ originally surfaced this. A parameter that legitimately accepts either a string 
 - **Thermal** → `sigrity-celsius`: Celsius2D/3D/CFD.
 - **Platform** (this file): job/session/pipeline/file/license/install tools.
 
+---
+
+## END-TO-END EDA WORKFLOWS + PART RESOLUTION (read this FIRST for any design task)
+
+This suite is a generic end-to-end EDA engine. For ANY task — build a board from scratch, take in an existing design (schematic / BOM / Gerber / IPC-2581 / DXF / STEP), analyze it, re-route it, edit it, DRC it, fabricate it, or run SI/PI/thermal — work the phases below. The phases are capability-dependent, not fixed: skip any phase whose inputs already exist. The ONE invariant rule for every task:
+
+> **CHECK BEFORE THE NEXT STEP.** At the start of each phase, verify its inputs actually exist. If an input is missing, do NOT fabricate it and do NOT call a tool that needs it — **STOP and ask for the specific missing artifact** (name the part/file/format). Only when the gate passes, proceed to the next phase.
+
+### The seven phases (entry point = the earliest phase that has no input yet)
+
+| Phase | What runs | Gate — verify before proceeding |
+|---|---|---|
+| **0. Intake** | `run_capture_session` (OrCAD schematic) or `dxf2a` / `ipc2581_in` / `brd2dml` / `spif_specctra` / `allegro_new_blank_board` / open an existing `.brd` | Know the design intent (requirements doc / netlist / existing board). No netlist + no existing `.brd` → ask for a schematic file or netlist. |
+| **1. Parts / libraries** | `create_sym` / `ipc2581_in` / `dxf2a` to import footprints; `diacheck`/`ibischk*` to validate models | **Every refdes in the netlist has an Allegro footprint (`.pdra`/`.d`) + OrCAD symbol (`.olb`).** If any refdes has no footprint → **STOP and list exactly which refdes/footprints are missing** (see "Part resolution" below). |
+| **2. Schematic → board** | `capture` → netlist → `allegro` (create `.brd`), `allegro_create_net`, stackup via `generate_multilayer_stackup`, constraints/presets (`get_high_speed_constraint_preset`, `allegro_create_ecset`, `allegro_set_physical_constraint`) | Board exists with nets, stackup, and the interface constraint sets. A **nets-only board is NOT placeable** — nets are logical names with 0 pins (you cannot place/route/DRC/extract a net). |
+| **3. Placement** | `placement.exe` (or manual `allegro_create_copper_shape` for pour/geometry) | Footprints present (Phase 1 gate) AND a board outline/mechanical constraint. No outline → ask or import a DXF. |
+| **4. Route + DRC** | SPECCTRA auto-route (`spif_batch` export → `specctra` route → `run_allegro_specctra_import`) + `run_allegro_batch_drc` / `checkplus` / `run_allegro_report(report_code="drc")` | Placed parts (Phase 3). Judge success by `final.sts` `Completion` + `batch_drc.log` error count, never the raw `state`. |
+| **5. Analysis** | translate to `.spd` (PowerSI BRD-bridge / `xtractim`) → `powerdc` (IR-drop/E-T), `optimizepi`, `powersi` (S-params/crosstalk), `xtractim`/`clarity3d` (3D EM), `psp_cmd` (SPICE/behavioral), `celsius*` (thermal), `aurora` (EMC pre-screen) | A `.spd` with placed+routed copper for the nets under study. No copper → **STOP: analysis is pending placement/routing** (not pending license, not a tool defect). Verify the `.spd` path you passed is YOUR staged file, not a sample. |
+| **6. Fabrication / sign-off** | `run_allegro_generate_artwork` (Gerber), `run_allegro_ipc356_out` / `run_allegro_ipc2581_out` (manufacturing), `run_allegro_step_out` (3D), `run_allegro_pdf_out`, full DRC readback | DRC-clean (Phase 4). For formal EMC/ESD/surge PASS/FAIL (IEC 61000-4-x) that is a **lab/chamber** item — design-side pre-screen (AURORA/PSpice) is the automatable slice; say so rather than claiming a cert. |
+
+### Part resolution — the gate that is different here
+
+This install ships software (Allegro, OrCAD, PowerDC, PowerSI, XtractIM, Clarity3D, PSpice), **not application-specific components**. A fresh install has only generic primitives (0201/0402/0603/0805 R/C/L padstacks, vias, generic connector shells). **Every application component in ANY design is vendor-supplied IP** (the chipmaker's licensed mechanical drawing) and is **not** in the install. So the Phase-1 gate is the universal "missing parts" check, for whatever the design is — not a fixed list:
+
+1. **Derive the required-part list from the DESIGN, not from memory.** Read the netlist / BOM / schematic / requirements to enumerate every refdes + package. (If handed a BOM file, that IS the list.)
+2. **Check each part** against the part-library roots:
+   `C:\Cadence\SPB_22.1\share\pcbdw_lib\`, `...\share\library\`, `...\share\pcb\pcb_lib\`, `...\share\orcad\` — match by part number/name (footprint file extensions: Allegro `.pdra`/`.d`; OrCAD `.olb`).
+3. **If any are missing, STOP and report the exact missing parts** (refdes, description, expected package, and the file format you need: Allegro `.pdra`/`.d` + `.olb`, or IPC-2581/STEP which this suite converts via `ipc2581_in`/`dxf2a`). Import them into `C:\Cadence\SPB_22.1\share\pcbdw_lib\` (or any folder on a `LIB_DIR`) and re-gate.
+4. **Do NOT** invent a footprint, do NOT run placement/route/DRC/analysis on what isn't there, and do NOT label a missing part a license failure. The honest status is **pending component import** for the specific missing refdes.
+
+### Capability boundaries (what the suite can and cannot do, for any task)
+- **Can do, end-to-end, no external dependency:** board authoring (stackup/nets/constraints/copper shapes), DRC, Gerber/mfg export (Gerber/IPC-356/IPC-2581/STEP/PDF), PSpice behavioral/SPICE sim, PowerSI S-params/crosstalk, XtractIM/Clarity3D extraction, OptimizePI, Thermal.
+- **Can do, gated on inputs:** placement (needs footprints + outline), SPECCTRA auto-route (needs placed board), PowerDC IR-drop (needs a `.spd` of placed+routed copper **and** PowerDC Net Classes — see the PowerDC pdcVRM caveat in `sigrity-cad` Task 7).
+- **Cannot do from this desktop (state it, don't fake it):** formal EMC/ESD/surge chamber certification (IEC 61000-4-x Level pass/fail), and capturing a live interactive Allegro session that only exists as a GUI (use the batch/CLI/headless paths).
+
+### Worked example (one real design, to show the gate in action)
+For the NXP i.MX 8M Plus IP-camera board, Phase-1 derived this required-part list from the requirements doc and found it ABSENT in the libraries (34,815-file search, 2026-10-11). The gate would therefore STOP at Phase 1 and ask for these 18 before any place/route/analysis — this is an EXAMPLE of the generic gate, not a fixed list:
+
+### Example part manifest (i.MX 8M Plus IP-camera only — NOT a fixed list, derive per design)
+
+| # | Component | Mfg PN (spec) | Package | Notes |
+|---|---|---|---|---|
+| 1 | i.MX 8M Plus SoC | MIMX8ML8DVNLZAB | FCBGA 316-ball | NXP board-design-files package gives `.pdra` + `.olb` together |
+| 2 | PMIC | NXP PCA9450B/C | BGA/QFN | VDD_ARM/SOC/DDR/IO |
+| 3 | LPDDR4/4X DRAM | 2×2 GB, 32-bit | BGA | memory, up to 4000 MT/s |
+| 4 | eMMC 5.1 | 16/32 GB HS400 | BGA | storage |
+| 5 | Quad-SPI NOR | 32 MB @ 104 MHz | SOP/QFN | boot flash |
+| 6 | MicroSD connector | UHS-I SDR104 socket | socket | + NVT4857UK level translator, multi-ch TVS |
+| 7 | Image sensor | sony STARVIS 4K | + IRCUT actuator | on the 38×38 headboard |
+| 8 | FPC / board-to-board | 30-pin shielded high-speed | connector footprint | between main SoC + sensor boards |
+| 9 | GbE PHY | Realtek RTL8211F | QFN | RGMII 1.8V |
+| 10 | RJ45 + magnetics | 1 kV integrated | module | + SRV05-4 TVS, common-mode chokes |
+| 11 | PoE PD | TI TPS23753A (IEEE 802.3af/at) | + isolated transformer | 1.5 kV barrier, ORing, SMAJ15A, fuse, P-FET |
+| 12 | SMD passives | 0201/0402 MLCC + R + L + ferrite beads; 10–22 µF bulk | standard | decoupling/filtering — the generic shells may already cover these |
+| 13 | Crystals/osc | 24 MHz (±10ppm) / 32.768 kHz / 25 MHz + sensor-local 24/27 MHz | 3225/3215/5032 | clocking |
+| 14 | Audio | TI/National WM8960 codec + Class-D 2W/8Ω amp + PDM mic header | QFN |  |
+| 15 | IR-CUT / IR | TI DRV8837C (QFN) + 850 nm IR LED (1 A) | QFN + LED |  |
+| 16 | Industrial I/O | isolated RS-485 (120 Ω) + optocoupler (5–24V) + 30V/1A SSR |  |  |
+| 17 | Secure element | NXP EdgeLock SE050 | LQFP/DFN | tamper-proof keys |
+| 18 | TVS / protection | SRV05-4, multi-channel TVS arrays, SMAJ15A |  |  |
+
+When only a SUBSET of a design's parts is imported, state explicitly which refdes are present vs **pending component import** and gate the dependent place/route/PI phases on the missing ones. Do NOT invent a footprint; do NOT treat a missing part as a license failure. (For a DIFFERENT design, re-run "Part resolution" from its own netlist/BOM — this table does not apply to it.)
+
 ## REAL file assets (USE THESE PATHS — they exist and are the confirmed test inputs)
 
 Copy read-only sources into the job scratch or a `runs/` target first (tools write next to/into
@@ -157,7 +220,7 @@ their job dir; never overwrite a shipped sample in place). `copy_file(src,dst,ov
 
 - `run_spdsim_simulation` — blocked (must run as a PowerSI-Tcl child process; standalone fails "Skip license fetch").
 - `run_specctra_import_session` — **crashes** (0xC0000005 / SPMHDB-238) on every import. Export+route is the durable half; import is a product bug.
-- All four interchange tools (`run_cap2xml/dml2con/con2xml/apd2con`) — license-gated ("No Product License selected"); the FlexNet server is down on this machine.
+- All four interchange tools (`run_cap2xml/dml2con/con2xml/apd2con`) — on this machine they surface a FlexNet product-chooser at launch on this PREMIUM/no-license-required install (not a missing license); the GUI tool handler in `core.gui_tool_runner` is what drives them; see `sigrity-cad` Task 3 for the confirmed working SPECCTRA import as the primary interchange path.
 - `run_t2b_conversion` — needs an external HSpice (not installed).
 - `run_allegro_zrouter` — refuses (GUI-only, Qt, no headless path).
 - `run_touchstone_deembed` (abcd) — segfaults on 4-port MA/dB files, silently no-ops on everything else; verify output exists.

@@ -15,6 +15,10 @@ Sample board (routed, ground truth = 81 components, 2 DRC errors / 1 short, DRC 
 `C:\Cadence\SPB_22.1\tools\capture\samples\PCB-Layout\Fault-Detector\allegro\fault-detector_allegro_routed.brd`
 Copy read-only sources into `runs\<task>\fd.brd` before running (`copy_file`), never edit a shipped sample.
 
+## PRE-REQUISITE FOR PLACE / ROUTE / DRC-ON-DE-FACTO-COPPER: the parts must be imported
+
+Placement (`placement.exe`), SPECCTRA/zrouter autoroute, and full-copper DRC/length-measure ALL require REAL component footprints to be present. A board that has only NETS (`allegro_create_net`, 0 pins) has nothing to place or route — any 'pending copper' item is blocked on **component import**, NOT on a missing tool or license. Run the generic **Part resolution** gate first (parent `sigrity` skill, "END-TO-END EDA WORKFLOWS"): derive the required parts from THIS design's netlist/BOM, check the part-library roots, and **STOP to ask for the exact missing refdes** (in `.pdra`/`.d` + `.olb`, or IPC-2581/STEP via `ipc2581_in`/`dxf2a`) before placing/routing. Standard R/C/L/via/connector-shell primitives ship by default; application parts do not. Until the gate passes, report each place/route/DRC item as **pending component import** for the specific missing parts.
+
 ## Task 1 — EASY: `run_allegro_report` → poll → read report
 
 ```

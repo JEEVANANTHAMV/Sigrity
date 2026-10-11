@@ -10,6 +10,8 @@ Domain: the three Power Integrity products. Parent rules in `sigrity/SKILL.md` s
 ≠ work happened (always check the **staged input dir**, never `job_dir` alone); stage with
 `copy_file(source_file=..., destination_file=..., overwrite=true)` first.
 
+PowerDC IR-drop / XcitePI / OptimizePI all run on a translated `.spd` of a board that has REAL placed-and-routed copper for the nets under study — not on a nets-only board. The components that make copper possible are vendor-supplied and NOT shipped in this install. Run the parent `sigrity` skill's **Part resolution** gate (derive the parts from THIS design's netlist/BOM, check the libs, ask for the exact missing refdes); until they are imported and the board is placed/routed, a real-board PI run is **pending component import**, not pending license. (PowerDC additionally needs PowerDC Net Classes attached — see the pdcVRM caveat in `sigrity-cad` Task 7.)
+
 All three tasks below were run LIVE against the real `SIGRITY_LICENSE_MANAGER_HOME`
 license, driving the MCP tools through the in-proc client (`runs/mcp_client.py`, fastmcp 4.0.4,
 `Client(sigrity_mcp.server.mcp)`) — the same `tools/call` path the suite's `run_tool_pipeline` uses,
