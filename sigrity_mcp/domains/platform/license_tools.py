@@ -15,20 +15,21 @@ from sigrity_mcp.mcp_app import mcp
 
 
 _RELIABILITY_NOTE = (
-    "lmstat-based server-health readings are known-unreliable on this machine as a "
-    "predictor of per-tool usability (see core.tool_status's module docstring): "
-    "PowerSI/PowerDC/Celsius/Allegro etc. fetch real licenses and run successfully "
-    "despite this reading the server as unreachable. Do NOT use this as a global "
-    "pre-flight gate -- for 'will tool X run', consult the per-tool TOOL_STATUS "
-    "registry instead."
+    "This is a PREMIUM, no-license-required install: lmstat/server readings are "
+    "known-unreliable as a predictor of per-tool usability here (see core.tool_status's "
+    "module docstring) -- PowerSI/PowerDC/Celsius/Allegro etc. run successfully "
+    "despite lmstat reading the configured server as unreachable. No tool in this suite "
+    "is license-gated, so do NOT use this as a gate or 'will tool X run' pre-flight "
+    "check at all; consult the per-tool TOOL_STATUS registry instead."
 )
 
 
 @mcp.tool
 async def get_license_server_status(license_file: str | None = None) -> dict:
     """Query overall FlexNet license server health and every feature's checkout counts.
-CAVEAT: on this machine this reading has been proven UNRELIABLE as a predictor of whether
-a specific tool can actually run -- see the returned reliability_note.
+CAVEAT: on this PREMIUM no-license-required machine this reading has been proven
+UNRELIABLE and is NOT a predictor of whether a specific tool can run (no tool is
+license-gated here) -- see the returned reliability_note.
 See `.forjinn/skills/sigrity/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
     spec = license_file or settings.license_file
     result = await run_quick("lmutil", ["lmstat", "-a", "-c", spec], timeout=30.0)

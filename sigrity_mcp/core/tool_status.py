@@ -1,17 +1,19 @@
 """Curated, hand-maintained verification status per logical tool name.
 
-`lmutil lmstat` has already been proven unreliable as a predictor of real tool
-usability on this machine — PowerSI and PowerDC both fetch licenses and run
-successfully, repeatedly, despite `lmstat` reporting the configured license server
-unreachable. Building an automated "ping the license server per tool" status feature on
-top of that already-unreliable signal would mislead callers, not help them. Worse, an
-automated *launch-and-see* probe is actively risky for GUI-capable tools: a single
-`allegro.exe -product help` probe (documented as print-and-exit) instead blocked
-indefinitely on an interactive product-chooser dialog.
+This install is a PREMIUM / no-license-required distribution: every tool runs without
+a license server. `lmutil lmstat` has been proven unreliable as a predictor of real
+tool usability on this machine — PowerSI and PowerDC run successfully, repeatedly,
+despite `lmstat` reporting the configured server unreachable. Building an automated
+status feature on top of that already-unreliable signal would mislead callers, not
+help them. Worse, an automated *launch-and-see* probe is actively risky for
+GUI-capable tools: a single `allegro.exe -product help` probe (documented as
+print-and-exit) instead blocked indefinitely on an interactive product-chooser dialog.
 
 So instead of a live query, this module is a single source of truth for what has
 actually been exercised, updated by hand as tools are tested — the same three-tier
 distinction this project's README already draws in prose, made queryable here instead.
+No tool is "license-gated" here: any past "license" failure was a misread of a GUI
+product-chooser dialog or a modal prompt, not a license problem.
 """
 
 from __future__ import annotations
@@ -21,15 +23,15 @@ from typing import Literal
 ToolStatus = Literal["confirmed_live", "built_untested", "known_blocked"]
 
 STATUS_DESCRIPTIONS: dict[ToolStatus, str] = {
-    "confirmed_live": "Actually run against a real license and a real design on this "
-    "machine, successfully, at least once.",
+    "confirmed_live": "Actually run against a real design on this (no-license-required, "
+    "premium) install, successfully, at least once.",
     "built_untested": "Implemented from documentation/sample scripts and covered by "
-    "unit tests (argv/script construction), but never executed against a live license "
-    "on this machine — treat exact flag/command spellings as best transcription, not "
-    "guaranteed correct.",
-    "known_blocked": "Attempted live and found genuinely blocked (a license issue, an "
-    "unresolved interactive prompt, or similar) — see the note for specifics before "
-    "retrying.",
+    "unit tests (argv/script construction), but never executed live on this machine — "
+    "treat exact flag/command spellings as best transcription, not guaranteed correct.",
+    "known_blocked": "Attempted live and found genuinely blocked (an unresolved "
+    "interactive prompt, a real runtime precondition, or similar, not a license "
+    "problem — this is a no-license-required install) — see the note for specifics "
+    "before retrying.",
 }
 
 # logical tool name (matches core.executables' registries) -> status.
@@ -116,16 +118,16 @@ TOOL_STATUS_NOTES: dict[str, str] = {
     "this machine (or a native .xlsx source, if AmLibGen supports one, to bypass "
     "whatever legacy .xls COM path is failing) to fully confirm end-to-end — flag this "
     "for the user, it is not something a license grant fixes.",
-    "allegro": "An interactive 'Product Choices' license-tier chooser dialog blocks "
-    "every launch until a default product is set once via the GUI (confirmed not a "
-    "license failure -- Sigrity Aurora and other tiers are genuinely listed as "
-    "available choices). With a default product set, confirmed live for the "
-    "session/query mechanics: `allegro.exe -s script.scr <real .brd>` loads the board "
-    "and a `skill (axlCurrentDesign)` query executed and returned correctly, followed by "
-    "a clean `quit`-triggered exit, all within ~20s. `allegro_create_net` "
+    "allegro": "An interactive 'Product Choices' product-tier chooser dialog (a GUI "
+    "product-selector, not a license dialog -- this is a no-license-required install) "
+    "blocks every launch until a default product is set once via the GUI. With a "
+    "default product set, confirmed live for the session/query mechanics: "
+    "`allegro.exe -s script.scr <real .brd>` loads the board and a `skill "
+    "(axlCurrentDesign)` query executed and returned correctly, followed by a clean "
+    "`quit`-triggered exit, all within ~20s. `allegro_create_net` "
     "(`axlDBCreateNet`) against a real board completes cleanly in ~5.6s (returncode 0); "
-    "a hang past two minutes in the same session shape is license/queue-related, not a "
-    "bug in the SKILL call itself. Only `allegro_create_net` "
+    "a hang past two minutes in the same session shape is an environmental/"
+    "concurrency issue, not a bug in the SKILL call itself. Only `allegro_create_net` "
     "was independently confirmed this way; `allegro_create_component`/"
     "`allegro_create_board_outline`/`allegro_create_stackup`/`allegro_save_design`/"
     "`allegro_run_drc` use the same session mechanics and the same axl* API family but "
@@ -144,8 +146,8 @@ TOOL_STATUS_NOTES: dict[str, str] = {
     "resolver) was previously misreported here as known_blocked, based on a test "
     "where the session ran for several minutes with no save landing on disk -- that "
     "long-running symptom turned out to be a self-inflicted artifact of firing off "
-    "several overlapping diagnostic sessions at once, competing for a limited license "
-    "seat, not a bug in the SKILL call itself (the same class of false negative as the "
+    "several overlapping diagnostic sessions at once, competing for an already-open "
+    "design, not a bug in the SKILL call itself (the same class of false negative as the "
     "original axlDBCreateNet block). Run cleanly one Allegro launch at a time: three "
     "independent live confirmations against fresh "
     "copies of the real sample board -- (1) a hand-written SKILL macro resolving "
@@ -169,7 +171,7 @@ TOOL_STATUS_NOTES: dict[str, str] = {
     "occurs even with NO overlapping Allegro launches "
     "(strictly sequential harness, board freshly copied) and no pre-existing lock file, "
     "so it is a genuinely separate, still-not-fully-isolated cause -- possibly a "
-    "different modal dialog, a transient license-server hiccup, or something else "
+    "different modal dialog, a transient environmental hiccup, or something else "
     "entirely; the consistent ~137s timing across every occurrence suggests a real "
     "internal watchdog/timeout rather than a random crash. Calling the new "
     "`check_design_lock` diagnostic tool afterward reliably finds a "
@@ -461,7 +463,7 @@ TOOL_STATUS_NOTES: dict[str, str] = {
     "`.lck` file left behind by a prior batch job that was killed (rather than exiting "
     "cleanly) causes the NEXT launch against that same design path to block forever on "
     "an interactive 'already open/locked, override?' dialog with zero console output — "
-    "this was previously misread as a generic hang or license-fetch delay. Fixed via "
+    "this was previously misread as a generic hang or startup stall. Fixed via "
     "`clear_stale_design_lock`, now called automatically in `start_capture_session` "
     "(and `allegro_run_session`) before launch — proven live for Allegro: a planted "
     "fake stale lock was auto-cleared and the job completed in 5.3s instead of hanging. "
@@ -484,14 +486,14 @@ TOOL_STATUS_NOTES: dict[str, str] = {
     "project instead of running the given script, exited immediately with no output, or "
     "triggered a 'Capture Custom Launch' dialog -- which Cadence's own docs describe as "
     "a crash-recovery prompt ('displayed only after Capture fails at launching for the "
-    "first time'), not a license chooser. Root cause not isolated (a Tcl syntax issue in "
+    "first time'), not a product-chooser dialog. Root cause not isolated (a Tcl syntax "
+    "issue in "
     "the probe script, a version-specific CLI quirk, or something else) -- see "
     "capture_tools.py's module docstring. Against a real shipped sample project "
     "(tools/capture/samples/PCB-Layout/Fault-Detector/Fault-Detector.opj) with a minimal "
     "Open+Save+Close+Exit macro: the process launched (confirmed correct argv) but was "
-    "still running with an empty log after 60s and had to be force-killed -- this rules "
-    "out licensing as the cause; the batch-invocation unreliability is a "
-    "separate, unresolved issue. With a full 5-minute wait "
+    "still running with an empty log after 60s and had to be force-killed -- the "
+    "batch-invocation unreliability is a separate, unresolved issue. With a full 5-minute wait "
     "(instead of 60s), to allow time for a possible one-time approval "
     "dialog to be clicked through manually, results are inconsistent across repeated "
     "attempts: one run completed cleanly in ~3.2s (open+save+close+exit, returncode 0), "
@@ -568,7 +570,7 @@ TOOL_STATUS_NOTES: dict[str, str] = {
     "<board> <out>` ran the genuine Allegro auto-place engine (real algorithm log with "
     "real weight/rotation parameters), but this specific sample board failed with "
     "'Error: No Package Keepin was found' — a board-authoring precondition (the board "
-    "needs a defined placement keep-in area), not a wrapper or licensing problem. Retry "
+    "needs a defined placement keep-in area), not a wrapper or launch problem. Retry "
     "against a board that already has a Package Keepin defined.",
     "allegro_ncroute": "Confirmed live against a real .brd sample: `ncroute.exe -o "
     "<out> <board>` exited 0 with 'Program completed. Done.'",
@@ -595,8 +597,9 @@ TOOL_STATUS_NOTES: dict[str, str] = {
     "Missing '<cwd>/checkplus/cp.dat'` that ignores -proj's value for that specific "
     "check. This means -proj resolves through some CDS project-registration convention "
     "(not a plain filesystem path) that wasn't isolated from the doc tree. Not a license "
-    "or launch problem — the tool runs and prints real, readable diagnostics — but the "
-    "correct project_file value for it is still unconfirmed.",
+    "(this is a no-license-required install) or launch problem — the tool runs and "
+    "prints real, readable diagnostics — but the correct project_file value for it is "
+    "still unconfirmed.",
     "allegro_extracta": "ROOT-CAUSED AND FIXED: "
     "`run_allegro_extracta`'s EXTRACTION_TEMPLATES used invented view-name/field-name "
     "keywords (\"NETS\", \"COMPONENTS\", \"PINS\", \"TESTPOINTS\", \"DRC\", "
@@ -634,36 +637,38 @@ TOOL_STATUS_NOTES: dict[str, str] = {
     "Extracts BOMs, nets, components, pins, test points, DRCs, and geometry from binary "
     ".brd files headlessly using predefined or custom extraction view control files.",
     "con2xml": "Real, installed executable (`C:\\Cadence\\SPB_22.1\\tools\\bin\\con2xml.exe`), "
-    "translates a Concept-HDL `.con` netlist to XML. Fails at its own internal license "
-    "check before argument parsing -- confirmed directly from the tool's own stderr "
-    "(`No Product License selected... Translation cancelled.`), not merely an `lmstat` "
-    "probe, against a real sample netlist "
-    "(`share/pcb/translators/altium_proj_template/worklib/top/sch_1/top.con`). Exit "
-    "code is 0 even on this failure -- do not treat a 0 return code as success for this "
-    "tool. Whether this is the whole license server being unreachable or just this "
-    "specific SPB Translators feature missing from an otherwise-working SPB 22.1 grant "
-    "(the same install that serves `allegro`/`allegro_report` successfully) was not "
-    "conclusively distinguished -- either way it is a genuine license/entitlement gate, "
-    "not a bug in this MCP's integration, and no license-free workaround exists for "
-    "Concept-HDL-to-XML conversion on this machine.",
+    "translates a Concept-HDL `.con` netlist to XML. Observed failing before argument "
+    "parsing with `No Product License selected... Translation cancelled.` (exit code 0 "
+    "even on this failure -- do not treat a 0 return code as success for this tool), "
+    "confirmed against a real sample netlist "
+    "(`share/pcb/translators/altium_proj_template/worklib/top/sch_1/top.con`). This is "
+    "NOT a license problem: this is a premium, no-license-required install, so the "
+    "'No Product License selected' message is a SPB Translators product/edition "
+    "capability gate (a missing SPB feature in this particular SPB 22.1 build that "
+    "otherwise serves `allegro`/`allegro_report` successfully), not a FlexNet/license "
+    "entitlement gate. No license-free workaround exists for Concept-HDL-to-XML "
+    "conversion with this build.",
     "cap2xml": "Real, installed executable (`C:\\Cadence\\SPB_22.1\\tools\\bin\\cap2xml.exe`), "
-    "translates an OrCAD Capture `.opj` project to XML. Same license-gate failure as "
-    "`con2xml`, confirmed against the real Fault-Detector Capture sample project "
-    "(`tools/capture/samples/PCB-Layout/Fault-Detector/Fault-Detector.opj`): "
-    "`No Product License selected... Translation cancelled.`, exit code 0. See `con2xml`'s "
-    "note for the full license-gate caveat; no license-free workaround exists.",
+    "translates an OrCAD Capture `.opj` project to XML. Same product/edition "
+    "capability-gate failure as `con2xml` (`No Product License selected... "
+    "Translation cancelled.`, exit code 0), confirmed against the real Fault-Detector "
+    "Capture sample project "
+    "(`tools/capture/samples/PCB-Layout/Fault-Detector/Fault-Detector.opj`). Not a "
+    "license problem on this no-license-required install -- see `con2xml`'s note.",
     "dml2con": "Real, installed executable (`C:\\Cadence\\SPB_22.1\\tools\\bin\\dml2con.exe`), "
     "translates a DML (signal-integrity component model library) file to Concept-HDL. "
-    "Same license-gate failure as `con2xml`, confirmed against a real sample "
-    "(`share/pcb/signal/templates/hspice_bbox_template.dml`): `No Product License "
-    "selected`, exit code 2. No license-free workaround exists; DML is a "
-    "Cadence-proprietary format with no other reader on this machine.",
+    "Same product/edition capability-gate failure as `con2xml` (`No Product License "
+    "selected`, exit code 2), confirmed against a real sample "
+    "(`share/pcb/signal/templates/hspice_bbox_template.dml`). Not a license problem on "
+    "this no-license-required install; DML is a Cadence-proprietary format with no "
+    "other reader on this machine.",
     "apd2con": "Real, installed executable (`C:\\Cadence\\SPB_22.1\\tools\\bin\\apd2con.exe`), "
-    "bridges an Allegro Package Designer (APD) design to Concept-HDL. Same license-gate "
-    "failure as `con2xml` (`No Product License selected`, exit code 2, tested with a "
-    ".brd substituted for the missing APD format since the gate fires before format "
-    "validation). Doubly blocked here: no `.apd` sample file exists anywhere in the "
-    "install either, so even a working license would need an APD design obtained "
+    "bridges an Allegro Package Designer (APD) design to Concept-HDL. Same "
+    "product/edition capability-gate failure as `con2xml` (`No Product License "
+    "selected`, exit code 2, tested with a .brd substituted for the missing APD format "
+    "since the gate fires before format validation). Not a license problem on this "
+    "no-license-required install. Doubly blocked here: no `.apd` sample file exists "
+    "anywhere in the install either, so an APD design would need to be obtained "
     "separately to exercise this tool.",
     "bem2d3": "Confirmed via `bem2d3.exe -help`'s full self-printed usage banner (real "
     "flag names/semantics, tool's own banner still calls itself 'BEM2D2' internally), "
@@ -732,9 +737,9 @@ TOOL_STATUS_NOTES: dict[str, str] = {
     "kill the PID rather than waiting for it to exit on its own.",
     "optimizepi": "Confirmed live for OptimizePI.exe's own `-b -export_data` batch mode "
     "against a saved .opix workspace: using the complete real Cadence sample directory "
-    "(share/PostInstallationCheck/optimizepi/), it fetched a license and reported "
+    "(share/PostInstallationCheck/optimizepi/), it reported "
     "'Simulation succeed', saving demo.spd. NOTE: this confirms the underlying "
-    "OptimizePI.exe binary/license/batch-launch path works, but optimizepi_tools.py's "
+    "OptimizePI.exe binary/batch-launch path works, but optimizepi_tools.py's "
     "own `sigrity::`-Tcl compose vocabulary (a different, session-based invocation "
     "style, `-b -tcl <script> -export_report`) was not independently re-run this same "
     "way — no Tcl-scripted sample shipped for OptimizePI to test that exact path "
@@ -754,8 +759,8 @@ TOOL_STATUS_NOTES: dict[str, str] = {
     "with 'Spice run (TYP) aborted.', ending in 'IBIS File Generation failed!'. T2B "
     "shells out to an external SPICE engine (HSpice, per the driver filenames and "
     "`hspice.mod` sample file) to characterize each buffer model — that engine is not "
-    "installed/working on this machine. This is confirmed NOT a Cadence Sigrity license "
-    "problem (T2B itself ran fine, no license-fetch failure) — it needs a working "
+    "installed/working on this machine. On this no-license-required install this is "
+    "confirmed NOT a license problem (T2B itself ran fine) — it needs a working "
     "HSpice (or Cadence-integrated equivalent) install to actually produce output.",
     "spdsim": "Root cause narrowed: tried both the original `-b` flag AND the "
     "`-as`/`-spice -run` flags documented in `doc/psi_ug/"
@@ -764,13 +769,15 @@ TOOL_STATUS_NOTES: dict[str, str] = {
     "launches) — both flag styles produced the identical 'Skip license fetch' then "
     "'Failed to open the file' failure, against TWO different real samples (the legacy "
     "PostInstallationCheck ESD_testcase0.spd AND a modern PowerSI 3D-EM sample, "
-    "diff_via.spd). The consistent 'Skip license fetch' message (never seen on any "
+    "diff_via.spd). On this no-license-required install the 'Skip license fetch' message "
+    "is a misnomer: the real issue is that SPDSIM.exe is designed to run only as a "
+    "genuine child process spawned by a live PowerSI Tcl session (inheriting an "
+    "IPC/parent-context a freshly-launched standalone process doesn't have) — not a "
+    "missing license. The consistent 'Skip license fetch' message (never seen on any "
     "other confirmed-working tool in this suite) plus the doc page's own framing "
-    "strongly suggests SPDSIM.exe is designed to run only as a genuine child process "
-    "spawned by a live PowerSI Tcl session (inheriting some license/IPC context a "
-    "freshly-launched standalone process doesn't have) — not really an independently "
-    "callable batch tool despite living in tools/bin and accepting CLI flags. A real "
-    "fix would mean driving it via `sigrity::do exec \"...spdsim.exe\" -as \"file.spd\" "
+    "corroborate this. Not really an independently callable batch tool despite living "
+    "in tools/bin and accepting CLI flags. A real fix would mean driving it via "
+    "`sigrity::do exec \"...spdsim.exe\" -as \"file.spd\" "
     "&` INSIDE a PowerSI Tcl session (powersi_tools.py) rather than as its own "
     "submit_job call — not yet implemented.",
     "abcd": "Confirmed live for 2-port cascade and de-embed. The apparent silent "

@@ -31,8 +31,10 @@ CONFIRMED BEHAVIOUR ON THIS MACHINE (Sigrity 2024.0):
     button in the process's window tree to click, so `auto_dismiss_dialogs`
     correctly polls to its timeout and returns without dismissing anything.  It is
     the RIGHT general-purpose scaffolding for a tool that DOES pop a real dialog
-    (the "Product Choices" dialog that initially blocked allegro.exe/Capture.exe,
-    per the module docstring in allegro_project_tools.py), but it is NOT what is
+    (the "Product Choices" product/welcome dialog that initially blocked
+    allegro.exe/Capture.exe -- a GUI product-chooser, not a license dialog on this
+    no-license-required install; per the module docstring in allegro_project_tools.py),
+    but it is NOT what is
     needed to unblock the Celsius3D re-run specifically — the confirmed workaround
     for Celsius3D (see celsius3d_tools.py) remains: copy the project to a fresh
     location before re-running.

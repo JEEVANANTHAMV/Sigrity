@@ -9,7 +9,8 @@ Confirmed batch syntax:
 
 IMPORTANT, confirmed live on this machine (Sigrity 2024.0): T2B has no SPICE engine of
 its own — it shells out to an EXTERNAL SPICE simulator and fails (silently, or with a
-license/timeout stall in our run) unless one is installed and findable.
+timeout stall in our run) unless one is installed and findable. On this no-license-
+required install the blocker is the missing SPICE engine, not a license.
 
   * The engine is chosen per `[Spice type]` in the `.t2b` control file: `HSPICE` (the
     samples under share/SpeedXP/Samples/T2B/Example1/*.t2b) or `Spectre` (the
@@ -32,7 +33,8 @@ license/timeout stall in our run) unless one is installed and findable.
   * Practical consequence on this machine: `run_t2b_conversion` on an HSPICE-type `.t2b`
     (the bundled Example1/buffer.t2b) will not produce an IBIS model because there is no
     HSPICE to run. A Spectrum-type `.t2b` (Example_Spectre/*) is the variant that could
-    work here IF Spectre is installed and licensed — verify with `run_quick(tool=...,
+     work here IF Spectre is installed (this is a no-license-required install; the
+     blocker is the engine's presence, not a license) — verify with `run_quick(tool=...,
     ["-help"])`-style probing, but even Spectre is not clearly installed. The module
     should be extended (or callers should be told) that HSPICE-backed T2B is
     effectively unsupported in this environment.

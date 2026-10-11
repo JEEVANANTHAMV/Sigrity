@@ -4,8 +4,8 @@ thermal power-integrity analysis.
 NOTE: PowerDC's own user guide never documents a raw `-tcl <script.tcl>` batch switch
 the way PowerSI's does. `powerdc_run_session` (below) uses it anyway (`-b -tcl <script>
 [spd]`), following the same shared-launcher-family convention as PowerSI/OptimizePI/
-XcitePI — and this has now been CONFIRMED empirically against a real license and a real
-sample design on this machine (see powerdc_run_session's docstring). What's still
+XcitePI — and this has now been CONFIRMED empirically against a real
+sample design on this no-license-required machine (see powerdc_run_session's docstring). What's still
 genuinely unconfirmed is the exact spelling of every individual `sigrity::` flag —
 e.g. PowerDC rejected `-eTcoSimulation` outright when tested (see
 powerdc_set_simulation_mode's docstring). The `sigrity::` Tcl vocabulary itself

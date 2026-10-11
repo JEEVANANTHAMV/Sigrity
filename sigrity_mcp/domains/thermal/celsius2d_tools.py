@@ -10,7 +10,7 @@ CLI (Domain 1) — transcribed from Cadence's own installer self-test script
 this way with no separate `.tcl` macro involved (unlike Celsius3D/CelsiusCFD).
 
 A second sample (`chip.pdcx`) failed with a domain-content error ("The CFD File
-Specified in the Use Defined CFD File is invalid") rather than a launch/license/syntax
+Specified in the Use Defined CFD File is invalid") rather than a launch or syntax
 failure — confirming the CLI invocation itself is solid and errors surface as real,
 readable diagnostics in the job log, not silent failure.
 """

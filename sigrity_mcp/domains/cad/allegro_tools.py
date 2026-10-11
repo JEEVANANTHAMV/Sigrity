@@ -8,10 +8,11 @@ board loaded, a real SKILL query (`axlCurrentDesign`) executed and its result wr
 a file, then a clean process exit, all within ~20 seconds.
 
 UPDATE: the mutation call (`axlDBCreateNet`, via `allegro_create_net`) was re-tested
-after the user resolved a machine-wide licensing issue, and now completes cleanly in
-~5.6 seconds against a real board (returncode 0) — the earlier ">2 minutes, never
-finished" result really was a license/queue-related block, not a bug in the SKILL call
-or session mechanics. Only `allegro_create_net` was independently re-confirmed this way;
+after the user set a default product in Allegro's one-time "Product Choices" dialog,
+and now completes cleanly in ~5.6 seconds against a real board (returncode 0) — the
+earlier ">2 minutes, never finished" result really was that product-chooser dialog
+blocking the launch (or overlapping diagnostic sessions competing for the design),
+not a license problem and not a bug in the SKILL call or session mechanics. Only `allegro_create_net` was independently re-confirmed this way;
 `allegro_create_component`/`allegro_create_board_outline`/`allegro_create_stackup`/
 `allegro_save_design`/`allegro_run_drc` share the same session mechanics and `axl*` API
 family but were not each individually re-run — likely also fixed, but still flagged

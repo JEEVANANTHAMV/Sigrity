@@ -16,8 +16,9 @@ but fully self-documenting via their own `-help` output (confirmed live on this 
 
   (1) `-filepath`'s value MUST end in a trailing path separator. Without one, abcd
       parses the command line and silently does nothing -- no output file, no error,
-      rc 0, log shows only "Program started.". This looks identical to a license or
-      input-file problem from the outside; it is neither. `run_touchstone_deembed`
+       rc 0, log shows only "Program started.". This looks identical to a missing-
+       filepath or input-file problem from the outside; it is a silent argument-parsing
+       no-op. `run_touchstone_deembed`
       below normalizes this automatically so no caller needs to remember it.
   (2) abcd exits 0 even on the silent no-op above, so rc 0 is never proof the
       de-embedding actually ran -- always verify with list_job_files/

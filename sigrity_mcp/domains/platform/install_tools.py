@@ -2,7 +2,7 @@
 
 These are read-only and fast: no Sigrity process is launched. Use them before running
 anything else to confirm which tools are actually present on this machine and what was
-licensed/installed, instead of discovering it from a job failure later.
+installed, instead of discovering it from a job failure later.
 """
 
 from __future__ import annotations

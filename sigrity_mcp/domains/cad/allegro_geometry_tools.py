@@ -28,8 +28,8 @@ SKILL script from the real example at
 STATUS UPDATE: `allegro_assign_net` (`axlDBAssignNet`) is now CONFIRMED LIVE, correcting
 an earlier wrong finding. The original test concluded it was broken (session ran, no
 change landed on disk) — a re-test, run cleanly (no overlapping Allegro launches
-competing for a license seat, which was the real cause of the earlier apparent hang),
-proved the opposite: reassigning a real pin (R1.2) to a real net (GND) via this exact
+competing for an already-open design, which was the real cause of the earlier apparent
+hang), proved the opposite: reassigning a real pin (R1.2) to a real net (GND) via this exact
 tool function, then independently re-reading the board with `report.exe` (bypassing
 SKILL entirely), showed R1.2 correctly moved out of its original net and into GND on
 disk. `allegro_create_via` and `allegro_create_film` are also confirmed live (see

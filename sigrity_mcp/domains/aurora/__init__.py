@@ -5,7 +5,7 @@ C:\\Cadence\\SPB_22.1 — a separate, sibling Cadence product line from the Sigr
 that an earlier pass of this research missed. This does NOT change the conclusion below,
 but it does replace the evidence for it. Direct research against the real Allegro/OrCAD
 doc set (`doc/sigrity_aurora`, `doc/algroroute/chap13.html`) confirmed Aurora is a real,
-license-gated MODE inside `allegro.exe` itself (selected at its GUI product-chooser
+GUI-only MODE inside `allegro.exe` itself (selected at its GUI product-chooser
 dialog, then driven entirely through `Analyze -> Workflow Manager`), performing six
 checks — impedance, coupling, crosstalk, return path, reflection, IR drop — each writing
 its own proprietary result-file extension (`.impida`, `.cplida`, `.xtalkida`, `.rpida`,
@@ -22,8 +22,9 @@ aurora.exe` looks promising by name but is a same-name-different-product false l
 596 KB launcher for Allegro Design Workbench (a PDM/design-collaboration tool, config
 folder `tools/pcbdw/configs/aurora/`), not the SI/PI analysis feature at all.
 `allegrosigritypi.exe`/`allegrosigritysi.exe` are also confirmed to be plain GUI
-product-launchers into Allegro (pre-selecting a Sigrity PI/SI license tier before the
-editor opens), not independently batch-scriptable — no `-b`/`-tcl`-style flags exist for
+product-launchers into Allegro (pre-selecting a Sigrity PI/SI product tier before the
+editor opens -- a product selection, not a license step on this no-license-required
+install), not independently batch-scriptable — no `-b`/`-tcl`-style flags exist for
 either anywhere in the docs.
 
 Bottom line unchanged: building tools that claim to launch, configure, or query live

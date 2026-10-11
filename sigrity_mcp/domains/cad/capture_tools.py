@@ -8,7 +8,7 @@ opening Capture's own default/tutorial project instead of running the given scri
 sometimes exiting immediately with no output, and at least once triggering a "Capture
 Custom Launch" recovery dialog (which Cadence's docs say "is displayed only after
 Capture fails at launching for the first time" — i.e. a crash-recovery prompt, not a
-license chooser). The exact cause (a Tcl syntax issue in the probe scripts used, a
+product-chooser dialog). The exact cause (a Tcl syntax issue in the probe scripts used, a
 version-specific CLI quirk, or something else) was not isolated.
 
 So unlike allegro_tools.py (where the session/run mechanics are confirmed, only

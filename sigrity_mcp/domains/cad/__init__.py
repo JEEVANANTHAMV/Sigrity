@@ -10,8 +10,9 @@ Status, verified live (not just from documentation):
 - `allegro_batch_tools.py` (report/dbdoctor via their standalone exes) — fully
   confirmed, headless, no GUI dialog involved at all.
 - `allegro_tools.py` (SKILL-scripted PCB layout) — the initial "Product Choices"
-  license-tier dialog blocker is resolved (the user set a default product
-  interactively); the session/query mechanics are now confirmed live (a real board
+  product-chooser dialog blocker is resolved (the user set a default product
+  interactively -- a one-time GUI product selection, not a license issue on this
+  no-license-required install); the session/query mechanics are now confirmed live (a real board
   loads, a real SKILL query executes and returns, the process exits cleanly). Database
   *mutation* calls (create net/component/etc.) are implemented from documentation but
   did not complete within two minutes in live testing — treat those specific compose
@@ -43,9 +44,10 @@ against real `-help`/doc text, never fabricate a flag" discipline as
 - `allegro_extraction_tools.py` — Allegro's own design/connectivity data extractor
   (`designextractor.exe`, distinct from Sigrity's EM extraction in Domain 3).
 - `interchange_tools.py` — schematic/netlist interchange translators (`con2xml`,
-  `cap2xml`, `dml2con`, `apd2con`) confirmed real but license-blocked on this machine
-  (fails with "No Product License selected" before printing usage) — see
-  `core.tool_status` and the module's own docstring.
+  `cap2xml`, `dml2con`, `apd2con`) confirmed real but blocked on this machine by a
+  SPB Translators product/edition capability gate (fails with "No Product License
+  selected" before printing usage) — NOT a license problem on this no-license-required
+  install — see `core.tool_status` and the module's own docstring.
 
 Confirmed GUI-only or with no documented/discoverable batch surface anywhere in the
 shipped doc tree (deliberately NOT wrapped, to avoid fabricating a capability that
@@ -53,7 +55,8 @@ doesn't exist): `apr.exe`/`placeroute.exe` themselves (interactive autorouting U
 see `spif_specctra_tools.py` below for the real headless alternative), `padstack_editor.exe`,
 `symboleditor.exe`/`symbolcreator.exe` (library authoring GUIs — see
 `allegro_geometry_tools.py` for the real SKILL-scriptable alternative), `dfa_dlg.exe`,
-`pdnsim.exe`, `apd.exe` (the GUI half of the license-blocked Package Designer bridge),
+`pdnsim.exe`, `apd.exe` (the GUI half of the Package Designer bridge; `apd2con`'s
+headless variant is blocked on this build),
 `orcad.exe`/`orcadx.exe` (redundant GUI entry points into Capture).
 
 **Three corrections from a follow-up research pass** — each of these was previously

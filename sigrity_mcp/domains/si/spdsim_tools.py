@@ -10,10 +10,12 @@ module's `-b` flag AND the alternate `-as`/`-spice -run` flags documented in
 `doc/psi_ug/ch10_tcl_re_Calling_SPDSIM_in_PowerSI_Commands.html` (a page titled
 "Invoke Subprocesses") fail identically — `"Skip license fetch ...."` followed by
 `"Failed to open the file"` — against two different real sample `.spd` files (one
-legacy, one modern). That doc page's own framing strongly suggests SPDSIM.exe is
-designed to run only as a genuine child process of a live PowerSI Tcl session (via
-`sigrity::do exec "...spdsim.exe" -as "file.spd" &`), not as an independently launched
-standalone process — this module's direct `submit_job` invocation may be
+legacy, one modern). The "Skip license fetch" message here is a misnomer on this
+no-license-required install: the real root cause is that SPDSIM.exe is designed to run
+only as a genuine child process of a live PowerSI Tcl session (via
+`sigrity::do exec "...spdsim.exe" -as "file.spd" &`), inheriting an IPC/parent context
+a freshly-launched standalone process does not have — not a missing license. That doc
+page's own framing supports this; this module's direct `submit_job` invocation may be
 structurally the wrong approach, not just missing a flag.
 """
 

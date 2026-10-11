@@ -2,7 +2,8 @@
 
 See the package docstring in `sigrity_mcp/domains/aurora/__init__.py` for the original
 research finding this domain is built on: Allegro/OrCAD (SPB 22.1) IS installed on this
-machine, and Aurora itself is a real, license-gated GUI-only mode inside it.
+machine, and Aurora itself is a real, GUI-only mode inside it (product-chooser driven;
+no license gating on this no-license-required install).
 
 UPDATED FINDING (supersedes the "zero automation surface" conclusion above): Aurora's
 six checks are driven through `allegro.exe`'s Workflow Manager form, and Allegro's own

@@ -25,8 +25,8 @@ family `designextractor.exe` expects `.cpm`/`.sdax` for), not a simple filesyste
 This exact resolution convention was not isolated from the doc tree (`doc/checkplus/`
 describes the check rules themselves, not this path convention in enough
 implementation-level detail). Treat `run_allegro_checkplus` as `built_untested`: the CLI
-launches correctly and is license-fetching (no dialog, no crash), but a correct
-`project_file` value for it has not been confirmed on this machine.
+launches correctly (no dialog, no crash) on this no-license-required install, but a
+correct `project_file` value for it has not been confirmed on this machine.
 """
 
 from __future__ import annotations

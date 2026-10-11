@@ -9,6 +9,7 @@ Sigrity tool started the job.
 
 from __future__ import annotations
 
+import json
 from typing import Literal
 
 from sigrity_mcp.core import results as result_parsers
@@ -31,11 +32,12 @@ def _record_to_dict(record) -> dict:
         "license_issue_suspected": record.license_issue_suspected,
         "license_issue_suspected_note": (
             "This only reports whether a license-related keyword string appears in the "
-            "last 1 MB of run.log -- on this install it is NOT a license health check: "
-            "confirmed False on both healthy artifact-producing runs (e.g. PowerSI "
-            "fetching a real license despite lmstat reporting the server unreachable) "
-            "and on empty-log runs alike. Judge tool health by the produced artifact, "
-            "never by this flag."
+            "last 1 MB of run.log -- on this PREMIUM, no-license-required install this "
+            "flag is essentially meaningless for tool health: no tool here fails for a "
+            "real license reason, so a 'yes' just means a license-looking word happened "
+            "to appear in the log (e.g. SPDSIM's 'Skip license fetch' misnomer, which "
+            "is actually an IPC/parent-process issue, not a license problem). Judge "
+            "tool health by the produced artifact, never by this flag."
         ),
         # Both booleans below default False and were previously set on JobRecord but
         # never surfaced past this function to any MCP tool caller -- a caller polling
@@ -47,7 +49,23 @@ def _record_to_dict(record) -> dict:
         "runaway_log_killed": record.runaway_log_killed,
         "stall_timeout_killed": getattr(record, "stall_timeout_killed", False),
         "failure_note": getattr(record, "failure_note", ""),
+        "gui_tool": getattr(record, "gui_tool", False),
     }
+    gui_tool_result = getattr(record, "gui_tool_result", "") or ""
+    if gui_tool_result:
+        try:
+            out["gui_tool_result"] = json.loads(gui_tool_result)
+        except ValueError:
+            out["gui_tool_result"] = {"raw": gui_tool_result}
+    if out["gui_tool"] and out["state"] in ("running", "needs_user_intervention"):
+        out["note"] = (
+            "This is a GUI tool on the PREMIUM no-license-required install: it opens "
+            "a window and its run.log is empty BY DESIGN, so license_issue_suspected "
+            "and log-silence watchdogs are meaningless for it. Judge it by "
+            "gui_tool_result (screenshots under screenshots/ in the job dir via "
+            "list_job_files) — needs_user_intervention means a human must click the "
+            "dialog on screen, NOT that a license is missing."
+        )
     if out["runaway_log_killed"]:
         out["note"] = (
             "JobManager force-killed this job because its log file exceeded "
@@ -58,11 +76,11 @@ def _record_to_dict(record) -> dict:
         out["note"] = (
             "JobManager force-killed this job because its log went completely silent "
             "(zero byte growth) for job_stall_timeout_seconds -- a likely hung/stuck "
-            "process (an undismissed dialog, a license wait, or a post-completion "
-            "idle-stall like Celsius3D's confirmed behavior), not necessarily a clean "
-            "failure. Check list_job_files/read_job_output_file before assuming no real "
-            "work happened -- a stalled job can still have written complete, genuine "
-            "results before going silent."
+            "process (an undismissed product-choice/welcome dialog, a stale .lck design "
+            "lock, or a post-completion idle-stall like Celsius3D's confirmed behavior), "
+            "not necessarily a clean failure. Check list_job_files/read_job_output_file "
+            "before assuming no real work happened -- a stalled job can still have "
+            "written complete, genuine results before going silent."
         )
     sig = crash_signature(record)
     if sig is not None:
