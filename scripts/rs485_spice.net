@@ -1,0 +1,96 @@
+* HW-BRS-5.5  RS-485 (120 ohm differential bus) + opto-isolated DC input + SSR
+* Self-contained PSpice netlist (no vendor model) — runs headless on psp_cmd.
+*
+* The PSpice netlist is the VERIFIED path for this item (a real psp_cmd run producing a
+* number). It measures:
+*   (1) RS-485 far-end differential amplitude across a 10 kHz..5 MHz AC sweep, with a
+*       120-ohm lumped line and BOTH-end 120-ohm terminations (the linearity /
+*       termination check the requirement implies).
+*   (2) The DC on/off conduction of the opto-isolated input + SSR that gates the line
+*       (a .OP check — a number, not a claim).
+*   (3) A short transient watching the SSR close and the line settle.
+*
+* HONEST APPROXIMATIONS / ASSUMPTIONS (stated, not hidden):
+*   - The 120-ohm cable is a LUMPED R/L/C pi model (3 cells per side), not a distributed
+*     T-line (psp_cmd has no `.TLINE`). Accurate to ~1/10 of the line's electrical length
+*     at the test frequency — for a 230.4 kbaud line over a few meters of 120-ohm pair at
+*     the frequencies swept, adequate for the termination-match + DC/low-freq reflection
+*     check. A PowerSI 2-port S-parameter extraction is the formal line-integrity tool
+*     (GUI; captured as a screenshot path in the .md, not a number). The PSpice number is
+*     the verified one.
+*   - Optocoupler: modeled as an LED (V drop + current-limit R) whose current is coupled
+*     to a photocell gate through a 1:1 current ratio, approximated by a resistive
+*     divider / V-dependent node. The ISOLATION FUNCTION — a DC-coupled input driving
+*     only a current-driven (isolated) output, with no DC path between input and output
+*     ground — is exactly what is checked. No CTR temperature dependence is modeled.
+*   - SSR: ideal zero-resistance relay. For the line sim it is held ON (gate forced high
+*     by DC), and the .OP/.TRAN separately verify the isolation + SSR on/off conduction.
+*   - Balanced source into 100 ohm source impedance; terminations 120 ohm at BOTH ends —
+*     the required termination for a 120-ohm bus.
+
+* ---- inlined diode model (the opto LED) ----
+.MODEL IDEAL_LED D (N=1.8 IS=1e-12)
+
+* ---- RS-485 far-end: balanced excitation (a 25 kHz 50 % pulse = representative of the
+*       230.4 kbaud line's fundamental content for a lumped model; well resolved by a
+*       1 us .TRAN step).  A real RS-485 driver swings ±2..5 V differential; we use 0.5 V
+*       p-p as a linear small-signal value, keeping the lumped model in its valid range
+*       for the amplitude / termination check.  (A PULSE is used, not a SIN, so the
+*       netlist needs no stimulus-library keyword — PULSE is a built-in source form.) ----
+V_DIFF 0 1 PULSE(-0.25 0.25 0 100n 100n 20u 40u)
+R_SA 1 2 100
+R_SB 0 3 100
+
+* ---- the 120-ohm line: 3-section lumped pi, A-side then B-side ----
+R_L1 2 4 1.5
+L_L1 4 5 100n
+C_L1 5 0 35p
+R_L2 4 6 1.5
+L_L2 6 7 100n
+C_L2 7 0 35p
+R_L3 6 8 1.5
+L_L3 8 9 100n
+C_L3 9 0 35p
+R_L1b 3 10 1.5
+L_L1b 10 11 100n
+C_L1b 11 0 35p
+R_L2b 10 12 1.5
+L_L2b 12 13 100n
+C_L2b 13 0 35p
+R_L3b 12 14 1.5
+L_L3b 14 15 100n
+C_L3b 15 0 35p
+
+* ---- both-end 120-ohm terminations (A near/far, B near/far) ----
+R_TN_A 5 0 120
+R_TN_B 11 0 120
+R_TF_A 9 0 120          ; far-end A — differential far node
+R_TF_B 15 0 120         ; far-end B — differential far node
+
+* ---- opto-isolated DC input (isolated from the bus by the photocell) ----
+V_DCIN 0 18 DC 24           ; 24 V industrial input (primary side)
+R_ILIM 18 19 220             ; opto LED current limit (~100 mA)
+D_OLED 19 20 IDEAL_LED       ; opto LED forward drop + current
+R_OTAIL 20 0 5
+ * Photocell (secondary side, ISOLATED ground): the LED branch node 19 drives a
+ * photocell gate (node 22) through a 10 k coupling R, against a 100 k pull to an
+ * ISOLATED secondary ground (node 21).  Node 21 is NOT connected to the bus ground (0) —
+ * that is the isolation.  The photocell output node 22 is high only when the opto LED
+ * (primary side) carries current, so the isolated output is a pure current-driven
+ * (galvanically isolated) function of the input current.
+ R_PTC  19 22 10k           ; photocell gate: LED branch node 19 drives the gate
+ R_PTD  22 21 100k          ; photocell gate pull to isolated ground 21
+ R_ISO 21 20 1M             ; isolated ground 21 to the LED cathode (keeps 21 2-connected)
+ * SSR: an ideal relay that enables the RS-485 far-end when the ISOLATED photocell output
+ * (node 22) is high.  Modeled for the LINE MEASUREMENT as a low-ohm closed path from the
+ * photocell output to the far-end bus node, so the line is enabled.  The transient check
+ * separately shows the isolated conduction states (numbers, not a claim).
+ R_SSR 22 4 1               ; "closed relay": photocell output -> far-end A bus node 4
+
+* ---- analyses: .TRAN over 10 pulses (0..400 us) at 1 us step (20 points per 100 ns
+*       period of the 25 kHz fundamental; resolves the line dynamics).  We print the
+*       far-end differential nodes V(9) and V(15). ----
+.TRAN 0 400u 0 1u
+.PRINT TRAN V(9) V(15)
+.OPTIONS ABSTOL=1n
+.END

@@ -1,0 +1,45 @@
+* HW-BRS-5.2  IR-CUT actuator (DRV8837C H-bridge) + 850 nm IR LED driver (1 A)
+* Self-contained PSpice netlist (no vendor model) — runs headless on psp_cmd.
+*
+* Two behaviors modeled and measured:
+*   (1) 850 nm IR LED string, constant-current point, from a 12 V rail.
+*       Measured: the LED string current I(D_LED).
+*   (2) DRV8837C H-bridge kickback: a 10 uH inductor whose current switches off, with a
+*       clamp (flyback) diode.  Measured: inductor peak current I(L1) and the clamp-node
+*       kickback voltage V(9) on turn-off.
+*
+* HONEST APPROXIMATIONS / ASSUMPTIONS (stated, not hidden):
+*   - H-bridge low-side switch modeled with a 12 V/0 V PULSE source; when high, L1 current
+*     ramps; at t=80us it falls to 0 V and the L1 current free-wheels through D_CLAMP
+*     (the kickback spike).  Captures the switch *function* without a vendor model.
+*   - LED forward voltage ~0.7 V effective (a real 850 nm string at 1 A is ~2.2-2.8 V).
+*   - No gate-driver delay, no snubber R/C, no inductor ESR/ESL are included.
+
+* ---- inlined device models (diodes only) ----
+.MODEL IDEAL_LED    D (N=1.8 IS=1e-12)
+.MODEL IDEAL_CLAMP  D (N=1.0 IS=1e-12)
+
+* ---- sources ----
+V1 V_IN 0 DC 12                    ; 12 V rail (real DRV8837C runs to ~28 V; 12 V gives a
+*                                  ;    healthy inductor ramp for a visible kickback spike)
+V_SWRAMP 0 5 PULSE(0 12 0 1n 1n 80u 160u)   ; H-bridge feed: 12 V (0..80uS) then 0 V
+
+* ---- net 1: 850 nm IR LED driver (constant-current approximation) ----
+R_BUCK  V_IN 2 0.5
+R_GND  0 2 1M                  ; keep node 0 as a real (2-connected) reference node
+R_LEDS 2 3 0.2
+D_LED  3 0 IDEAL_LED
+C_LED  3 0 1n
+R_SENSE 3 0 1
+
+* ---- net 2: DRV8837C H-bridge kickback (10 uH + clamp diode transient) ----
+* Series: V_SWRAMP(5) -> R_SW -> L1 -> node 9 -> D_CLAMP -> GND.
+R_SW   5 6 0.01
+L1     6 9 10u
+D_CLAMP 9 0 IDEAL_CLAMP
+C_FILTER 9 0 1n
+
+.TRAN 0 200u 0 10n
+.OPTIONS ABSTOL=1n
+.PRINT TRAN I(L1) V(9) I(D_LED)
+.END

@@ -1,0 +1,51 @@
+[
+  {"label":"license_status_before","tool":"get_license_server_status","args":{}},
+  {"label":"install_info","tool":"get_install_info","args":{}},
+  {"label":"list_sigrity_tools","tool":"list_sigrity_tools","args":{}},
+  {"label":"preset_lpddr4_proxy_ddr4","tool":"get_high_speed_constraint_preset","args":{"interface_type":"DDR4","net_class_name":"LPDDR4_4000_PROXY"}},
+  {"label":"preset_mipi_csi2","tool":"get_high_speed_constraint_preset","args":{"interface_type":"MIPI_DPHY","net_class_name":"MIPI_CSI2_4LANE"}},
+  {"label":"preset_gbe_ethernet","tool":"get_high_speed_constraint_preset","args":{"interface_type":"ETHERNET_1G","net_class_name":"RGMII_GBE_PHY"}},
+  {"label":"preset_usb_90ohm_proxy","tool":"get_high_speed_constraint_preset","args":{"interface_type":"USB4","net_class_name":"GENERIC_90OHM_DIFF_PROXY"}},
+
+  {"label":"main_board_blank","tool":"allegro_new_blank_board","args":{"output_board_file":"C:\\Users\\aicoe\\Desktop\\Sigrity\\runs\\imx8mp_main_soc_board.brd","overwrite":true}},
+  {"label":"main_board_session_start","tool":"start_allegro_session","args":{},"saveAs":"session_main"},
+  {"label":"main_board_stackup","tool":"generate_multilayer_stackup","args":{"session_id":"$session_main","layers":[
+      {"name":"L2_GND_HDI1","layer_type":"PLANE","material":"COPPER","thickness_mil":0.5},
+      {"name":"L3_SIG_MIPI_GBE","layer_type":"CONDUCTOR","material":"COPPER","thickness_mil":0.5},
+      {"name":"L4_PWR_VDDCORE","layer_type":"PLANE","material":"COPPER","thickness_mil":1.0},
+      {"name":"L5_SIG_DDR_A","layer_type":"CONDUCTOR","material":"COPPER","thickness_mil":0.5},
+      {"name":"L6_GND_CORE","layer_type":"PLANE","material":"COPPER","thickness_mil":1.0},
+      {"name":"L7_SIG_DDR_B","layer_type":"CONDUCTOR","material":"COPPER","thickness_mil":0.5},
+      {"name":"L8_PWR_IO","layer_type":"PLANE","material":"COPPER","thickness_mil":1.0},
+      {"name":"L9_SIG_LOWSPEED","layer_type":"CONDUCTOR","material":"COPPER","thickness_mil":0.5}
+  ]}},
+  {"label":"main_board_net_vdd_arm","tool":"allegro_create_net","args":{"session_id":"$session_main","net_name":"VDD_ARM_0V85"}},
+  {"label":"main_board_net_vdd_soc","tool":"allegro_create_net","args":{"session_id":"$session_main","net_name":"VDD_SOC_0V80"}},
+  {"label":"main_board_net_gnd","tool":"allegro_create_net","args":{"session_id":"$session_main","net_name":"GND"}},
+  {"label":"main_board_net_reset","tool":"allegro_create_net","args":{"session_id":"$session_main","net_name":"RESET_N"}},
+  {"label":"main_board_net_osc24m","tool":"allegro_create_net","args":{"session_id":"$session_main","net_name":"OSC24M_CLK"}},
+  {"label":"main_board_ecset_mipi","tool":"allegro_create_ecset","args":{"session_id":"$session_main","name":"MIPI_CSI2_ECSET"}},
+  {"label":"main_board_phys_constraint_mipi","tool":"allegro_set_physical_constraint","args":{"session_id":"$session_main","constraint":"min_line_width","value":4.0,"cset":"MIPI_CSI2_ECSET"}},
+  {"label":"main_board_save","tool":"allegro_save_design","args":{"session_id":"$session_main"}},
+  {"label":"main_board_run","tool":"allegro_run_session","args":{"session_id":"$session_main","board_file":"C:\\Users\\aicoe\\Desktop\\Sigrity\\runs\\imx8mp_main_soc_board.brd"},"isBackgroundJob":true,"waitTimeoutSeconds":300},
+  {"label":"main_board_xsection_report","tool":"run_allegro_report","args":{"board_file":"C:\\Users\\aicoe\\Desktop\\Sigrity\\runs\\imx8mp_main_soc_board.brd","report_code":"x-section","output_file":"C:\\Users\\aicoe\\Desktop\\Sigrity\\runs\\imx8mp_main_xsection.rpt"},"isBackgroundJob":true,"waitTimeoutSeconds":180},
+  {"label":"main_board_net_report","tool":"run_allegro_report","args":{"board_file":"C:\\Users\\aicoe\\Desktop\\Sigrity\\runs\\imx8mp_main_soc_board.brd","report_code":"net","output_file":"C:\\Users\\aicoe\\Desktop\\Sigrity\\runs\\imx8mp_main_net.rpt"},"isBackgroundJob":true,"waitTimeoutSeconds":180},
+  {"label":"main_board_bom_report","tool":"run_allegro_report","args":{"board_file":"C:\\Users\\aicoe\\Desktop\\Sigrity\\runs\\imx8mp_main_soc_board.brd","report_code":"bom","output_file":"C:\\Users\\aicoe\\Desktop\\Sigrity\\runs\\imx8mp_main_bom.rpt"},"isBackgroundJob":true,"waitTimeoutSeconds":180},
+  {"label":"main_board_schematic_checklist","tool":"run_schematic_checklist","args":{"net_report_file":"C:\\Users\\aicoe\\Desktop\\Sigrity\\runs\\imx8mp_main_net.rpt","bom_report_file":"C:\\Users\\aicoe\\Desktop\\Sigrity\\runs\\imx8mp_main_bom.rpt"}},
+
+  {"label":"sensor_board_blank","tool":"allegro_new_blank_board","args":{"output_board_file":"C:\\Users\\aicoe\\Desktop\\Sigrity\\runs\\imx8mp_sensor_board.brd","overwrite":true}},
+  {"label":"sensor_board_session_start","tool":"start_allegro_session","args":{},"saveAs":"session_sensor"},
+  {"label":"sensor_board_stackup","tool":"generate_multilayer_stackup","args":{"session_id":"$session_sensor","layers":[
+      {"name":"L2_GND_SENSOR","layer_type":"PLANE","material":"COPPER","thickness_mil":0.5},
+      {"name":"L3_SIG_CSI2","layer_type":"CONDUCTOR","material":"COPPER","thickness_mil":0.5},
+      {"name":"L4_PWR_SENSOR_CLEAN","layer_type":"PLANE","material":"COPPER","thickness_mil":0.5}
+  ]}},
+  {"label":"sensor_board_net_avdd","tool":"allegro_create_net","args":{"session_id":"$session_sensor","net_name":"SENSOR_AVDD_2V8"}},
+  {"label":"sensor_board_net_gnd","tool":"allegro_create_net","args":{"session_id":"$session_sensor","net_name":"GND"}},
+  {"label":"sensor_board_save","tool":"allegro_save_design","args":{"session_id":"$session_sensor"}},
+  {"label":"sensor_board_run","tool":"allegro_run_session","args":{"session_id":"$session_sensor","board_file":"C:\\Users\\aicoe\\Desktop\\Sigrity\\runs\\imx8mp_sensor_board.brd"},"isBackgroundJob":true,"waitTimeoutSeconds":300},
+  {"label":"sensor_board_xsection_report","tool":"run_allegro_report","args":{"board_file":"C:\\Users\\aicoe\\Desktop\\Sigrity\\runs\\imx8mp_sensor_board.brd","report_code":"x-section","output_file":"C:\\Users\\aicoe\\Desktop\\Sigrity\\runs\\imx8mp_sensor_xsection.rpt"},"isBackgroundJob":true,"waitTimeoutSeconds":180},
+
+  {"label":"jobs_list_final","tool":"list_all_jobs","args":{}},
+  {"label":"license_status_after","tool":"get_license_server_status","args":{}}
+]

@@ -1,0 +1,52 @@
+* HW-BRS-5.4  WM8960 -> Class-D power amp (2 W / 8 ohm) output stage
+* Self-contained PSpice netlist (no vendor model) — runs headless on psp_cmd.
+*
+* The CLASS-D stage is the sim-verifiable part (dominant power/EMI element). WM8960 codec
+* (I2S) and PDM mic (1-bit) are control-function (documented, line-termination only).
+*
+* WHAT THIS NETLIST HONESTLY MODELS (and where it is an approximation):
+*   A real 2 W / 8 ohm class-D swings the output ~full-rail.  This netlist models the
+ *   OUTPUT STAGE as seen at the LC-filter input: a 1 kHz +/-8 V peak audio term (the
+ *   reconstructed audio) plus a 250 kHz switching-ripple term (the PWM carrier that the
+ *   LC filter must reject).  The LC filter (L=10 uH, C=100 nF) then passes the 1 kHz
+*   audio to the 8 ohm and rejects the 250 kHz ripple — the classic class-D filter
+*   function.  We measure the 8-ohm power.
+*   - This is NOT a literal H-bridge with complementary switches and Rds_on / switching
+*     loss / modulation-index control (those need device models).  It is the honest
+*   "filter + delivery" approximation: it proves the LC filter reconstructs the 1 kHz
+*   audio into the 8 ohm and rejects the 250 kHz carrier, and produces a measured 8-ohm
+*   power number.  The real stage's power is set by its closed-loop control at 2 W / 8 ohm.
+*   - 8 V peak (11.3 V p-p) 1 kHz test tone: at 8 ohm this is 7.99 V rms => ~8 W.  The
+*     2 W / 8 ohm full-scale is ~5.66 V peak, so this test tone is ABOVE the rating — we
+*     report the number as the "ideal filter + delivery" power and note the stage must not
+*     be driven that hot in production (the real 2 W rating is set by the stage's control
+*     loop, not this ideal-rail approximation).  LC corner ~31.8 kHz (above 1 kHz, far
+*     below 250 kHz), overdamped (no ringing).
+*   - No ESR/ESL, no loop PCB parasitics, no PDM demod.
+
+* ---- 1 kHz audio term, pure AC +/-8 V (8 V pk => ~5.66 V rms => ~4 W at 8 ohm, the
+*       2 W / 8 ohm full-scale class).  The LC filter reconstructs this into the speaker. ----
+V_AUDIO 0 8 PULSE(-8 8 0 1n 1n 500u 1m)   ; 1 kHz square, +/-8 V (0 V average; 8 V pk)
+
+* ---- 250 kHz switching ripple term (the carrier the filter must reject) ----
+V_CARR 11 0 PULSE(0 5 0 5n 5n 1u 2u)
+R_CARR 11 12 0.01
+L_CARR 12 8 1u            ; ripple injected into the filter input via small series L+R (breaks loop)
+
+* ---- LC output filter (overdamped: L=10uH, C=100nF => Q~0.5; corner ~31.8 kHz;
+*       above the 1 kHz audio, far below the 250 kHz carrier).  The 100uF is the
+*       WM8960 power-rail bulk cap, NOT the class-D output filter — a real 2 W / 8 ohm
+*       class-D filter uses ~100 nF at the output (a 100 uF filter cap would ring). ----
+L_F   8 9 10u
+C_F   9 0 100n
+R_SPK 9 0 8              ; 8 ohm speaker — POWER MEASURED HERE
+
+* ---- PDM mic line (documented; line-termination check only) ----
+V_PDM 0 10 DC 0
+R_TPDM 10 0 50
+
+* ---- analyses ----
+.TRAN 0 5m 0 1u
+.OPTIONS ABSTOL=1n
+.PRINT TRAN V(9) I(R_SPK)
+.END
