@@ -13,12 +13,89 @@ Aligned with FORJINN Discovery Form Priorities 7, 8, 9 & Deliverable 2:
 
 from __future__ import annotations
 
+import ast
 import json
 import os
 from datetime import datetime
 from typing import Any, Optional
 
 from sigrity_mcp.mcp_app import mcp
+
+
+def _as_dict(value: Any, default: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Coerce a tool argument into a dict, tolerating the JSON-string-as-dict quirk.
+
+    Some calling models serialize a dict-typed argument as a JSON string
+    (e.g. `'{"rails": [...]}'`) and FastMCP's pydantic validation passes a
+    scalar through as-is, so the tool body would otherwise crash on
+    `.get()` (e.g. `'str' object has no attribute 'get'`). This normalizes
+    that: a dict is returned unchanged, a JSON/Python-literal string that
+    parses to a dict is parsed, and anything else becomes `default or {}`.
+    """
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+            if isinstance(parsed, dict):
+                return parsed
+        except (ValueError, RecursionError):
+            pass
+        try:
+            parsed = ast.literal_eval(value)
+            if isinstance(parsed, dict):
+                return parsed
+        except (ValueError, SyntaxError, RecursionError, TypeError, MemoryError):
+            pass
+    return dict(default) if default else {}
+
+
+def _as_list(value: Any) -> list[Any]:
+    """Coerce a tool argument into a list, tolerating a JSON/Python-literal string.
+
+    A list is returned unchanged; a string that parses to a list is parsed; a
+    single dict (a one-item table sent without the wrapping list) is wrapped;
+    anything else becomes `[]`.
+    """
+    if isinstance(value, list):
+        return value
+    if isinstance(value, dict):
+        return [value]
+    if isinstance(value, str):
+        for parser in (json.loads, ast.literal_eval):
+            try:
+                parsed = parser(value)
+            except (ValueError, RecursionError, SyntaxError, TypeError, MemoryError):
+                continue
+            if isinstance(parsed, list):
+                return parsed
+            if isinstance(parsed, dict):
+                return [parsed]
+    return []
+
+
+def _row(row: Any) -> dict[str, Any]:
+    """Coerce one table row into a dict: a dict passes through, a raw string is
+    wrapped as {'_text': <s>} (so a scalar row still renders instead of crashing),
+    and anything else becomes an empty dict."""
+    if isinstance(row, dict):
+        return row
+    if isinstance(row, str):
+        return {"_text": row}
+    return {}
+
+
+def _cell(row: dict[str, Any], key: str, default: Any = "N/A") -> Any:
+    """Read a cell from a row dict, tolerating a scalar/_text row and a missing key.
+
+    Returning `default` (instead of raising or None) keeps the Markdown tables
+    from crashing on the observed model-shaped inputs: a dict row with a missing
+    key, or a row that was a plain string (e.g. a pins list whose entries are
+    bare strings rather than pin objects).
+    """
+    if "_text" in row and key not in row:
+        return row["_text"]
+    return row.get(key, default)
 
 
 @mcp.tool
@@ -47,6 +124,15 @@ async def generate_hardware_design_document(
     `thermal_and_power_budget`: Optional thermal dissipation, cooling requirements, power budgets per rail.
     `output_markdown_path`: Target path to save the generated document (defaults to <board_name>_HDD.md).
     """
+    # Normalize string-encoded / scalar-typed structured args (FastMCP surfaces a few of
+    # these as-is; see _as_dict/_as_list at the top of this module).
+    power_architecture = _as_dict(power_architecture)
+    subsystems_and_interfaces = _as_list(subsystems_and_interfaces)
+    layer_stackup_summary = _as_dict(layer_stackup_summary)
+    clock_and_reset_architecture = _as_dict(clock_and_reset_architecture)
+    bom_summary = _as_dict(bom_summary)
+    thermal_and_power_budget = _as_dict(thermal_and_power_budget)
+
     date_str = datetime.now().strftime("%Y-%m-%d")
     out_path = output_markdown_path or f"{board_name.replace(' ', '_')}_HDD_v{version}.md"
 
@@ -193,7 +279,13 @@ async def generate_validation_test_plan(
 
     Covers Power Rail Sequencing, Voltage Margins, Clock Frequencies, JTAG/SWD Bringup,
     High-Speed Bus Signal Integrity (Eye-diagrams, BER), and Peripheral Functional Tests.
+    Every table parameter may be a native list OR a JSON string (both are accepted).
     """
+    power_rails = _as_list(power_rails)
+    clocks_and_resets = _as_list(clocks_and_resets)
+    high_speed_interfaces = _as_list(high_speed_interfaces)
+    peripheral_smoke_tests = _as_list(peripheral_smoke_tests)
+
     date_str = datetime.now().strftime("%Y-%m-%d")
     out_path = output_markdown_path or f"{board_name.replace(' ', '_')}_Validation_Test_Plan_Rev{revision}.md"
 
@@ -305,13 +397,26 @@ async def generate_board_user_guide(
     board_description: str,
     power_supply_specifications: dict[str, Any],
     connector_pinouts: list[dict[str, Any]],
-    jumper_configuration_tables: list[dict[str, Any]],
+    jumper_configuration_tables: Optional[list[dict[str, Any]]] = None,
     status_leds_and_switches: Optional[list[dict[str, Any]]] = None,
     test_points_index: Optional[list[dict[str, Any]]] = None,
     troubleshooting_matrix: Optional[list[dict[str, Any]]] = None,
     output_markdown_path: Optional[str] = None,
 ) -> dict[str, Any]:
-    """Auto-generate a Board User Guide for engineers, bring-up teams, and customers."""
+    """Auto-generate a Board User Guide for engineers, bring-up teams, and customers.
+
+    `connector_pinouts` / `jumper_configuration_tables` may be passed as a native list
+    OR as a JSON string (a quirk observed from some calling models); both are accepted.
+    Any of the table parameters may be empty or omitted (a board with no jumpers /
+    LEDs / test points / troubleshooting rows is still a valid guide).
+    """
+    power_supply_specifications = _as_dict(power_supply_specifications)
+    connector_pinouts = _as_list(connector_pinouts)
+    jumper_configuration_tables = _as_list(jumper_configuration_tables)
+    status_leds_and_switches = _as_list(status_leds_and_switches)
+    test_points_index = _as_list(test_points_index)
+    troubleshooting_matrix = _as_list(troubleshooting_matrix)
+
     date_str = datetime.now().strftime("%Y-%m-%d")
     out_path = output_markdown_path or f"{board_name.replace(' ', '_')}_User_Guide_Rev{revision}.md"
 
@@ -335,45 +440,73 @@ async def generate_board_user_guide(
     ]
 
     for conn in connector_pinouts:
-        refdes = conn.get("refdes", "J_CONN")
-        name = conn.get("name", "Header / Interface")
-        desc = conn.get("description", "")
+        c = _row(conn)
+        refdes = _cell(c, "refdes", "J_CONN")
+        name = _cell(c, "name", "")
+        # Some callers label the connector with a 'connector'/'label' key instead of
+        # a separate refdes/name pair — fall back to the first non-empty of those.
+        labelish = next((c[k] for k in ("connector", "label") if c.get(k)), None)
+        if not name:
+            if refdes and refdes != "J_CONN":
+                name = labelish or refdes
+            else:
+                name = labelish or "Header / Interface"
+        desc = _cell(c, "description", "")
         doc_lines.append(f"\n### {refdes}: {name}")
         if desc:
             doc_lines.append(f"{desc}\n")
-        pins = conn.get("pins", [])
-        if pins:
+        # `pins` may be a list of dicts ({"pin","signal",...}), a list of bare
+        # strings, or a single string describing the pins in prose.
+        pins_raw = c.get("pins", [])
+        pins = _as_list(pins_raw)
+        if pins and not isinstance(pins, str):
             doc_lines.append("| Pin # | Signal Name | Type | Voltage | Description |")
             doc_lines.append("| :--- | :--- | :--- | :--- | :--- |")
-            for p in pins:
-                doc_lines.append(f"| {p.get('pin')} | {p.get('signal')} | {p.get('type', 'IO')} | {p.get('voltage', '3.3V')} | {p.get('description', '')} |")
+            for pi, p in enumerate(_as_list(pins), start=1):
+                pr = _row(p)
+                doc_lines.append(f"| {_cell(pr, 'pin', pi)} | {_cell(pr, 'signal', _cell(c, 'name', ''))} | {_cell(pr, 'type', 'IO')} | {_cell(pr, 'voltage', '3.3V')} | {_cell(pr, 'description', '')} |")
+        elif isinstance(pins_raw, str) and pins_raw.strip():
+            doc_lines.append(f"Pins: {pins_raw.strip()}")
 
     doc_lines.append("\n---\n## 4. Jumper & DIP Switch Configuration")
     doc_lines.append("| Jumper RefDes | Function | Default Setting | Alternative Positions & Mode |")
     doc_lines.append("| :--- | :--- | :--- | :--- |")
-    for jmp in jumper_configuration_tables:
-        doc_lines.append(f"| {jmp.get('refdes')} | {jmp.get('function')} | {jmp.get('default')} | {jmp.get('alternatives', 'N/A')} |")
+    if jumper_configuration_tables:
+        for jmp in jumper_configuration_tables:
+            j = _row(jmp)
+            doc_lines.append(f"| {_cell(j, 'refdes')} | {_cell(j, 'function')} | {_cell(j, 'default')} | {_cell(j, 'alternatives', 'N/A')} |")
+    else:
+        doc_lines.append("| (none) | No jumpers / DIP switches on this board | N/A | N/A |")
 
     if status_leds_and_switches:
         doc_lines.append("\n---\n## 5. Status LEDs, Push Buttons & Indicators")
         doc_lines.append("| RefDes | Type | Color / Label | Normal State | Function / Indicator Meaning |")
         doc_lines.append("| :--- | :--- | :--- | :--- | :--- |")
         for ind in status_leds_and_switches:
-            doc_lines.append(f"| {ind.get('refdes')} | {ind.get('type', 'LED')} | {ind.get('color', 'Green')} | {ind.get('normal_state', 'ON')} | {ind.get('function')} |")
+            i = _row(ind)
+            refdes = _cell(i, "refdes", "N/A")
+            if refdes == "N/A":
+                refdes = _cell(i, "led", _cell(i, "switch", "N/A"))
+            ind_type = _cell(i, "type", "LED")
+            if "switch" in i:
+                ind_type = "Switch"
+            doc_lines.append(f"| {refdes} | {ind_type} | {_cell(i, 'color', 'Green')} | {_cell(i, 'normal_state', 'ON')} | {_cell(i, 'function')} |")
 
     if test_points_index:
         doc_lines.append("\n---\n## 6. Test Points Quick Reference")
         doc_lines.append("| Test Point | Net Name | Expected Signal / Voltage | Pad Type | Location / Layer |")
         doc_lines.append("| :--- | :--- | :--- | :--- | :--- |")
         for tp in test_points_index:
-            doc_lines.append(f"| {tp.get('refdes')} | {tp.get('net_name')} | {tp.get('expected_value')} | {tp.get('pad_type', 'SMD Pad')} | {tp.get('location', 'Top')} |")
+            t = _row(tp)
+            doc_lines.append(f"| {_cell(t, 'refdes', _cell(t, 'tp'))} | {_cell(t, 'net_name', _cell(t, 'net'))} | {_cell(t, 'expected_value')} | {_cell(t, 'pad_type', 'SMD Pad')} | {_cell(t, 'location', 'Top')} |")
 
     if troubleshooting_matrix:
         doc_lines.append("\n---\n## 7. Troubleshooting & Common Issues")
         doc_lines.append("| Symptom / Failure | Likely Cause | Recommended Diagnostic / Action |")
         doc_lines.append("| :--- | :--- | :--- |")
         for tr in troubleshooting_matrix:
-            doc_lines.append(f"| {tr.get('symptom')} | {tr.get('cause')} | {tr.get('action')} |")
+            t = _row(tr)
+            doc_lines.append(f"| {_cell(t, 'symptom', _cell(t, 'check'))} | {_cell(t, 'cause', 'N/A')} | {_cell(t, 'action', _cell(t, 'check'))} |")
 
     content = "\n".join(doc_lines)
     os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
@@ -398,8 +531,11 @@ async def generate_traceability_matrix(
     """Auto-generate a Requirement-to-Schematic Traceability Matrix.
 
     Maps PRD/HRS requirement IDs to schematic sheets, net names, component refdes,
-    constraint rules, and verification test cases.
+    constraint rules, and verification test cases. `requirements` may be a native list
+    OR a JSON string (both accepted).
     """
+    requirements = _as_list(requirements)
+
     date_str = datetime.now().strftime("%Y-%m-%d")
     out_path = output_markdown_path or f"{board_name.replace(' ', '_')}_Traceability_Matrix.md"
 

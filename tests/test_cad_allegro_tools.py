@@ -5,6 +5,7 @@ from sigrity_mcp.domains.cad.allegro_tools import (
     allegro_create_board_outline,
     allegro_create_component,
     allegro_create_net,
+    allegro_create_nets,
     allegro_create_stackup,
     allegro_run_drc,
     allegro_run_session,
@@ -105,3 +106,22 @@ async def test_run_session_warns_about_jrl_journal_when_session_saves_design(fak
     result = await allegro_run_session(sid, board_file="board.brd")
     assert "axlSaveDesign" in result["note"]
     assert ".jrl" in result["note"]
+
+
+@pytest.mark.asyncio
+async def test_allegro_create_nets_batches_into_one_session():
+    sess = (await start_allegro_session())["session_id"]
+    result = await allegro_create_nets(sess, ["GND", "VDD_ARM", "OSC24M", "MIPI_CLK"])
+    assert result["created"] == 4
+    preview = tcl_sessions.preview(sess)
+    assert preview.count("axlDBCreateNet") == 4
+    assert "VDD_ARM" in preview and "OSC24M" in preview
+    await close_tcl_session(sess)
+
+
+@pytest.mark.asyncio
+async def test_allegro_create_nets_rejects_empty():
+    sess = (await start_allegro_session())["session_id"]
+    with pytest.raises(ValueError):
+        await allegro_create_nets(sess, [])
+    await close_tcl_session(sess)

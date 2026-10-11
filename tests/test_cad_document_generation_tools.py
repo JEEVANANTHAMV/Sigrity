@@ -125,3 +125,46 @@ async def test_generate_traceability_matrix(tmp_path):
     assert result["status"] == "success"
     assert os.path.exists(out_file)
     assert result["total_requirements_tracked"] == 1
+
+@pytest.mark.asyncio
+async def test_hdd_tolerates_json_string_structured_args(tmp_path):
+    # Regression: a calling model serialized dict/list args as JSON strings;
+    # the tool must not crash with "'str' object has no attribute 'get'".
+    out_file = str(tmp_path / "STR_HDD.md")
+    result = await generate_hardware_design_document(
+        project_name="P", board_name="B", author="a", version="1",
+        system_overview="ov",
+        power_architecture='{"input_voltage": "48V PoE", "rails": [{"name": "VDD_ARM", "voltage": "0.85"}]}',
+        subsystems_and_interfaces='[{"name": "SoC", "type": "MSoC", "description": "d", "signals": []}]',
+        output_markdown_path=out_file,
+    )
+    assert result["status"] == "success"
+    assert os.path.exists(result["document_path"])
+
+
+@pytest.mark.asyncio
+async def test_user_guide_without_jumpers_or_scalar_rows(tmp_path):
+    # Regression 1: jumper_configuration_tables was required; a board with no
+    # jumpers is a valid guide. Regression 2: connector 'pins' was a prose
+    # string and status/test/trouble rows were flat dicts with alt keys.
+    out_file = str(tmp_path / "NOJMP_UG.md")
+    result = await generate_board_user_guide(
+        project_name="NXP", board_name="IPC", revision="A", author="a",
+        board_description="d",
+        power_supply_specifications={"input": "PoE 48V"},
+        connector_pinouts=[
+            {"connector": "30-pin shielded FPC", "pins": "MIPI CSI-2 D0-D3, sensor power, GND"},
+            {"connector": "RJ45 magnetics", "pins": "GbE, 1kV isolation"},
+        ],
+        status_leds_and_switches=[{"function": "power + link", "led": "PWR_LED"}],
+        test_points_index=[{"net": "VDD_ARM", "tp": "TP_PVDD"}],
+        troubleshooting_matrix=[{"check": "PoE handshake", "symptom": "No power"}],
+        # jumper_configuration_tables omitted on purpose
+        output_markdown_path=out_file,
+    )
+    assert result["status"] == "success"
+    assert result["total_connectors"] == 2
+    text = open(result["user_guide_path"], encoding="utf-8").read()
+    assert "30-pin shielded FPC" in text
+    assert "PWR_LED" in text
+    assert "No jumpers" in text

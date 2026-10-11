@@ -90,9 +90,34 @@ See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfa
 @mcp.tool
 async def allegro_create_net(session_id: str, net_name: str, net_type: Optional[_NET_TYPES] = None) -> dict:
     """Create a net in the open Allegro board (CONFIRMED LIVE — see module docstring).
-See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+
+    `axlDBCreateNet` on an already-existing net name is a no-op, so this is idempotent.
+    For a batch of nets, prefer `allegro_create_nets` (one queued SKILL line per net,
+    one round-trip for the whole set) to avoid the per-net round-trip cost that the
+    single-net tool incurs when called in a loop.
+    See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
     tcl_sessions.add_line(session_id, _skill_line(f"(axlDBCreateNet {skill_str(net_name)})"))
-    return {"session_id": session_id, "net_name": net_name, "net_type": net_type}
+    return {"session_id": session_id, "net_name": net_name, "net_type": net_type, "idempotent": True}
+
+
+@mcp.tool
+async def allegro_create_nets(
+    session_id: str,
+    net_names: list[str],
+    net_type: Optional[_NET_TYPES] = None,
+) -> dict:
+    """Create MULTIPLE nets in one call — batch alternative to looping `allegro_create_net`.
+
+    Queues one `axlDBCreateNet` SKILL line per name into the current session (same
+    mutation path as the single-net tool, so the result is idempotent for already-present
+    names). `net_type` is applied to any name that accepts it (it is silently ignored
+    for a net already created without one); omit it to keep nets at Allegro's default
+    type. See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook."""
+    if not net_names:
+        raise ValueError("net_names must be a non-empty list")
+    for net_name in net_names:
+        tcl_sessions.add_line(session_id, _skill_line(f"(axlDBCreateNet {skill_str(net_name)})"))
+    return {"session_id": session_id, "created": len(net_names), "net_names": list(net_names), "net_type": net_type}
 
 
 @mcp.tool
