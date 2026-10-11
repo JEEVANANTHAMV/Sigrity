@@ -8,6 +8,9 @@ Aligned with FORJINN Discovery Form Section 1.2 & Section 4.2:
   * USB4 / USB 3.2 Gen 2 (diff 90Ω, intra-pair skew < 0.15mm)
   * MIPI D-PHY / C-PHY (diff 100Ω, clock-to-data skew < 1.0mm)
   * 1000BASE-T Ethernet (diff 100Ω, pair-to-pair match < 10mm)
+  * eMMC HS400 (SE 50Ω, +1mm data-to-strobe skew, series damping)
+  * MicroSD UHS-I SDR104 (SE 50Ω, 1.8V/3.3V auto-switch, 200MHz SDR)
+  * QSPI NOR (SE 50Ω, point-to-point < 35mm, Quad-SPI)
 """
 
 from __future__ import annotations
@@ -88,6 +91,34 @@ HIGH_SPEED_INTERFACE_PRESETS: dict[str, dict[str, Any]] = {
         "diff_trace_width_mils": 5.0,
         "diff_spacing_mils": 6.5,
         "min_isolation_spacing_mils": 15.0,
+    },
+    "EMMC_HS400": {
+        "single_ended_impedance_ohms": 50.0,
+        "diff_impedance_ohms": 100.0,
+        "impedance_tolerance_percent": 10.0,
+        "intra_pair_length_match_mils": 5.0,
+        "clock_to_data_length_match_mils": 39.4,
+        "min_spacing_mils": 6.0,
+        "diff_trace_width_mils": 4.0,
+        "min_isolation_spacing_mils": 10.0,
+    },
+    "SD_UHS1_SDR104": {
+        "single_ended_impedance_ohms": 50.0,
+        "impedance_tolerance_percent": 10.0,
+        "intra_pair_length_match_mils": 5.0,
+        "clock_to_data_length_match_mils": 20.0,
+        "min_spacing_mils": 6.0,
+        "diff_trace_width_mils": 4.0,
+        "min_isolation_spacing_mils": 10.0,
+    },
+    "QSPI_NOR": {
+        "single_ended_impedance_ohms": 50.0,
+        "impedance_tolerance_percent": 10.0,
+        "intra_pair_length_match_mils": 0.0,
+        "clock_to_data_length_match_mils": 20.0,
+        "min_spacing_mils": 6.0,
+        "diff_trace_width_mils": 5.0,
+        "min_isolation_spacing_mils": 10.0,
     },
 }
 
@@ -250,7 +281,7 @@ async def generate_multilayer_stackup(session_id: str, layers: list[dict[str, An
     this session (before the script even finishes loading the board) — NOT obviously
     content-dependent (it also appeared in a 2-layer isolation test), so likely the same
     general Allegro launch flakiness already documented in `core/tool_status.py`'s "allegro"
-    note (product-chooser/license dialogs, ~1-in-4 launches historically) rather than
+    note (product-chooser/welcome dialogs, ~1-in-4 launches historically) rather than
     something this tool's SKILL calls specifically cause — but it showed up EVERY time in this
     round of testing, not 1-in-4, so treat stackup authoring as a higher-risk case for this
     until proven otherwise. Without something to dismiss it, the job hangs past its normal
@@ -345,7 +376,10 @@ See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfa
 
 @mcp.tool
 async def get_high_speed_constraint_preset(
-    interface_type: Literal["DDR4", "DDR5", "PCIE_GEN4", "PCIE_GEN5", "USB4", "MIPI_DPHY", "ETHERNET_1G"],
+    interface_type: Literal[
+        "DDR4", "DDR5", "PCIE_GEN4", "PCIE_GEN5", "USB4", "MIPI_DPHY", "ETHERNET_1G",
+        "EMMC_HS400", "SD_UHS1_SDR104", "QSPI_NOR",
+    ],
     net_class_name: Optional[str] = None,
 ) -> dict[str, Any]:
     """Retrieve high-speed bus layout and routing constraint rules for Allegro Constraint Manager.
