@@ -24,6 +24,8 @@ from typing import Optional
 from sigrity_mcp.core import win32gui_helper
 from sigrity_mcp.core.config import settings
 from sigrity_mcp.core.errors import JobNotFoundError, JobStillRunningError
+from sigrity_mcp.core import executables
+from sigrity_mcp.core import gui_tool_runner
 
 _LICENSE_MARKERS = (
     "no license",
@@ -124,7 +126,7 @@ class JobRecord:
     """True if JobManager force-killed this job because its log file went completely
     silent (zero byte growth) for `settings.job_stall_timeout_seconds`. See
     core.config's `job_stall_timeout_seconds` docstring for the confirmed real failure
-    modes this guards against (an un-dismissed modal dialog, a silent license wait,
+    modes this guards against (an un-dismissed modal product-choice/welcome dialog,
     Celsius3D's confirmed post-completion idle-stall). A job killed this way may still
     have genuinely completed real work and written real output files before going
     silent (this is exactly what happens in the Celsius3D case) — check
@@ -133,12 +135,32 @@ class JobRecord:
 
     failure_note: str = ""
     """Populated only for one narrow, well-defined ambiguous-failure shape: a negative
-    (NT-status-range) return code, no license keyword in the log, and a near-empty
-    (<4KB) log -- too little signal to tell a silent license abort, a crash, a
-    modal-dialog hang, and a watchdog kill apart. Empty string for every other
-    failure, so its presence is itself a precise signal. See the assignment site in
-    `_watch` for the full note text and `core.tool_status`'s per-tool notes for any
-    known negative-rc signature this specific tool has."""
+    (NT-status-range) return code, no license-related keyword in the log, and a
+    near-empty (<4KB) log -- too little signal to tell a silent abort (often a GUI
+    product-choice/welcome dialog or stale design-lock prompt on this
+    no-license-required install), a crash, a modal-dialog hang, and a watchdog kill
+    apart. Empty string for every other failure, so its presence is itself a precise
+    signal. See the assignment site in `_watch` for the full note text and
+    `core.tool_status`'s per-tool notes for any known negative-rc signature this
+    specific tool has."""
+
+    gui_tool: bool = False
+    """True when this job was launched via the core.gui_tool_runner GUI path (the
+    tool opens real windows and blocks on interactive startup dialogs on this
+    PREMIUM / no-license-required install). For such jobs the console-log heuristics
+    do not apply: run.log is empty BY DESIGN (a GUI tool writing zero bytes is its
+    normal state), so `license_issue_suspected` must never be read as evidence of a
+    license problem, and 'needs_user_intervention' means a human must click through
+    the screen, not that a license is missing."""
+
+    gui_tool_result: str = ""
+    """`core.gui_tool_runner.GuiToolResult.to_dict()` serialized to JSON, captured by
+    the GUI runner's side-task the moment it observes the tool's outcome: runner
+    `status`, `screenshots` (screen_01.png... under screenshots/ in the job dir),
+    `dismissed_dialogs`, `error`, `returncode`. Empty string for console jobs and for
+    GUI jobs whose outcome is not yet known (state still 'running') --
+    running_long/timeout outcomes keep the job 'running' on purpose so the caller can
+    keep polling or cancel explicitly."""
 
     def save(self) -> None:
         Path(self.job_dir, "job.json").write_text(json.dumps(asdict(self), indent=2), encoding="utf-8")
@@ -149,6 +171,8 @@ class JobManager:
         self._jobs: dict[str, JobRecord] = {}
         self._procs: dict[str, asyncio.subprocess.Process] = {}
         self._dismiss_watchers: dict[str, win32gui_helper.DismissWatcher] = {}
+        self._gui_launches: set[str] = set()
+        self._gui_running_long: set[str] = set()
 
     def new_job_dir(self, tool: str) -> tuple[str, Path]:
         job_id = f"{tool}-{uuid.uuid4().hex[:10]}"
@@ -177,6 +201,31 @@ class JobManager:
         one job -- pass `None` (the default) to keep the global default. See
         `core.tclsession.run_session`'s use of this for why Allegro/Capture interactive
         sessions need a much shorter override than long batch simulations.
+
+        GUI tools (PowerDC/PowerSI/XtractIM/... on this PREMIUM no-license-required
+        install) open windows and their run.log is empty BY DESIGN (confirmed:
+        PowerSI and OptimizePI have produced a fully successful 0-byte run.log),
+        so the log-silence stall watchdog is meaningless for them. For any
+        command whose first token's exe stem is in
+        `core.gui_tool_runner.GUI_TOOL_EXE_NAMES`, submit() launches the process
+        the normal way (so proc/_procs/cancel()/stale-state correction in
+        get()/wait() all keep working) and then starts the screen-based runner
+        task `_gui_observe` (core.gui_tool_runner.run_gui_tool): pyautogui
+        screenshots every 2s into screenshots/ in the job dir, dialog dismissal
+        via the common confirm buttons, and an honest outcome written to the
+        record's `gui_tool_result`.
+          * 'running_long' (still running after the stall-timeout window) keeps
+            the job 'running' on purpose: it is a real long simulator run, not a
+            hang -- the caller polls or cancel()s it, and cancel() still works
+            because the proc handle is in _procs. Screenshots keep accumulating
+            for the process's whole lifetime (attach mode);
+          * 'needs_user_intervention' (a dialog survived all dismissal attempts,
+            STUCK_Here screenshot saved) becomes the job's state -- a human must
+            click, NEVER a license label. The process is left alive so the job
+            stays cancellable and the screenshots readable;
+          * the process's real exit is still finalized by `_watch` (the
+            completion authority); the runner only adds gui_tool_result and the
+            needs_user_intervention state on top of it.
         """
         log_path = job_dir / "run.log"
         record = JobRecord(
@@ -189,6 +238,19 @@ class JobManager:
             log_path=str(log_path),
         )
         self._jobs[job_id] = record
+
+        # GUI tools (PowerDC/PowerSI/XtractIM/... on this PREMIUM no-license-required
+        # install) open real windows and block on interactive startup dialogs; their
+        # console log is empty BY DESIGN. For these, the job is launched the normal
+        # way (so _procs/cancel/stale-state correction keep working) plus a
+        # screen-based runner (screenshot every 2s, dialog dismissal,
+        # needs_user_intervention / running_long reporting) -- see submit() docstring
+        # and `JobRecord.gui_tool`.
+        gui_tool = False
+        try:
+            gui_tool = gui_tool_runner.is_gui_tool(command[0])
+        except Exception:
+            gui_tool = False
 
         log_file = open(log_path, "wb")
         proc = await asyncio.create_subprocess_exec(
@@ -204,10 +266,106 @@ class JobManager:
                 self._dismiss_watchers[job_id] = win32gui_helper.spawn_dismiss_watcher(proc.pid)
             except Exception:
                 pass  # never let watcher setup block/break the job launch itself
-        record.save()
-
-        asyncio.create_task(self._watch(job_id, proc, log_file, stall_timeout_seconds))
+        if gui_tool:
+            record.gui_tool = True
+            record.save()
+            self._gui_launches.add(job_id)
+            asyncio.create_task(self._gui_observe(job_id, proc, stall_timeout_seconds))
+        asyncio.create_task(
+            self._watch(job_id, proc, log_file, stall_timeout_seconds, stall_disabled=gui_tool)
+        )
         return record
+
+    async def _gui_observe(
+        self,
+        job_id: str,
+        proc: asyncio.subprocess.Process,
+        stall_timeout_seconds: int | None,
+    ) -> None:
+        """Screen-based runner pass for a GUI job (see submit's docstring).
+
+        `run_gui_tool` LAUNCHES a short-lived monitoring session against the
+        already-running tool process: it screenshots the screen every 2s into
+        `runs/<job_id>/screenshots/` and dismisses dialogs while it lasts, but
+        it does NOT own the process and never reaps anything except its own
+        launch attempt. Only TWO outcomes are acted on here:
+        - "running_long" -> the tool is a genuine long run (still alive after
+          the timeout window): the job STAYS 'running', `_watch` keeps running
+          with the log-stall watchdog disabled (an empty log is a GUI tool's
+          normal state) and only the runaway-log size watchdog plus cancel()
+          remain available. `_watch` finalizes the record on the process's
+          real exit. Nothing else to do.
+        - "needs_user_intervention" -> a dialog survived every dismissal
+          attempt (STUCK_Here screenshot saved). This install is PREMIUM /
+          no-license-required, so the only honest explanation for an un-clicked
+          dialog is "a human has to click it" -- NEVER a license failure,
+          never a stall label. Set that state on the record (a human, or an
+          agent driving the desktop, must act; cancel() still terminates the
+          job if the caller gives up). We deliberately do NOT kill the process
+          from here: the job stays cancellable and its screenshots stay
+          readable.
+        Every OTHER runner outcome (success/failed/timeout from the monitoring
+        pass, or a headless-host degradation) is stored verbatim on
+        `gui_tool_result`; the process's own normal lifecycle (via `_watch`)
+        then finalizes the record, exactly like a console tool.
+        """
+        record = self._jobs.get(job_id)
+        if record is None:
+            return
+        timeout_s = stall_timeout_seconds
+        if timeout_s is None:
+            timeout_s = settings.job_stall_timeout_seconds or settings.default_timeout_seconds
+
+        def _on_running_long(_timeout: float) -> None:
+            # One-shot: the tool outlived the 'quick run' window. The job
+            # stays 'running' (it's a long simulator run, not a hang); just
+            # surface RUNNING_LONG on the record so a status() call made
+            # while the run is in progress tells the caller the truth.
+            rec = self._jobs.get(job_id)
+            if rec is None:
+                return
+            self._gui_running_long.add(job_id)
+            if rec.state == "running":
+                # Keep state 'running' (the process is alive and producing
+                # screenshots); RUNNING_LONG is signalled via gui_tool_result
+                # error notes and the _gui_running_long bookkeeping set, and
+                # via the `note` in _record_to_dict for GUI tools.
+                rec.save()
+
+        try:
+            result = await gui_tool_runner.run_gui_tool(
+                exe_path=Path(record.command[0]),
+                args=[],
+                workdir=Path(record.job_dir),
+                timeout_s=float(timeout_s),
+                job_name=job_id,
+                pid=proc.pid,  # ATTACH mode: we already launched it
+                on_running_long=_on_running_long,
+            )
+        except Exception as e:  # the runner must never break the job itself
+            result = gui_tool_runner.GuiToolResult(
+                status="failed",
+                screenshots=[],
+                dismissed_dialogs=[],
+                error=f"gui runner internal error: {type(e).__name__}: {e}",
+                returncode=None,
+            )
+        record = self._jobs.get(job_id)
+        if record is None:
+            return
+        record.gui_tool_result = json.dumps(result.to_dict())
+        # Attach-mode outcomes:
+        #  - needs_user_intervention: dialog survived dismissal; mark the job
+        #    (process is left alive so the human/cancel() can still act).
+        #  - success / failed: the process exited on its own; _watch will
+        #    finalize state from proc.wait() (authoritative rc); we only
+        #    surface the richer gui_tool_result alongside.
+        #  - running_long shouldn't return in attach mode (monitoring
+        #    continues until exit), but if an executor-side timeout fired
+        #    first we still keep the job running.
+        if result.status == "needs_user_intervention" and record.state == "running":
+            record.state = "needs_user_intervention"
+        record.save()
 
     def _stop_dismiss_watcher(self, job_id: str) -> None:
         """Signal and join the job's DismissWatcher thread (if any) WITHOUT blocking the
@@ -227,6 +385,7 @@ class JobManager:
         proc: asyncio.subprocess.Process,
         log_file,
         stall_timeout_seconds: int | None = None,
+        stall_disabled: bool = False,
     ) -> None:
         log_path = Path(log_file.name)
         runaway_flag = {"killed": False}
@@ -258,7 +417,10 @@ class JobManager:
             # shape: not too much output, but none at all for too long. See
             # `settings.job_stall_timeout_seconds`'s docstring for exactly which real
             # failure modes this is a last-resort safety net for (DismissWatcher /
-            # a license wait / Celsius3D's confirmed post-completion idle-stall).
+            # a modal product-choice/welcome dialog wait / Celsius3D's confirmed
+            # post-completion idle-stall).
+            if stall_disabled:
+                return  # GUI tool: empty log is its NORMAL state (see submit docstring)
             limit = (
                 settings.job_stall_timeout_seconds
                 if stall_timeout_seconds is None
@@ -285,6 +447,8 @@ class JobManager:
         stall_task = asyncio.ensure_future(stall_watchdog())
         returncode = await proc.wait()
         self._stop_dismiss_watcher(job_id)
+        self._gui_running_long.discard(job_id)
+        self._gui_launches.discard(job_id)
         for t in (watchdog_task, stall_task):
             t.cancel()
         for t in (watchdog_task, stall_task):
@@ -304,21 +468,34 @@ class JobManager:
         # process; this task was already awaiting proc.wait() at that point and would
         # otherwise overwrite it with "failed" once the kill's exit code arrives — a
         # cancelled job must stay reported as cancelled, not misreported as a failure.
+        # The GUI observer's "needs_user_intervention" (a dialog a human must click)
+        # gets the same protection: reaching here at all means the process has exited
+        # (the human unblocked it and the tool proceeded, or it was cancelled), so
+        # below the honest return-code outcome overwrites the intervention state.
         if runaway:
             record.state = "failed"
             record.runaway_log_killed = True
-        elif stalled and record.state != "cancelled":
+        elif stalled and record.state not in ("cancelled", "needs_user_intervention"):
             # A genuine race is possible here: proc.wait() and stall_watchdog's own
             # proc.kill() can both be "about to resolve" in the same instant a normal
             # completion was already happening on its own — stalled only overrides the
             # outcome when the job wasn't already explicitly cancelled by a caller.
             record.state = "failed"
             record.stall_timeout_killed = True
-        elif record.state != "cancelled":
+        elif record.state not in ("cancelled", "needs_user_intervention"):
             record.state = "succeeded" if returncode == 0 else "failed"
+        elif record.state == "needs_user_intervention" and returncode == 0:
+            # The human clicked through the dialog and the tool then completed
+            # normally — report the honest success, not the stale intervention state.
+            record.state = "succeeded"
         try:
             tail = _read_tail_text(log_path, max_bytes=1024 * 1024).lower()
             record.license_issue_suspected = any(m in tail for m in _LICENSE_MARKERS)
+            if record.gui_tool:
+                # This install is PREMIUM / no-license-required: for GUI tools the log
+                # is empty BY DESIGN, so the keyword scan is pure noise and must never
+                # be surfaced as a suspected license problem for them.
+                record.license_issue_suspected = False
         except OSError:
             pass
         if (
@@ -328,15 +505,18 @@ class JobManager:
             and _safe_stat_size(log_path) < 4096
         ):
             record.failure_note = (
-                "Negative return code with a near-empty log and no license markers — "
-                "the cause is AMBIGUOUS (silent license abort vs. crash vs. modal-"
-                "dialog hang vs. watchdog kill). license_issue_suspected=False here "
-                "means 'no license text in the log', NOT 'not a license problem'. Do "
-                "not auto-retry on this flag alone. Run the inspection trio: "
-                "tail_job_log(job_id), check_design_lock(design_path) (a silent "
-                "Allegro failure typically orphans a .lck), and check for real "
-                "artifacts in the input file's own directory. See core.tool_status's "
-                "per-tool note for this tool's known negative-rc signature, if any."
+                "Negative return code with a near-empty log and no license-related "
+                "markers — the cause is AMBIGUOUS (a silent abort, on this "
+                "no-license-required install most often a GUI product-choice/welcome "
+                "dialog or stale .lck design-lock prompt left un-clicked; vs. a crash; "
+                "vs. a modal-dialog hang; vs. a watchdog kill). No tool in this suite "
+                "fails for a real license reason, so do NOT read this as evidence of a "
+                "license problem. Do not auto-retry on this flag alone. Run the "
+                "inspection trio: tail_job_log(job_id), check_design_lock(design_path) "
+                "(a silent Allegro/Capture failure typically orphans a .lck), and check "
+                "for real artifacts in the input file's own directory. See "
+                "core.tool_status's per-tool note for this tool's known negative-rc "
+                "signature, if any."
             )
         record.save()
 
@@ -392,7 +572,13 @@ class JobManager:
         # never fire on this machine's (Windows/Proactor) event loop, leaving the job
         # stuck reporting "running" forever even after the real process has exited.
         deadline = time.monotonic() + timeout
-        while self._jobs[job_id].state == "running" and time.monotonic() < deadline:
+        while time.monotonic() < deadline:
+            # "running" and "needs_user_intervention" are both non-terminal from the
+            # CALLER's point of view: the process may still exit (the human unblocks
+            # the dialog and the tool proceeds, or the caller cancels). wait() polls
+            # until one of {succeeded, failed, cancelled, timeout} happens.
+            if self._jobs[job_id].state not in ("running", "needs_user_intervention"):
+                break
             await asyncio.sleep(0.05)
         return self.get(job_id)
 
@@ -410,7 +596,9 @@ class JobManager:
         proc = self._procs.get(job_id)
         if proc is None:
             return record, "no-live-handle"
-        if record.state != "running":
+        # "needs_user_intervention" (GUI job waiting on a human to click a dialog) is
+        # non-terminal too: the process is still alive and must be killable.
+        if record.state not in ("running", "needs_user_intervention"):
             return record, "already-terminal"
         await _kill_process_tree(proc)
         record.state = "cancelled"

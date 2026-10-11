@@ -18,4 +18,5 @@ class JobStillRunningError(SigrityError):
 
 
 class LicenseError(SigrityError):
-    """Raised when a Sigrity tool exits with a recognizable FlexNet license failure."""
+    """Legacy exception class. This install is PREMIUM / no-license-required, so this
+    should never be raised in normal operation. Kept for backward compatibility."""

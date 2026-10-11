@@ -1,0 +1,400 @@
+"""Regression tests for the GUI-tool job layer (core.gui_tool_runner + the
+JobManager submit() routing that adds it for GUI exes).
+
+This install is PREMIUM / no-license-required: the GUI tools (PowerDC, PowerSI,
+XtractIM, ...) open windows and block on interactive startup dialogs, and their
+run.log is empty BY DESIGN. JobManager must therefore route them through the
+screen-based runner (screenshot + dialog dismissal) instead of the console
+watcher's log-size heuristics, and must NEVER label a GUI tool's empty output /
+non-zero exit as a license failure.
+
+These tests need no real Sigrity or GUI: submit_job is tested with a command
+whose first token is named like a GUI exe (PowerDC.exe -> a throwaway copy of
+the running python), and the runner's blocking monitor / async entry point are
+monkeypatched out, so only the wiring under test -- gui_tool flag,
+gui_tool_result capture, state, license_issue_suspected forced False for GUI
+tools, stall/success/failed transitions, cancel() on a needs_user_intervention
+job -- is exercised.
+"""
+
+import shutil
+import sys
+from pathlib import Path
+
+import pytest
+
+from sigrity_mcp.core import gui_tool_runner as gui
+from sigrity_mcp.core import jobs as jobs_module
+from sigrity_mcp.core import process as process_module
+from sigrity_mcp.core.gui_tool_runner import GuiToolResult
+from sigrity_mcp.core.jobs import JobManager
+
+
+def _stub_gui_exe(tmp_path: Path, stem: str = "PowerDC") -> Path:
+    """A native stub named like the GUI tool's exe so `is_gui_tool(command[0])`
+    matches by stem, while remaining harmless.
+
+    Copying the VENV's python.exe here is not viable (a venv launcher reads
+    pyvenv.cfg relative to its own location, so the copy dies with
+    'No pyvenv.cfg file', rc 106). The stub is therefore a copy of the BASE
+    (non-venv) interpreter named <stem>.EXE; it then runs the args JobManager
+    passes it (`-c '<code>'`) exactly like the real interpreter does, so the
+    tests still exercise a genuine process launch + real exit code, just under
+    a GUI-sounding name.
+    """
+    import subprocess as _sp
+    r = _sp.run([sys.executable, "-c", "import sys; print(sys.base_prefix)"],
+                capture_output=True, text=True)
+    base_prefix = r.stdout.strip()
+    base_python = Path(base_prefix) / "python.exe"
+    exe = tmp_path / f"{stem}.EXE"
+    if not base_python.exists():
+        pytest.skip(f"base interpreter not found at {base_python}")
+    shutil.copy(base_python, exe)
+    return exe
+
+
+# --- is_gui_tool(): the routing predicate ------------------------------------
+
+
+def test_is_gui_tool_matches_known_gui_exes():
+    for stem in ("PowerDC", "PowerSI", "XtractIM", "Clarity3DWorkbench",
+                 "OptimizePI", "XcitePI", "XcitePICon", "BroadbandSPICE",
+                 "SPDSIM", "SPDsimCon", "PowerTree", "Optimality", "Celsius3D"):
+        assert gui.is_gui_tool(f"C:\\fake\\{stem}.exe") is True, stem
+        assert gui.is_gui_tool(f"C:\\fake\\{stem}") is True, stem
+
+
+def test_is_gui_tool_rejects_console_tools():
+    for name in ("psp_cmd", "checkplus", "batch_drc", "report", "artwork",
+                 "allegro", "capture", "spif_batch"):
+        assert gui.is_gui_tool(f"C:\\fake\\{name}.exe") is False, name
+
+
+# --- run_gui_tool(): entry-point semantics -------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_run_gui_tool_attaches_and_reports_success(tmp_path, monkeypatch):
+    """Attach mode (pid given): no launch by the runner, screenshots under
+    workdir/screenshots/, honest status, error note preserved."""
+    calls = {}
+
+    def fake_monitor(pid, shot_dir, timeout_s, interval, max_dismiss_attempts,
+                     return_at_timeout=False, on_running_long=None):
+        calls.update(pid=pid, shot_dir=shot_dir)
+        shot = shot_dir / "screen_01.png"
+        shot.write_bytes(b"fakepng")
+        return ("success", 0, [], [shot],
+                ["attached monitor: process exited with code 0 after 0s of screen monitoring"])
+
+    monkeypatch.setattr(gui, "_blocking_attach_monitor", fake_monitor)
+    monkeypatch.setattr(gui, "_load_imports", lambda: None)
+
+    result = await gui.run_gui_tool(
+        exe_path=tmp_path / "PowerDC.exe",
+        args=[], workdir=tmp_path, timeout_s=120.0, job_name="powerdc-test",
+        pid=4242,
+    )
+    assert result.status == "success"
+    assert result.returncode == 0
+    assert calls["pid"] == 4242
+    assert calls["shot_dir"] == tmp_path / "screenshots"
+    assert (tmp_path / "screenshots" / "screen_01.png").is_file()
+    assert result.screenshots == [tmp_path / "screenshots" / "screen_01.png"]
+    assert result.error and "exited with code 0" in result.error
+
+
+@pytest.mark.asyncio
+async def test_run_gui_tool_headless_degrades_to_intervention_not_crash(
+    tmp_path, monkeypatch
+):
+    """If pyautogui/PIL/pywin32 are unavailable, the runner must degrade to
+    needs_user_intervention (with a clear error) -- NOT crash, NOT launch, and
+    NEVER classify as a license failure."""
+    monkeypatch.setattr(gui, "_load_imports", lambda: "ImportError: no display")
+    result = await gui.run_gui_tool(
+        exe_path=tmp_path / "PowerDC.exe",
+        args=[], workdir=tmp_path, timeout_s=1.0, job_name="x",
+    )
+    assert result.status == "needs_user_intervention"
+    assert result.error and "GUI tool runner unavailable" in result.error
+    # nothing launched, and no license misclassification of the error
+    assert "license" not in result.error.lower()
+
+
+@pytest.mark.asyncio
+async def test_stuck_dialog_renames_screenshot_and_reports_intervention(
+    tmp_path, monkeypatch
+):
+    """A dialog that survives max_dismiss_attempts must rename the latest shot to
+    screen_NN_STUCK_Here.png and produce needs_user_intervention -- and must NOT
+    classify it as a license failure."""
+    def fake_monitor(pid, shot_dir, timeout_s, interval, max_dismiss_attempts,
+                     return_at_timeout=False, on_running_long=None):
+        shot = shot_dir / "screen_01.png"
+        shot.write_bytes(b"fakepng")
+        stuck = shot.with_name("screen_01_STUCK_Here.png")
+        shot.rename(stuck)
+        errors = ["dialog still present after 3 dismissal attempts; a human needs to click it"]
+        return ("needs_user_intervention", None, ["SomeDialog -> OK"], [stuck], errors)
+
+    monkeypatch.setattr(gui, "_blocking_attach_monitor", fake_monitor)
+    monkeypatch.setattr(gui, "_load_imports", lambda: None)
+    result = await gui.run_gui_tool(
+        exe_path=tmp_path / "PowerSI.exe",
+        args=[], workdir=tmp_path, timeout_s=120.0, job_name="powersi",
+        pid=1, max_dismiss_attempts=3,
+    )
+    assert result.status == "needs_user_intervention"
+    assert (tmp_path / "screenshots" / "screen_01_STUCK_Here.png").is_file()
+    assert not (tmp_path / "screenshots" / "screen_01.png").exists()
+    assert "license" not in (result.error or "").lower()
+
+
+def test_gui_tool_result_to_dict_fields():
+    r = GuiToolResult(status="success", screenshots=[Path("a.png")],
+                      dismissed_dialogs=["OK"], error=None, returncode=0)
+    d = r.to_dict()
+    assert set(d.keys()) == {"status", "screenshots", "dismissed_dialogs",
+                             "error", "returncode"}
+    assert d["screenshots"] == [str(Path("a.png"))]
+
+
+# --- JobManager.submit() routing -----------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_submit_job_for_gui_exe_sets_gui_tool_flag(tmp_path, monkeypatch):
+    """A command whose first token is a GUI exe must get gui_tool=True on the
+    record, have the runner attached with that process's pid and the job dir as
+    workdir, and (with a real exit code 0) finish as a genuine success with
+    license_issue_suspected forced to False for GUI tools."""
+    monkeypatch.chdir(tmp_path)
+    jm = JobManager()
+    job_id, job_dir = jm.new_job_dir("powerdc")
+    exe = _stub_gui_exe(tmp_path, "PowerDC")
+
+    runner_calls = {}
+
+    async def fake_run_gui_tool(exe_path, args, workdir, timeout_s, job_name,
+                                pid=None, screenshot_interval=2.0,
+                                max_dismiss_attempts=3, on_running_long=None):
+        runner_calls.update(pid=pid, workdir=workdir, job_name=job_name)
+        return GuiToolResult(status="success", screenshots=[],
+                             dismissed_dialogs=[], error=None, returncode=0)
+
+    monkeypatch.setattr(gui, "run_gui_tool", fake_run_gui_tool)
+
+    record = await jm.submit(
+        tool="powerdc",
+        command=[str(exe), "-c", "print('hi')"],
+        job_dir=job_dir,
+        job_id=job_id,
+    )
+    finished = await jm.wait(job_id, timeout=15)
+    assert finished.gui_tool is True
+    assert runner_calls["pid"] == finished.pid
+    assert runner_calls["workdir"] == job_dir
+    assert runner_calls["job_name"] == job_id
+    assert finished.state == "succeeded"
+    assert finished.returncode == 0
+    assert finished.license_issue_suspected is False
+    assert finished.stall_timeout_killed is False
+
+
+@pytest.mark.asyncio
+async def test_submit_job_for_console_exe_does_not_route_to_gui(
+    tmp_path, monkeypatch
+):
+    """A command whose first token is a console exe must NOT get the GUI routing:
+    gui_tool stays False and the runner is never invoked."""
+    monkeypatch.chdir(tmp_path)
+    jm = JobManager()
+    job_id, job_dir = jm.new_job_dir("fake_console")
+    called = {"n": 0}
+
+    async def fake_run_gui_tool(*a, **kw):
+        called["n"] += 1
+        return GuiToolResult(status="success", screenshots=[],
+                             dismissed_dialogs=[], error=None, returncode=0)
+
+    monkeypatch.setattr(gui, "run_gui_tool", fake_run_gui_tool)
+
+    await jm.submit(
+        tool="fake_console",
+        command=[sys.executable, "-c", "print('ok')"],
+        job_dir=job_dir,
+        job_id=job_id,
+    )
+    finished = await jm.wait(job_id, timeout=15)
+    assert finished.gui_tool is False
+    assert called["n"] == 0
+
+
+@pytest.mark.asyncio
+async def test_needs_user_intervention_state_is_set_and_cancelable(
+    tmp_path, monkeypatch
+):
+    """If the runner reports needs_user_intervention (a dialog a human must
+    click), the job's state becomes needs_user_intervention -- NEVER a license
+    issue -- and the job must still be cancellable (the process is alive)."""
+    monkeypatch.chdir(tmp_path)
+    jm = JobManager()
+    job_id, job_dir = jm.new_job_dir("powersi")
+    exe = _stub_gui_exe(tmp_path, "PowerSI")
+
+    async def fake_run_gui_tool(exe_path, args, workdir, timeout_s, job_name,
+                                pid=None, screenshot_interval=2.0,
+                                max_dismiss_attempts=3, on_running_long=None):
+        return GuiToolResult(
+            status="needs_user_intervention", screenshots=[], dismissed_dialogs=[],
+            error="dialog survived dismissal attempts", returncode=None,
+        )
+
+    monkeypatch.setattr(gui, "run_gui_tool", fake_run_gui_tool)
+
+    await jm.submit(
+        tool="powersi",
+        command=[str(exe), "-c", "import time; time.sleep(30)"],
+        job_dir=job_dir,
+        job_id=job_id,
+    )
+    import asyncio
+    for _ in range(400):
+        if jm._jobs[job_id].state == "needs_user_intervention":
+            break
+        await asyncio.sleep(0.05)
+    rec = jm.get(job_id)
+    assert rec.state == "needs_user_intervention"
+    assert rec.license_issue_suspected is False
+    assert "license" not in (rec.gui_tool_result or "").lower()
+
+    cancelled, outcome = await jm.cancel(job_id)
+    assert cancelled.state == "cancelled"
+    assert outcome == "killed"
+
+
+@pytest.mark.asyncio
+async def test_wait_keeps_polling_while_needs_user_intervention(
+    tmp_path, monkeypatch
+):
+    """wait() must treat needs_user_intervention as NON-terminal: the process may
+    still exit after a human unblocks the dialog, and the honest rc-based
+    outcome (success here) must win over the stale intervention state."""
+    monkeypatch.chdir(tmp_path)
+    jm = JobManager()
+    job_id, job_dir = jm.new_job_dir("powersi")
+    exe = _stub_gui_exe(tmp_path, "PowerSI")
+    import asyncio
+
+    async def fake_run_gui_tool(exe_path, args, workdir, timeout_s, job_name,
+                                pid=None, screenshot_interval=2.0,
+                                max_dismiss_attempts=3, on_running_long=None):
+        jm._jobs[job_id].state = "needs_user_intervention"
+        await asyncio.sleep(0.3)  # 'human' unblocks; the tool then completes
+        return GuiToolResult(status="success", screenshots=[],
+                             dismissed_dialogs=[], error=None, returncode=0)
+
+    monkeypatch.setattr(gui, "run_gui_tool", fake_run_gui_tool)
+    await jm.submit(
+        tool="powersi",
+        command=[str(exe), "-c", "import time; time.sleep(5); import sys; sys.exit(0)"],
+        job_dir=job_dir,
+        job_id=job_id,
+    )
+    final = await jm.wait(job_id, timeout=10)
+    assert final.state == "succeeded"
+    assert final.returncode == 0
+
+
+@pytest.mark.asyncio
+async def test_submit_via_process_module_routes_gui_exe(tmp_path, monkeypatch, job_manager_holder):
+    """The MCP-facing process.submit_job entry point must route a GUI tool
+    (resolved exe named PowerDC.exe) through the runner path, while leaving
+    console tools on the normal path."""
+    exe = _stub_gui_exe(tmp_path, "PowerDC")
+    monkeypatch.setattr(process_module.executables, "resolve", lambda name: exe)
+
+    async def fake_run_gui_tool(*a, **kw):
+        return GuiToolResult(status="success", screenshots=[],
+                             dismissed_dialogs=[], error=None, returncode=0)
+    monkeypatch.setattr(gui, "run_gui_tool", fake_run_gui_tool)
+
+    rec = await process_module.submit_job(tool="powerdc", build_args=["-c", "pass"])
+    finished = await job_manager_holder["jm"].wait(rec.job_id, timeout=15)
+    assert finished.gui_tool is True
+
+
+@pytest.fixture
+def job_manager_holder(monkeypatch):
+    """Point process_module at a FRESH JobManager so this test's job lands in a
+    local dict (the global job_manager singleton is shared by other tests)."""
+    import sigrity_mcp.core.jobs as jm_mod
+
+    fresh = JobManager()
+    monkeypatch.setattr(jm_mod, "job_manager", fresh)
+    monkeypatch.setattr(process_module, "job_manager", fresh)
+    return {"jm": fresh}
+
+
+# --- end-to-end: the REAL (unpatched) runner against a real short-lived process.
+# In a headless CI there is no display, so pyautogui.screenshot() raises and each
+# shot is skipped (logged, never fatal) -- which is exactly the graceful-degradation
+# contract. The process still exits, the exit code is still read, and the status is
+# still the honest rc-based one. On an interactive machine the same code path also
+# captures real screenshots (asserted separately, only when a display is present).
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows-only process paths")
+@pytest.mark.asyncio
+async def test_run_gui_tool_end_to_end_short_exit(tmp_path):
+    """Launch mode: a 250ms process that exits 0. The real monitor attaches, the
+    process exits, and the status is the honest success -- with or without a
+    display. This proves the runner works against a real process (not a mocked
+    one) and that a headless screen-grab failure is non-fatal."""
+    exe = _stub_gui_exe(tmp_path, "PowerDC")
+    result = await gui.run_gui_tool(
+        exe_path=exe,
+        args=["-c", "import time,sys; time.sleep(0.25); sys.exit(0)"],
+        workdir=tmp_path,
+        timeout_s=20.0,
+        job_name="powerdc-e2e",
+        screenshot_interval=0.05,
+    )
+    assert result.status == "success"
+    assert result.returncode == 0
+    assert "license" not in (result.error or "").lower()
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows-only process paths")
+@pytest.mark.asyncio
+async def test_run_gui_tool_end_to_end_nonzero_exit(tmp_path):
+    """A non-zero exit is reported as 'failed' with the code -- and, critically,
+    is NOT dressed up as a license problem for a GUI tool."""
+    exe = _stub_gui_exe(tmp_path, "PowerSI")
+    result = await gui.run_gui_tool(
+        exe_path=exe,
+        args=["-c", "import sys; sys.exit(7)"],
+        workdir=tmp_path,
+        timeout_s=20.0,
+        job_name="powersi-e2e",
+        screenshot_interval=0.05,
+    )
+    assert result.status == "failed"
+    assert result.returncode == 7
+    assert "license" not in (result.error or "").lower()
+
+
+def test_gui_tool_result_stable_serialization():
+    """gui_tool_result is persisted as JSON on the record, so the to_dict() shape
+    (the only thing JobManager serializes) must be a fixed, documented set of
+    keys and JSON-serializable end to end."""
+    import json
+    r = GuiToolResult(status="failed", screenshots=[Path("s.png")],
+                      dismissed_dialogs=["OK"], error="boom", returncode=3)
+    d = json.loads(json.dumps(r.to_dict()))
+    assert d["status"] == "failed"
+    assert d["returncode"] == 3
+    assert d["screenshots"] == [str(Path("s.png"))]
+    assert d["dismissed_dialogs"] == ["OK"]

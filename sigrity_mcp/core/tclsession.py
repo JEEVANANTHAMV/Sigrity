@@ -45,7 +45,7 @@ def clear_stale_design_lock(design_path: str) -> bool:
     than exiting cleanly, that `.lck` file is orphaned. The NEXT batch launch against
     that same design path then hits a real modal "this design appears to be open/
     locked, override?" dialog — which blocks forever with no console output at all
-    (previously misdiagnosed as a license-fetch hang or generic timeout, since a
+    (previously misdiagnosed as a startup hang or generic timeout, since a
     headless batch job has no way to click through it). Since every caller here always
     owns a private, already-copied working file (never a design another live process
     could legitimately still have open), removing a stale lock before launch is safe
@@ -241,7 +241,7 @@ async def run_session(
     alongside Allegro as a Cadence exe that "initialise[s] a Qt or classic-Win32 GUI even
     when driven from the command line, and block[s] on a modal dialog" -- and
     `core.tool_status`'s "capture" note documents three distinct real dialogs seen on
-    this exact install (a 'Product Choices' license-tier chooser, a 'Capture Custom
+    this exact install (a 'Product Choices' product-chooser, a 'Capture Custom
     Launch' crash-recovery prompt, and a stale-.lck-file 'already open/locked, override?'
     prompt). Capture's batch invocation is separately still `known_blocked` for an
     unrelated reason (the `Open <project>` step itself hangs with zero windows at all,

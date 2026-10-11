@@ -46,7 +46,8 @@ class SigritySettings(BaseSettings):
     """Default wall-clock timeout for a synchronous/blocking tool run."""
 
     license_queue_seconds: int = 0
-    """Passed to tools that support a license wait/queue flag; 0 = fail fast if no license."""
+    """Legacy setting — this install is PREMIUM / no-license-required, so no tool
+    actually waits on a license queue. Kept for backward compatibility; 0 = no wait."""
 
     max_log_tail_lines: int = 400
     """Cap on how many lines a "tail log" style tool will return in one call."""
@@ -76,8 +77,9 @@ class SigritySettings(BaseSettings):
     (1) an interactive Allegro/Capture GUI launch raising a modal dialog
     `core.win32gui_helper.DismissWatcher` doesn't recognize or fails to dismiss (defense
     in depth -- DismissWatcher is the primary fix and should catch the known dialog
-    shape well before this fires); (2) a silent FlexNet license-fetch wait with zero
-    console output (see `core.tool_status`'s license-unreliability notes); (3) Celsius3D's
+     shape well before this fires); (2) a silent wait with zero console output while
+    a GUI tool sits on an un-dismissed product-choice/welcome dialog (see
+    `core.tool_status`'s per-tool notes); (3) Celsius3D's
     own confirmed post-completion idle-stall (see `tool_status.TOOL_STATUS_NOTES["celsius3d"]`)
     -- the process finishes real work, writes a full result set, then simply never exits
     on its own (frozen CPU, idle main window, no dialog of any kind) -- a real 2.5+ hour

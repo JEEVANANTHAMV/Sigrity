@@ -7,12 +7,13 @@ from pathlib import Path
 from typing import Optional
 
 from sigrity_mcp.core import executables
+from sigrity_mcp.core import gui_tool_runner
 from sigrity_mcp.core.jobs import JobRecord, job_manager
 from sigrity_mcp.core.tclscript import TclScript
 
 
 async def run_quick(tool: str, args: list[str], timeout: float = 60.0, cwd: Optional[Path] = None) -> dict:
-    """Run a short-lived command (version/license/info queries) and wait for it to finish.
+    """Run a short-lived command (version/info queries) and wait for it to finish.
 
     Not for simulations/extractions — those go through `submit_job` so they don't block
     the MCP call for the run's full duration.
@@ -41,12 +42,26 @@ async def run_quick(tool: str, args: list[str], timeout: float = 60.0, cwd: Opti
         "timed_out": timed_out,
         "output": output,
     }
-    if not timed_out and returncode is not None and returncode < 0 and not output.strip():
+    if timed_out and gui_tool_runner.is_gui_tool(exe):
         result["note"] = (
-            "Process exited immediately with a negative code and no output. On this suite "
-            "that pattern has been observed when the FlexNet license server is unreachable "
-            "(licensed Sigrity tools abort silently before printing anything in that case) — "
-            "call get_license_server_status to check before assuming this is a tool bug."
+            "Timed out while RUNNING: this is a GUI tool whose whole run happens on a "
+            "window with no console output at all — the timeout does NOT mean failure. "
+            "This install is PREMIUM / no-license-required, so do not interpret a "
+            "silent GUI tool as a license problem. Submit the same tool via submit_job "
+            "instead: GUI jobs get a screen watcher (screenshots under "
+            "runs/<job_id>/screenshots/, dialog dismissal, honest "
+            "needs_user_intervention/running_long outcomes) and are tracked until the "
+            "process actually exits."
+        )
+    elif not timed_out and returncode is not None and returncode < 0 and not output.strip():
+        result["note"] = (
+            "Process exited immediately with a negative code and no output. On this "
+            "PREMIUM, no-license-required suite that pattern has been observed when a "
+            "GUI tool waits on a modal product-choice/welcome dialog for a click, or "
+            "when a stale .lck design lock triggers an 'already open' prompt -- neither "
+            "is a license problem (no tool here fails for a real license reason). Check "
+            "for a modal dialog (win32gui_helper) or a stale lock (check_design_lock) "
+            "before assuming this is a tool bug."
         )
     return result
 
@@ -87,6 +102,18 @@ async def submit_job(
     jobs, auto-enabled by `core.tclsession.run_session` for `tool="allegro"`).
     `stall_timeout_seconds` overrides the global silent-log watchdog timeout for this one
     job -- see `JobManager.submit`'s docstring.
+
+    GUI tools (PowerDC, PowerSI, XtractIM, Clarity3DWorkbench, OptimizePI, XcitePI,
+    XcitePICon, BroadbandSPICE, SPDSIM, SPDsimCon, PowerTree, Optimality, Celsius3D —
+    see `core.gui_tool_runner.GUI_TOOL_EXE_NAMES` for the authoritative list) open
+    windows and block on interactive startup dialogs on this PREMIUM / no-license-
+    required install, and their run.log is empty by design. `JobManager.submit`
+    detects them by exe stem and additionally starts the screen-based observer
+    (`core.gui_tool_runner.run_gui_tool`): it screenshots the screen every 2s into
+    `runs/<job_id>/screenshots/`, dismisses the common dialog buttons, and writes an
+    honest `gui_tool_result` onto the job record (needs_user_intervention /
+    running_long / ...) — it can NEVER classify such a job as a license failure,
+    because no license exists to fail on this build.
     Returns immediately once the process has been *started*; use job_manager.status()/wait()
     to track completion.
     """
