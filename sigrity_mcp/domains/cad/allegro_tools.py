@@ -7,16 +7,25 @@ board and replays `script.scr`'s lines against Allegro's `Command:` prompt. A
 board loaded, a real SKILL query (`axlCurrentDesign`) executed and its result written to
 a file, then a clean process exit, all within ~20 seconds.
 
-UPDATE: the mutation call (`axlDBCreateNet`, via `allegro_create_net`) was re-tested
-after the user set a default product in Allegro's one-time "Product Choices" dialog,
-and now completes cleanly in ~5.6 seconds against a real board (returncode 0) — the
-earlier ">2 minutes, never finished" result really was that product-chooser dialog
-blocking the launch (or overlapping diagnostic sessions competing for the design),
-not a license problem and not a bug in the SKILL call or session mechanics. Only `allegro_create_net` was independently re-confirmed this way;
-`allegro_create_component`/`allegro_create_board_outline`/`allegro_create_stackup`/
-`allegro_save_design`/`allegro_run_drc` share the same session mechanics and `axl*` API
-family but were not each individually re-run — likely also fixed, but still flagged
-per-tool as unverified below until confirmed one by one.
+UPDATE 2026-10-11: each `axl*` mutation call was independently re-run live in a single
+SKILL session and the saved .brd was re-read with extracta (bypassing SKILL), so
+persistence — not just "state=succeeded" — is what's claimed. Confirmed WORKING this way:
+`allegro_create_net` (axlDBCreateNet persisted pre-save), `allegro_create_stackup`
+(axlXSectionCreate — new layer visible in the LAYER report, board went 2->3 layers),
+`allegro_run_drc` (axlDRCUpdate "No DRC errors detected", rc 0), and `allegro_save_design`
+(axlSaveDesign "fillin yes" — board file grew and the net/layer persisted on re-open).
+Two calls were found MIS-WRITTEN and corrected against that live run:
+- `allegro_create_board_outline`: the old form passed a flat point list to
+  axlDBCreateShape, which rejects it ("Object should be either an r_path or an o_polygon").
+  It now builds a real r_path (`axlPathStart`, same as allegro_create_copper_shape). The
+  API works; the shipped default was wrong.
+- `allegro_create_component`: axlDBCreateComponent reached the board fine but failed with
+  ERROR(SPMHNX-9): Unable to find device file for 'MYDEVICE' because the example used an
+  arbitrary string; device_name must be a REAL installed device/part name. Corrected the
+  docstring + return note; prefer allegro_place_module_instance for a real placement.
+Note the one-time "Product Choices" dialog is real on this machine and the DismissWatcher
+attached by run_session for tool="allegro" is what dismisses it — a raw subprocess with no
+watcher hangs on it.
 
 Usage pattern: start_allegro_session -> compose tools -> allegro_run_session(session_id,
 board_file). Note `board_file` is supplied at RUN time, not composition time — Allegro
@@ -31,6 +40,7 @@ from typing import Any, Literal, Optional, Union
 from sigrity_mcp.core.skillscript import skill_path, skill_str
 from sigrity_mcp.core.tclsession import clear_stale_design_lock, run_session, tcl_sessions
 from sigrity_mcp.mcp_app import mcp
+from sigrity_mcp.domains.cad.allegro_geometry_tools import closed_outline_path_expr
 
 _NET_TYPES = Literal["Signal", "Power", "Ground"]
 
@@ -128,23 +138,59 @@ async def allegro_create_component(
     package: Optional[str] = None,
     value: Optional[str] = None,
 ) -> dict:
-    """Create a component placeholder in the open Allegro board (UNVERIFIED live — see module docstring).
-See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+    """Create a component in the open Allegro board.
+
+    FIX / root-cause (2026-10-11 live test): the session mechanics are FINE and confirmed
+    working (a net/stackup/save in the same session all persisted), but the ORIGINAL
+    example in the tests/prompt used an arbitrary string for `device_name` — Allegro
+    case-folds it (e.g. "MyDevice" -> "MYDEVICE") and then fails with
+    `ERROR(SPMHNX-9): Unable to find device file for 'MYDEVICE'`, creating nothing.
+    `axlDBCreateComponent` requires `device_name` to be a REAL, installed device/part name
+    (resolvable by `axlGetParam("library:<name>")` in this board's library path) — the
+    same requirement `axlDBCreateModuleInstance` has (see `allegro_place_module_instance`).
+    Pass an actually-installed part (e.g. one of the .olb/.psm you staged into
+    `C:\\Cadence\\SPB_22.1\\tools\\capture\\library` + `pcbdw_lib`), not a made-up name.
+    For a real placement at a coordinate, prefer `allegro_place_module_instance`.
+    See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook."""
     args = [skill_str(ref_des), skill_str(device_name)]
     if package is not None:
         args.append(skill_str(package))
     if value is not None:
         args.append(skill_str(value))
     tcl_sessions.add_line(session_id, _skill_line(f"(axlDBCreateComponent {' '.join(args)})"))
-    return {"session_id": session_id, "ref_des": ref_des, "device_name": device_name}
+    return {
+        "session_id": session_id,
+        "ref_des": ref_des,
+        "device_name": device_name,
+        "note": (
+            "device_name MUST be a real installed device/part name (Allegro case-folds it "
+            "and looks it up as a device file). A made-up name fails with "
+            "ERROR(SPMHNX-9): Unable to find device file. Use an installed .psm/.olb part, "
+            "or place via allegro_place_module_instance."
+        ),
+    }
 
 
 @mcp.tool
 async def allegro_create_board_outline(session_id: str, points: list[list[float]]) -> dict:
-    """Create the board outline shape from a closed polygon of [x, y] points (UNVERIFIED live — see module docstring).
-See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
-    point_list = " ".join(f"(list {p[0]} {p[1]})" for p in points)
-    expr = f'(axlDBCreateShape (list {point_list}) nil "BOARD GEOMETRY/OUTLINE")'
+    """Create the board outline shape from a closed polygon of [x, y] points.
+
+    FIXED (2026-10-11 live root-cause): the original form passed a *flat* point list
+    (`(list (list x y) ...)`) to `axlDBCreateShape`, which rejects it with
+    `WARNING (axlDBCreateOpenShape): Object should be either an r_path or an o_polygon`
+    and creates nothing. `axlDBCreateShape`'s first argument must be a real `r_path`
+    (or `o_polygon`) SKILL object — the same construction `allegro_create_copper_shape`
+    already uses (`axlPathStart` from a closed point list). Now the outline is built as a
+    proper `r_path` via `closed_outline_path_expr` and left unclosed-on-purpose is NOT an
+    option: the path is auto-closed (first point repeated as last) per the SKILL doc's
+    "a path that does not end at its start point is an ERROR" rule.
+    See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook."""
+    if len(points) < 3:
+        raise ValueError("A board outline needs at least 3 points.")
+    path_expr = closed_outline_path_expr(points)
+    # Bind the r_path to a var, then hand it to axlDBCreateShape (which needs a real
+    # r_path object, not a flat list). The second arg (t) is l_r_closed.
+    expr = f'(let ((g_outline {path_expr})) (axlDBCreateShape g_outline t "BOARD GEOMETRY/OUTLINE"))'
     tcl_sessions.add_line(session_id, _skill_line(expr))
     return {"session_id": session_id, "point_count": len(points)}
 

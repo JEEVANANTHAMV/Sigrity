@@ -53,6 +53,7 @@ from pathlib import Path
 from typing import Callable, Optional
 
 from sigrity_mcp.core import win32gui_helper
+from sigrity_mcp.core.executables import SELECTOR_DIALOG_PATTERNS
 
 GUI_TOOL_EXE_NAMES: frozenset[str] = frozenset({
     "PowerDC",
@@ -93,6 +94,75 @@ MAX_DISMISS_ATTEMPTS = 3
 and reporting needs_user_intervention with a STUCK_Here screenshot."""
 
 
+def _normalize_window_text(text: Optional[str]) -> str:
+    return (text or "").strip().lower()
+
+
+def _selector_pattern_for(win: dict) -> Optional[tuple[str, dict]]:
+    """Match a dialog window against SELECTOR_DIALOG_PATTERNS; return (key, spec) or None.
+
+    Matches case-insensitively against the dialog TITLE (primary signal) and, for the
+    resource-'waiting' / tree / proxy patterns, the window CLASS (those probe windows are
+    often untitled). This is what lets the runner tell 'make-a-selection' modals
+    (select a tree / proxy / internet waiting) apart from ordinary confirm dialogs so it
+    can answer them with a SELECTION (default/local/localhost/continue) instead of a bare
+    OK — the reason most of this build's 'known blocked' labels stuck on an unclicked
+    selection modal.
+    """
+    title = _normalize_window_text(win.get("title"))
+    cls = _normalize_window_text(win.get("class"))
+    for key, spec in SELECTOR_DIALOG_PATTERNS.items():
+        if key in title:
+            return (key, spec)
+    # Untitled probe windows: fall back to class hints for the resource-waiting family.
+    # These probe windows are often untitled, so a class substring is the only signal —
+    # "wait" (not just "waiting") covers the "WaitDialog"/"WaitFor..." naming variants.
+    if not title and cls:
+        for key, hints in (
+            ("waiting", ("wait", "check", "connect", "contact", "query")),
+            ("proxy", ("prox",)),
+            ("tree", ("tree", "bom", "model")),
+        ):
+            if any(h in cls for h in hints):
+                return (key, SELECTOR_DIALOG_PATTERNS[key])
+    return None
+
+
+def _auto_answer_selector(win: dict, key: str, spec: dict, confirmed: set, errors: list) -> str:
+    """Answer a selection modal by clicking the first matching selection keyword as a
+    child button, else falling back to the default confirm-word ladder. Returns a
+    description for dismissed_dialogs. Never raises.
+
+    The difference from `_try_dismiss`: it tries the SELECTION keywords from the pattern
+    (default/local/localhost/continue — the words that actually advance a tree/proxy/
+    waiting modal) BEFORE the generic confirm words, and it targets a selection control
+    (a button or the default-list row), not just an OK. If no selection keyword resolves,
+    it degrades to `_try_dismiss` so we no longer do worse than before.
+    """
+    keywords = list(spec.get("answer_keywords", tuple()))
+    if win32gui_helper._WIN32:
+        import win32gui
+
+        hwnd = win["hwnd"]
+        for kw in keywords:
+            child = win32gui_helper._find_child_by_text(hwnd, kw)
+            if child:
+                try:
+                    import win32api
+                    import win32con
+
+                    win32api.PostMessage(child, win32con.WM_COMMAND, win32con.BN_CLICKED, 0)
+                    confirmed.add(hwnd)
+                    return f"selection:auto-answer[{key}] '{kw}'"
+                except Exception as e:
+                    errors.append(f"selector {key} '{kw}': {e}")
+    # No selection keyword resolved — degrade to the generic confirm dismiss ladder.
+    fallback = _try_dismiss(win, confirmed, errors)
+    if fallback is None:
+        return None
+    return f"selection:fallback[{key}] {fallback}"
+
+
 @dataclass
 class GuiToolResult:
     status: str
@@ -114,6 +184,56 @@ class GuiToolResult:
 def is_gui_tool(exe) -> bool:
     """True if `exe` (a Path or a path string) is one of GUI_TOOL_EXE_NAMES."""
     return Path(str(exe)).stem in GUI_TOOL_EXE_NAMES
+
+
+def preseed_selection(window_hints: Optional[dict] = None, note: str = "") -> list:
+    """Resolve any ALREADY-OPEN selection modal (tree/proxy/waiting/product) on the
+    desktop BEFORE a GUI tool is launched, so the new process doesn't inherit a stale
+    one and freeze.
+
+    This is phase 1 of the two-phase selection fix (phase 2 is the in-line ladder in
+    `_blocking_attach_monitor`). It scans the whole desktop for top-level windows matching
+    `SELECTOR_DIALOG_PATTERNS` (no pid — a stale modal from a prior run can be owned by
+    any process, including a dead one) and auto-answers each with its default/local/
+    localhost/continue selection. Idempotent and best-effort: it never raises, and if
+    nothing matches it returns immediately with `[]`.
+
+    Returns a list of descriptions (e.g. `['selector:product "default"']`) of anything it
+    answered. Callers (core.jobs) record this on the job so a run doesn't look "blocked"
+    just because a leftover selection dialog was waiting on a human.
+
+    `window_hints` / `note` are accepted for forward-compat (the pre-seed today is
+    desktop-global; a per-process variant can key off a pid later).
+    """
+    del window_hints, note
+    answered: list = []
+    if not win32gui_helper._WIN32:
+        return answered
+    try:
+        import win32gui
+
+        def _enum_callback(hwnd, _):
+            try:
+                if not win32gui.IsWindow(hwnd) or not win32gui.IsWindowVisible(hwnd):
+                    return
+                title = win32gui.GetWindowText(hwnd)
+                cls = win32gui.GetClassName(hwnd)
+                win = {"hwnd": hwnd, "title": title, "class": cls}
+                if not _selector_pattern_for(win):
+                    return
+                errors: list = []
+                confirmed: set = set()
+                mkey, mspec = _selector_pattern_for(win)
+                outcome = _auto_answer_selector(win, mkey, mspec, confirmed, errors)
+                if outcome is not None:
+                    answered.append(f"selector:{mkey} '{(title or cls) or 'untitled'}' -> {outcome}")
+            except Exception:
+                return
+
+        win32gui.EnumWindows(_enum_callback, None)
+    except Exception:
+        pass
+    return answered
 
 
 def _load_imports() -> Optional[str]:
@@ -321,7 +441,15 @@ def _blocking_attach_monitor(
         if dialogs:
             d = dialogs[0]
             errors.append(f"dialog found: class={d.get('class')!r} title={d.get('title')!r}")
-            outcome = _try_dismiss(d, confirmed, errors)
+            # Selection modals (select a tree / proxy / internet-waiting) need a
+            # SELECTION answer, not a bare OK — that's what most 'blocked' runs stuck
+            # on. Check the selection ladder first, then the generic confirm ladder.
+            matched = _selector_pattern_for(d)
+            if matched is not None:
+                mkey, mspec = matched
+                outcome = _auto_answer_selector(d, mkey, mspec, confirmed, errors)
+            else:
+                outcome = _try_dismiss(d, confirmed, errors)
             if outcome is not None:
                 attempts += 1
                 dismissed.append(f"{d.get('title') or '<untitled>'} -> {outcome}")
@@ -470,6 +598,13 @@ async def run_gui_tool(
     shot_dir = workdir / "screenshots"
     shot_dir.mkdir(parents=True, exist_ok=True)
 
+    # PRE-SEED (phase 1): clear any stale selection modal (tree/proxy/waiting/product)
+    # left open on the desktop by a prior run BEFORE launching, so the new process
+    # doesn't inherit it and freeze at 100% CPU with an empty log. Idempotent; no-op if
+    # the screen is clear. This is the direct answer to "every open asks to select a
+    # tree / proxy / internet-waiting".
+    preseeded = preseed_selection(note=f"pre-launch preseed for {Path(exe_path).name}")
+
     unavailable = _load_imports()
     if unavailable is not None:
         return GuiToolResult(
@@ -523,6 +658,10 @@ async def run_gui_tool(
         )
 
     status, rc, dismissed, shots, errors = outcome
+    # Pre-launch pre-seeded selection modals are part of "what the runner dismissed" —
+    # surface them first so a run that auto-answered a stale tree/proxy/waiting dialog
+    # before launching is never mistaken for a stuck/blocked launch.
+    dismissed = list(preseeded) + list(dismissed)
     error_notes = " ".join(dict.fromkeys(errors)) or None
     if status == "failed" and rc is not None and error_notes is None:
         error_notes = f"process exited with return code {rc}"

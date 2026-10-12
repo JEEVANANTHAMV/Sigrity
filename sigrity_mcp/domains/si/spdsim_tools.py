@@ -5,18 +5,20 @@ API at all — it's driven entirely by CLI switches against a `.spd` project fil
 authored in SPDGEN (SPDGEN itself is GUI-only; no batch/Tcl automation is documented
 for it, so it isn't wrapped here).
 
-CONFIRMED BLOCKED live, root cause narrowed (see `core.tool_status`): both this
-module's `-b` flag AND the alternate `-as`/`-spice -run` flags documented in
-`doc/psi_ug/ch10_tcl_re_Calling_SPDSIM_in_PowerSI_Commands.html` (a page titled
-"Invoke Subprocesses") fail identically — `"Skip license fetch ...."` followed by
-`"Failed to open the file"` — against two different real sample `.spd` files (one
-legacy, one modern). The "Skip license fetch" message here is a misnomer on this
-no-license-required install: the real root cause is that SPDSIM.exe is designed to run
-only as a genuine child process of a live PowerSI Tcl session (via
-`sigrity::do exec "...spdsim.exe" -as "file.spd" &`), inheriting an IPC/parent context
-a freshly-launched standalone process does not have — not a missing license. That doc
-page's own framing supports this; this module's direct `submit_job` invocation may be
-structurally the wrong approach, not just missing a flag.
+RE-TESTED 2026-10-11 and CONFIRMED WORKING standalone — the earlier "blocked" status was
+a misdiagnosis, now corrected (see `core.tool_status`'s `spdsim` note for the full
+evidence). A clean `SPDSIM.exe -b <file.spd>` with the CWD set to the folder containing
+the .spd (the trial sample `share\\PostInstallationCheck\\spdsim\\ESD_testcase0.spd`) ran
+the full transient to rtlog 99%, 0 errors/0 warnings, and wrote real artifacts (a ~1MB
+C.CUR, a ~4.2MB V.CUR, a dc.out). The "Skip license fetch" line is a benign no-license
+probe on this install (no license exists to fetch), NOT fatal — and "Failed to open the
+file" was the CWD-relative path not resolving. Two takeaways from the re-test: (1) the
+older hypothesis (drive it via `sigrity::do exec ...` inside a live PowerSI session) is
+UNNEEDED and is also not valid in 24.0 — standalone `-b` works; (2) judge success by the
+ARTIFACTS (C.CUR/V.CUR/dc.out/rtlog) and the CWD, never by that single log line. This
+tool is routed through the GUI-tool runner (GUI_TOOL_EXE_NAMES) purely because SPDSIM can
+open a GUI in some flows — a quiet successful console run must not be mistaken for
+"needs_user_intervention".
 """
 
 from __future__ import annotations

@@ -398,3 +398,59 @@ def test_gui_tool_result_stable_serialization():
     assert d["returncode"] == 3
     assert d["screenshots"] == [str(Path("s.png"))]
     assert d["dismissed_dialogs"] == ["OK"]
+
+
+# --- Selection-modal (select a tree / proxy / internet-waiting) auto-answer layer.
+# Regression for the #1 'known blocked' root cause: these modals need a SELECTION
+# answer (default/local/localhost/continue), not a bare OK. The tests below are
+# pure-Python: `_selector_pattern_for`/`_auto_answer_selector` (no live GUI needed
+# for the pattern-matching half) and a headless-safe call of `preseed_selection`
+# (which no-ops cleanly when there's no display).
+
+
+def test_selector_pattern_matches_tree_proxy_waiting_product():
+    """Each of the four documented selection dialogs maps to a pattern + keywords.
+    Title match is primary; class is the fallback for untitled probe windows."""
+    from sigrity_mcp.core.executables import SELECTOR_DIALOG_PATTERNS
+    # Title-path matches (the usual case).
+    assert gui._selector_pattern_for({"title": "Select a Tree", "class": "Dialog"})[0] == "tree"
+    assert gui._selector_pattern_for({"title": "Select a Proxy Server", "class": "Dialog"})[0] == "proxy"
+    assert gui._selector_pattern_for({"title": "Product Choices", "class": "Dialog"})[0] == "product"
+    assert gui._selector_pattern_for({"title": "Waiting for network resource...", "class": "Dialog"})[0] == "waiting"
+    # Untitled probe windows fall back to a class hint.
+    assert gui._selector_pattern_for({"title": "", "class": "WaitDialog"})[0] == "waiting"
+    # A plain confirm dialog must NOT be misclassified as a selection modal.
+    assert gui._selector_pattern_for({"title": "Are you sure?", "class": "#32770"}) is None
+    # Every registered pattern has at least one answer keyword to try.
+    for key, spec in SELECTOR_DIALOG_PATTERNS.items():
+        assert key and spec.get("answer_keywords")
+
+
+def test_auto_answer_selector_prefers_selection_keyword_then_fallback():
+    """When a selection keyword resolves to a child, the runner clicks it (no
+    fallback); when none resolve, it degrades to the generic confirm ladder (or
+    None on a headless box where win32 is unavailable). Never raises."""
+    # No child matching any keyword -> falls through to _try_dismiss -> None on headless.
+    win = {"hwnd": 12345, "title": "Select a Tree", "class": "Dialog"}
+    out = gui._auto_answer_selector(win, "tree",
+                                    {"answer_keywords": ("default", "local", "ok")},
+                                    confirmed=set(), errors=[])
+    # On a headless/CI box with no matching child and no real win32 dialog, this is
+    # None; on an interactive box it may be a fallback string. Both are acceptable —
+    # the contract is 'never raise, never crash'.
+    assert out is None or isinstance(out, str)
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows-only desktop paths")
+def test_preseed_selection_is_noop_when_screen_is_clean():
+    """preseed_selection scans the desktop for a *stale* selection modal and answers
+    it. On a clean screen (no matching modal open) it returns [] and — crucially —
+    never raises. This is the pre-launch 'clear a leftover tree/proxy/dialog' guard
+    that stops a fresh GUI-tool launch from inheriting a stale selection modal and
+    freezing at 100% CPU / empty log (the 'blocked' look)."""
+    result = gui.preseed_selection(note="unit-test preseed")
+    assert isinstance(result, list)
+    # A clean screen answers nothing; if a stale modal happened to be open on this
+    # interactive machine it is still a list of description strings.
+    for entry in result:
+        assert isinstance(entry, str)

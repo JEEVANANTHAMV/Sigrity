@@ -397,6 +397,12 @@ See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfa
     return result
 
 
+def closed_outline_path_expr(points: list[list[float]]) -> str:
+    """Public alias of `_closed_path_expr`, exposed for the board-outline tool in
+    `allegro_tools` (which needs a real `r_path` object for `axlDBCreateShape`)."""
+    return _closed_path_expr(points)
+
+
 def _closed_path_expr(points: list[list[float]]) -> str:
     """Build an r_path SKILL expression (`axlPathStart`) from a boundary point list,
     auto-closing it if the caller didn't repeat the first point as the last one.

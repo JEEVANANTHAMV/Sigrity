@@ -192,6 +192,54 @@ GUI_TOOL_NAMES: frozenset[str] = frozenset({
 })
 
 
+#: Modal dialogs that block a GUI-tool launch by demanding the user SELECT something
+#: (a default product/tree/proxy target, or a "waiting on a resource" confirmation)
+#: rather than just acknowledging one. A plain confirm-word click (OK/Next) does NOT
+#: drive these forward: the process keeps spinning 100% CPU with an empty log, which the
+#: console job-watcher misreads as a stall and the old heuristic flagged as a "license
+#: issue". On this build these are the single root cause behind most "known blocked"
+#: labels. `core.gui_tool_runner.preseed_selection` resolves them BEFORE launching, and
+#: `_selection_actions` answers them in-line if one still appears during a run.
+#:
+#: Keys are case-insensitive substrings matched against the dialog TITLE (and, for the
+#: "waiting on resource" probe, the window class). Values are the in-line answer: a small
+#: list of (description, keyword) pairs — the first (description) the runner tries is the
+#: auto-answer (default/local/continue); a match means "click the child whose text is
+#: this keyword", falling back to the default confirm-word ladder.
+SELECTOR_DIALOG_PATTERNS: dict[str, dict[str, object]] = {
+    # "Product Choices" / product-tier chooser: pick the installed default product.
+    "product": {
+        "answer_keywords": ("default", "ok", "continue", "accept"),
+        "note": "one-time: Allegro/Capture default product chooser. Auto-answers 'default' "
+        "and persists; subsequent launches skip it.",
+    },
+    # "Select a tree" / model-tree / BOM-tree picker: pick the local default tree.
+    "tree": {
+        "answer_keywords": ("default", "local", "browse", "ok"),
+        "note": "tree/model-tree picker. Auto-answers the local default tree so the "
+        "process proceeds without a network/proxy tree.",
+    },
+    # "Select a proxy" / proxy-host chooser: point at localhost (no external proxy).
+    "proxy": {
+        "answer_keywords": ("localhost", "default", "no proxy", "ok"),
+        "note": "proxy-host picker. Auto-answers localhost/no-proxy so the tool does not "
+        "wait on an external proxy that is not configured.",
+    },
+    # "Waiting" / "Checking" / "Connecting" / "Contacting" resource probes: confirm
+    # local and continue (the classic 'internet waiting' freeze).
+    "waiting": {
+        "answer_keywords": ("continue", "yes", "ok", "default", "local"),
+        "note": "'waiting on a resource' / 'checking ...' / 'contacting ...' probe. "
+        "Confirms local continuation so the tool does not hang on a network resource.",
+    },
+}
+"""Registry of 'make-a-selection' modals that block GUI-tool launches, plus how the
+runner auto-answers each (default/local/localhost/continue). See module docstring and
+`core.gui_tool_runner.preseed_selection` for the two-phase strategy (pre-seed before
+launch, answer in-line if one still appears). This is the fix for the 'select a tree /
+proxy / internet waiting' modal that is the root cause of most 'known blocked' labels."""
+
+
 def _registries() -> list[tuple[dict[str, str], Path, str]]:
     """Each registry paired with the base dir its filenames resolve against and a
     human-readable hint for the error message when a file is missing. Order matters only
