@@ -32,7 +32,7 @@ _PLOT_FILE_TYPES = Literal["CSV", "BNP", "touchstone"]
 @mcp.tool
 async def start_optimizepi_session(workflow_key: _WORKFLOW_KEYS) -> dict:
     """Begin a new OptimizePI automation session by selecting its workflow.
-See `.forjinn/skills/sigrity-pi/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity-pi') for the full verified playbook, pitfalls, and a live example."""
     session = tcl_sessions.create("optimizepi")
     tcl_sessions.add_line(
         session.session_id,
@@ -44,7 +44,7 @@ See `.forjinn/skills/sigrity-pi/SKILL.md` for the full verified playbook, pitfal
 @mcp.tool
 async def optimizepi_attach_layout(session_id: str, spd_file: str) -> dict:
     """Attach a layout (.spd) design to the current OptimizePI session.
-See `.forjinn/skills/sigrity-pi/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity-pi') for the full verified playbook, pitfalls, and a live example."""
     tcl_sessions.add_line(session_id, f"sigrity::open document -attach {tcl_path(spd_file)} {{!}}")
     return {"session_id": session_id, "spd_file": spd_file}
 
@@ -52,7 +52,7 @@ See `.forjinn/skills/sigrity-pi/SKILL.md` for the full verified playbook, pitfal
 @mcp.tool
 async def optimizepi_add_vrm(session_id: str, power_net: str, ground_net: str, ref_des: str) -> dict:
     """Add a VRM (voltage regulator module) reference on a power/ground net pair, by component.
-See `.forjinn/skills/sigrity-pi/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity-pi') for the full verified playbook, pitfalls, and a live example."""
     tcl_sessions.add_line(
         session_id,
         (
@@ -72,7 +72,7 @@ async def optimizepi_add_decap_candidate(
     ref_des: str,
 ) -> dict:
     """Add a decoupling-capacitor placement candidate on a power/ground net pair for the optimizer to consider.
-See `.forjinn/skills/sigrity-pi/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity-pi') for the full verified playbook, pitfalls, and a live example."""
     tcl_sessions.add_line(
         session_id,
         (
@@ -98,7 +98,7 @@ async def optimizepi_add_impedance_observation(
     ref_des: str,
 ) -> dict:
     """Add an impedance-observation point (a pin pair to track PDN impedance at) for the optimizer's target-impedance analysis.
-See `.forjinn/skills/sigrity-pi/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity-pi') for the full verified playbook, pitfalls, and a live example."""
     tcl_sessions.add_line(
         session_id,
         (
@@ -112,7 +112,7 @@ See `.forjinn/skills/sigrity-pi/SKILL.md` for the full verified playbook, pitfal
 @mcp.tool
 async def optimizepi_set_frequency_range(session_id: str, start_freq: str, end_freq: str) -> dict:
     """Set the frequency range OptimizePI analyzes over.
-See `.forjinn/skills/sigrity-pi/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity-pi') for the full verified playbook, pitfalls, and a live example."""
     tcl_sessions.add_line(
         session_id, f"sigrity::update simu -startFreq {tcl_str(start_freq)} -endFreq {tcl_str(end_freq)} {{!}}"
     )
@@ -131,7 +131,7 @@ async def optimizepi_configure_optimization(
     max_area: Optional[float] = None,
 ) -> dict:
     """Configure the decap-optimization goal and constraints for one device/optimization target.
-See `.forjinn/skills/sigrity-pi/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity-pi') for the full verified playbook, pitfalls, and a live example."""
     parts = [
         "sigrity::update deviceOPTI",
         f"-name {tcl_str(name)}",
@@ -154,7 +154,7 @@ See `.forjinn/skills/sigrity-pi/SKILL.md` for the full verified playbook, pitfal
 @mcp.tool
 async def optimizepi_generate_report(session_id: str) -> dict:
     """Queue OptimizePI's standard optimization report. Appends `sigrity::do genReport {!}`.
-See `.forjinn/skills/sigrity-pi/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity-pi') for the full verified playbook, pitfalls, and a live example."""
     tcl_sessions.add_line(session_id, "sigrity::do genReport {!}")
     return {"session_id": session_id}
 
@@ -167,7 +167,7 @@ async def optimizepi_export_impedance_plot(
     file_type: _PLOT_FILE_TYPES = "CSV",
 ) -> dict:
     """Queue an export of an impedance-vs-frequency plot for a named port once the run finishes.
-See `.forjinn/skills/sigrity-pi/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity-pi') for the full verified playbook, pitfalls, and a live example."""
     tcl_sessions.add_line(
         session_id,
         (
@@ -181,7 +181,7 @@ See `.forjinn/skills/sigrity-pi/SKILL.md` for the full verified playbook, pitfal
 @mcp.tool
 async def optimizepi_run_session(session_id: str) -> dict:
     """Write out the session's accumulated Tcl macro and launch OptimizePI against it as a background job.
-See `.forjinn/skills/sigrity-pi/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity-pi') for the full verified playbook, pitfalls, and a live example."""
     record = await run_session(
         session_id, tool="optimizepi", tcl_arg_flag="-tcl", build_args=["-b", "-export_report"]
     )

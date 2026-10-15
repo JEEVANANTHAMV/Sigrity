@@ -24,7 +24,7 @@ from sigrity_mcp.mcp_app import mcp
 @mcp.tool
 async def run_celsius2d_workspace(pdcx_file: str, save_excel_result: bool = True) -> dict:
     """Run an already-configured Celsius2D thermal/thermal-stress workspace, as a background job.
-See `.forjinn/skills/sigrity-celsius/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity-celsius') for the full verified playbook, pitfalls, and a live example."""
     args = ["-b"]
     if save_excel_result:
         args.append("-XIMSAVE")

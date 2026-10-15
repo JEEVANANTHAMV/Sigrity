@@ -85,7 +85,7 @@ _MODES = Literal[
 @mcp.tool
 async def start_powersi_session(spd_file: str) -> dict:
     """Begin a new PowerSI automation session by opening a layout design.
-See `.forjinn/skills/sigrity-si/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity-si') for the full verified playbook, pitfalls, and a live example."""
     session = tcl_sessions.create("powersi")
     tcl_sessions.add_line(session.session_id, f"sigrity::open document {tcl_path(spd_file)} {{!}}")
     return {"session_id": session.session_id, "spd_file": spd_file}
@@ -94,7 +94,7 @@ See `.forjinn/skills/sigrity-si/SKILL.md` for the full verified playbook, pitfal
 @mcp.tool
 async def powersi_save_document(session_id: str, spd_file: str) -> dict:
     """Save the currently-open design to a native `.spd` file.
-See `.forjinn/skills/sigrity-si/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity-si') for the full verified playbook, pitfalls, and a live example."""
     tcl_sessions.add_line(session_id, f"sigrity::save {tcl_path(spd_file)} {{!}}")
     return {"session_id": session_id, "spd_file": spd_file}
 
@@ -102,7 +102,7 @@ See `.forjinn/skills/sigrity-si/SKILL.md` for the full verified playbook, pitfal
 @mcp.tool
 async def powersi_set_mode(session_id: str, mode: _MODES) -> dict:
     """Set the PowerSI analysis mode for this session (e.g. 'extraction' for S-parameter extraction, 'resonance' for resonance analysis).
-See `.forjinn/skills/sigrity-si/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity-si') for the full verified playbook, pitfalls, and a live example."""
     tcl_sessions.add_line(session_id, f"sigrity::update option -mode {tcl_str(mode)} {{!}}")
     return {"session_id": session_id, "mode": mode}
 
@@ -115,7 +115,7 @@ async def powersi_set_frequency_sweep(
     use_afs: bool = True,
 ) -> dict:
     """Define the frequency sweep range for the simulation.
-See `.forjinn/skills/sigrity-si/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity-si') for the full verified playbook, pitfalls, and a live example."""
     start = _to_plain_hz(start, "start")
     end = _to_plain_hz(end, "end")
     if float(end) < float(start):
@@ -136,7 +136,7 @@ async def powersi_add_ports_auto(
     power_ref_impedance: Optional[float] = None,
 ) -> dict:
     """Auto-generate ports for every pin of a component (or every component if ref_des is omitted).
-See `.forjinn/skills/sigrity-si/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity-si') for the full verified playbook, pitfalls, and a live example."""
     parts = ["sigrity::add port -all"]
     if ref_des:
         parts.append(f"-circuit {tcl_str(ref_des)}")
@@ -159,7 +159,7 @@ async def powersi_add_edge_port(
     reference_impedance: float = 50.0,
 ) -> dict:
     """Add one explicit edge port between a positive and negative node (e.g. a trace edge to a ground edge).
-See `.forjinn/skills/sigrity-si/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity-si') for the full verified playbook, pitfalls, and a live example."""
     tcl_sessions.add_line(
         session_id,
         (
@@ -180,7 +180,7 @@ async def powersi_add_excitation(
     amplitude: Optional[float] = None,
 ) -> dict:
     """Add a signal excitation source between two nets, for time/frequency-domain response analysis.
-See `.forjinn/skills/sigrity-si/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity-si') for the full verified playbook, pitfalls, and a live example."""
     parts = [
         "sigrity::excitation add",
         f"-posnet {tcl_str(positive_net)}",
@@ -204,7 +204,7 @@ async def powersi_export_network(
     frequency: Optional[str] = None,
 ) -> dict:
     """Queue an export of the simulated network's S/Z/Y matrix to a file once the run finishes.
-See `.forjinn/skills/sigrity-si/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity-si') for the full verified playbook, pitfalls, and a live example."""
     parts = [
         "sigrity::export network",
         f"-network {tcl_str(network_name)}",
@@ -230,7 +230,7 @@ async def powersi_export_rlgc(
     frequency: Optional[str] = None,
 ) -> dict:
     """Queue an export of the network's per-unit-length RLGC parameters to a file.
-See `.forjinn/skills/sigrity-si/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity-si') for the full verified playbook, pitfalls, and a live example."""
     parts = [
         "sigrity::export NetworkRLGC",
         f"-network {tcl_str(network_name)}",
@@ -253,7 +253,7 @@ See `.forjinn/skills/sigrity-si/SKILL.md` for the full verified playbook, pitfal
 @mcp.tool
 async def powersi_generate_html_report(session_id: str) -> dict:
     """Queue generation of PowerSI's standard HTML simulation report. Appends `sigrity::do GenReport {!}`.
-See `.forjinn/skills/sigrity-si/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity-si') for the full verified playbook, pitfalls, and a live example."""
     tcl_sessions.add_line(session_id, "sigrity::do GenReport {!}")
     return {"session_id": session_id}
 
@@ -265,7 +265,7 @@ async def powersi_run_session(
     output_format: Literal["touchstone", "bnp", "both"] = "touchstone",
 ) -> dict:
     """Write out the session's accumulated Tcl macro and launch PowerSI against it as a background job.
-See `.forjinn/skills/sigrity-si/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity-si') for the full verified playbook, pitfalls, and a live example."""
     session = tcl_sessions.add_line(session_id, "sigrity::begin simulation {!}")
     lines = session.script._lines
     open_idx = next((i for i, l in enumerate(lines) if l.startswith("sigrity::open document")), None)

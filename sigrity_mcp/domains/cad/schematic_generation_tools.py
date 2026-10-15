@@ -106,7 +106,7 @@ async def generate_schematic_from_spec(
     create_netlist: bool = True,
 ) -> dict:
     """Author a complete schematic from a structured circuit spec in one call, then save and run it.
-See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity-cad') for the full verified playbook, pitfalls, and a live example."""
     given = [design, schematic_folder, page]
     if any(given) and not all(given):
         return {

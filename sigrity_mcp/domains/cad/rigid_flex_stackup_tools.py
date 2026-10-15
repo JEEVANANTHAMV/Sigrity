@@ -227,7 +227,7 @@ async def generate_multilayer_stackup(session_id: str, layers: list[dict[str, An
     `allegro_run_session(session_id, board_file)`.
 
     ORDERING (verified LIVE 2026-09-30 against a real board copy on this machine, TWICE —
-    see `.forjinn/skills/sigrity-cad/SKILL.md` for the exact run and raw `x-section` report
+    see load_skill('sigrity-cad') for the exact run and raw `x-section` report
     output): each layer is queued via `axlXSectionCreate(nil 'bottom <defstruct>)` IN THE
     SAME order as the input `layers` list (top physical layer queued first). `'top'`/
     `'afterBottom` are documented as restricted to unnamed dielectric/MASK layers for PCB
@@ -315,7 +315,7 @@ async def generate_multilayer_stackup(session_id: str, layers: list[dict[str, An
     correspond to any SKILL call made against the board. Order your `layers` list so the
     intended reference plane is physically adjacent to its signal layer; that adjacency alone
     is what Allegro's calculator uses.
-See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity-cad') for the full verified playbook, pitfalls, and a live example."""
     if not layers:
         raise ValueError("layers must be a non-empty list, in top-to-bottom physical order.")
 

@@ -86,7 +86,7 @@ async def _wait_for_terminal_state(job_id: str, poll_timeout_seconds: float) -> 
 @mcp.tool
 async def run_ipc2581_export(board_file: str, output_file: Optional[str] = None, attr_file: Optional[str] = None) -> dict:
     """Export an Allegro board to IPC-2581 (unified fab/assembly/test data), as a background job.
-See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity-cad') for the full verified playbook, pitfalls, and a live example."""
     args = []
     if attr_file:
         args += ["-g", attr_file]
@@ -100,7 +100,7 @@ See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfa
 @mcp.tool
 async def run_ipc356_export(board_file: str, output_file: Optional[str] = None) -> dict:
     """Export an Allegro board to IPC-356 (bare-board electrical test netlist), as a background job.
-See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity-cad') for the full verified playbook, pitfalls, and a live example."""
     args = [board_file]
     if output_file:
         args.append(output_file)
@@ -111,7 +111,7 @@ See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfa
 @mcp.tool
 async def run_step_export(board_file: str, output_file: Optional[str] = None) -> dict:
     """Export an Allegro board to STEP (3D mechanical/ECAD-MCAD interchange), as a background job.
-See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity-cad') for the full verified playbook, pitfalls, and a live example."""
     args = []
     if output_file:
         args += ["-o", output_file]
@@ -127,7 +127,7 @@ async def run_allegro_generate_artwork(
     list_only: bool = False,
 ) -> dict:
     """Generate real Gerber (RS274X) artwork films from an Allegro board, as a background job.
-See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity-cad') for the full verified playbook, pitfalls, and a live example."""
     if list_only:
         args = ["-l", board_file]
     else:
@@ -166,7 +166,7 @@ See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfa
 @mcp.tool
 async def run_allegro_gerber_plot(artwork_file: str, penplot_file: Optional[str] = None) -> dict:
     """Convert an already-generated Gerber artwork file to legacy pen-plotter format, as a background job.
-See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity-cad') for the full verified playbook, pitfalls, and a live example."""
     args = [artwork_file]
     if penplot_file:
         args.append(penplot_file)
@@ -183,7 +183,7 @@ async def run_ipc2581_import(
     import_layer_features: bool = False,
 ) -> dict:
     """Import IPC-2581 data into Allegro — CONFIRMED LIVE (see module docstring).
-See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity-cad') for the full verified playbook, pitfalls, and a live example."""
     args: list[str] = []
     if import_stackup:
         args.append("-x")
@@ -206,7 +206,7 @@ async def run_idf_export(
     idf_version: Optional[Literal["2.0", "3.0"]] = None,
 ) -> dict:
     """Export Allegro mechanical outline/placement data to IDF format — CONFIRMED LIVE (see module docstring).
-See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity-cad') for the full verified playbook, pitfalls, and a live example."""
     args: list[str] = []
     if idf_format:
         args += ["-d", idf_format]
@@ -227,7 +227,7 @@ async def run_idx_export(
     export_traces_as_outlines: bool = False,
 ) -> dict:
     """Export Allegro mechanical/placement data to IDX (ProSTEP EDMD) format — CONFIRMED LIVE (see module docstring).
-See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity-cad') for the full verified playbook, pitfalls, and a live example."""
     args: list[str] = []
     if output_name:
         args += ["-o", _resolve(output_name)]
@@ -248,7 +248,7 @@ async def run_idf_import(
     idf_format: Optional[Literal["IDF", "PTC", "SDRC"]] = None,
 ) -> dict:
     """Import IDF mechanical outline/placement data into Allegro (BUILT, UNTESTED — see module docstring).
-See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity-cad') for the full verified playbook, pitfalls, and a live example."""
     args: list[str] = []
     if idf_format:
         args += ["-d", idf_format]
@@ -264,7 +264,7 @@ See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfa
 @mcp.tool
 async def run_idx_import(idx_file: str, output_board_file: Optional[str] = None, input_board_file: Optional[str] = None) -> dict:
     """Import IDX (ProSTEP EDMD) mechanical data into Allegro (BUILT, UNTESTED — see module docstring).
-See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity-cad') for the full verified playbook, pitfalls, and a live example."""
     args = [_resolve(idx_file)]
     if input_board_file:
         args += ["-i", _resolve(input_board_file)]
@@ -283,7 +283,7 @@ async def run_dml_export(
     frequency: Optional[str] = None,
 ) -> dict:
     """Export an Allegro board's connectivity to Cadence's DML boardmodel format — CONFIRMED LIVE (see module docstring).
-See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity-cad') for the full verified playbook, pitfalls, and a live example."""
     args: list[str] = []
     if nets_file:
         args.append(f"nets={_resolve(nets_file)}")
@@ -308,7 +308,7 @@ async def run_pdf_export(
     export_outlines: bool = False,
 ) -> dict:
     """Export Allegro data directly to PDF — CONFIRMED LIVE (see module docstring).
-See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity-cad') for the full verified playbook, pitfalls, and a live example."""
     args: list[str] = []
     if output_name:
         args += ["-o", _resolve(output_name)]

@@ -57,7 +57,7 @@ from sigrity_mcp.mcp_app import mcp
 @mcp.tool
 async def run_spif_export_to_specctra(board_file: str, dsn_file: Optional[str] = None) -> dict:
     """Export an Allegro board to a SPECCTRA `.dsn` design file, as a background job.
-See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity-cad') for the full verified playbook, pitfalls, and a live example."""
     args = ["-o", board_file]
     if dsn_file:
         args.append(dsn_file)
@@ -72,7 +72,7 @@ async def run_specctra_autoroute(
     graphics: bool = False,
 ) -> dict:
     """Run Cadence's SPECCTRA-based headless PCB autorouter against a `.dsn` design, driven by a `.do` batch script, as a background job.
-See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity-cad') for the full verified playbook, pitfalls, and a live example."""
     args = [dsn_file]
     if not graphics:
         args.append("-nog")
@@ -88,7 +88,7 @@ async def run_allegro_specctra_import(
     output_file: Optional[str] = None,
 ) -> dict:
     """Import a routed SPECCTRA session (.ses) into an Allegro board via Allegro's own native `specctra_in` command (the recommended import path — see module docstring), as a background job.
-See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity-cad') for the full verified playbook, pitfalls, and a live example."""
     clear_stale_design_lock(board_file)
     session = tcl_sessions.create("allegro")
     clean_ses = str(session_file).replace("\\", "/")
@@ -125,7 +125,7 @@ See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfa
 @mcp.tool
 async def run_specctra_import_session(board_file: str, session_file: str) -> dict:
     """Import a routed SPECCTRA session via standalone spif_batch.exe (KNOWN BROKEN on this machine — prefer run_allegro_specctra_import), as a background job.
-See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity-cad') for the full verified playbook, pitfalls, and a live example."""
     args = ["-i", board_file, session_file]
     record = await submit_job(tool="spif_batch", build_args=args)
     return {

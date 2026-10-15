@@ -164,7 +164,7 @@ async def generate_amm_library_from_spreadsheet(
     external_node_assignment: Optional[Literal["Series", "Shunt"]] = None,
 ) -> dict:
     """Build/populate an AMM (.amm) component library from a spreadsheet of R/L/S-parameter model data.
-See `.forjinn/skills/sigrity/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity') for the full verified playbook, pitfalls, and a live example."""
     source_file = _ensure_xlsx_readable(source_file)
     args = ["-b", "-SourceFile", source_file]
     if worksheet:

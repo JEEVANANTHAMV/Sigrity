@@ -57,7 +57,7 @@ def _ckt_arg(ref_des: Union[str, list[str]]) -> str:
 @mcp.tool
 async def start_powerdc_session(spd_file: str) -> dict:
     """Begin a new PowerDC automation session by opening an empty document, then attaching a layout (.spd) design.
-See `.forjinn/skills/sigrity-pi/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity-pi') for the full verified playbook, pitfalls, and a live example."""
     session = tcl_sessions.create("powerdc")
     tcl_sessions.add_line(session.session_id, "sigrity::open document {!}")
     tcl_sessions.add_line(
@@ -74,7 +74,7 @@ async def powerdc_set_simulation_mode(
     thermal_only: bool = False,
 ) -> dict:
     """Select which PowerDC analysis mode(s) this session runs: DC IR-drop, electro-thermal co-simulation, or thermal-only.
-See `.forjinn/skills/sigrity-pi/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity-pi') for the full verified playbook, pitfalls, and a live example."""
     parts = ["sigrity::set pdcSimMode"]
     if ir_drop_analysis:
         parts.append("-irDropAnalysis {1}")
@@ -112,7 +112,7 @@ async def powerdc_add_vrm(
     literal class name `PowerNets` rather than any board-specific net), not raw net-name strings -- a
     bare SPDIF-translated `.spd` with no Net Class/AMM setup may not satisfy this regardless of net
     names. Treat this tool as unconfirmed until a Net-Class-defined design is tried.
-See `.forjinn/skills/sigrity-pi/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity-pi') for the full verified playbook, pitfalls, and a live example."""
     ckt = _ckt_arg(ref_des)
     tcl_sessions.add_line(
         session_id,
@@ -134,7 +134,7 @@ async def powerdc_add_sink(
     lower_tolerance: Optional[str] = None,
 ) -> dict:
     """Add a current-sink (load device) on a power/ground net pair for one or more components.
-See `.forjinn/skills/sigrity-pi/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity-pi') for the full verified playbook, pitfalls, and a live example."""
     parts = [
         "sigrity::add pdcSink -auto",
         _net_arg(power_net, ground_net),
@@ -165,7 +165,7 @@ async def powerdc_add_interconnect(
     negative_pin: Optional[str] = None,
 ) -> dict:
     """Add a fixed-resistance interconnect element (e.g. a jumper or fuse) on a power/ground net pair.
-See `.forjinn/skills/sigrity-pi/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity-pi') for the full verified playbook, pitfalls, and a live example."""
     parts = ["sigrity::add pdcInter -auto", _net_arg(power_net, ground_net), _ckt_arg(ref_des)]
     if positive_pin is not None:
         parts.append(f"-positivePin {tcl_str(positive_pin)}")
@@ -180,7 +180,7 @@ See `.forjinn/skills/sigrity-pi/SKILL.md` for the full verified playbook, pitfal
 @mcp.tool
 async def powerdc_mark_thermal_component(session_id: str, ref_des: str) -> dict:
     """Flag a component as a thermal component so PowerDC includes it in thermal/electro-thermal analysis.
-See `.forjinn/skills/sigrity-pi/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity-pi') for the full verified playbook, pitfalls, and a live example."""
     tcl_sessions.add_line(
         session_id, f"sigrity::update circuit {tcl_str(ref_des)} -setAsThermalComponent {{1}} {{!}}"
     )
@@ -197,7 +197,7 @@ async def powerdc_set_power_dissipation(
     output_temperature_map: Optional[str] = None,
 ) -> dict:
     """Set a thermal component's power dissipation, either as a fixed wattage or from a power-map file.
-See `.forjinn/skills/sigrity-pi/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity-pi') for the full verified playbook, pitfalls, and a live example."""
     if (watts is None) == (power_map_file is None):
         raise ValueError("Provide exactly one of watts or power_map_file, not both/neither.")
 
@@ -221,7 +221,7 @@ async def powerdc_set_thermal_test_board(
     enhance_pkg_area: bool = False,
 ) -> dict:
     """Configure PowerDC's standard JEDEC-style thermal test board (used for package-level thermal characterization).
-See `.forjinn/skills/sigrity-pi/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity-pi') for the full verified playbook, pitfalls, and a live example."""
     tcl_sessions.add_line(
         session_id,
         (
@@ -236,7 +236,7 @@ See `.forjinn/skills/sigrity-pi/SKILL.md` for the full verified playbook, pitfal
 @mcp.tool
 async def powerdc_enable_autosave_results(session_id: str, save_excel: bool = True) -> dict:
     """Enable PowerDC's auto-save of simulation results (and optionally the Excel results workbook) once the run finishes.
-See `.forjinn/skills/sigrity-pi/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity-pi') for the full verified playbook, pitfalls, and a live example."""
     tcl_sessions.add_line(
         session_id,
         f"sigrity::update option -AutoSaveSimulationResult {{1}} -AutoSaveExcelResult {{{int(save_excel)}}} {{!}}",
@@ -247,7 +247,7 @@ See `.forjinn/skills/sigrity-pi/SKILL.md` for the full verified playbook, pitfal
 @mcp.tool
 async def powerdc_save_workspace(session_id: str, pdcx_file: str) -> dict:
     """Save the current PowerDC workspace/setup to a `.pdcx` file within the session's macro.
-See `.forjinn/skills/sigrity-pi/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity-pi') for the full verified playbook, pitfalls, and a live example."""
     tcl_sessions.add_line(session_id, f"sigrity::save -w {tcl_path(pdcx_file)} {{!}}")
     return {"session_id": session_id, "pdcx_file": pdcx_file}
 
@@ -260,7 +260,7 @@ async def powerdc_run_one_step_powertree(
     amm_library: str,
 ) -> dict:
     """Queue PowerDC's \"One-Step PowerTree\" automated VRM/sink extraction from a spreadsheet, inside the current session's macro.
-See `.forjinn/skills/sigrity-pi/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity-pi') for the full verified playbook, pitfalls, and a live example."""
     tcl_sessions.add_line(
         session_id,
         (
@@ -289,7 +289,7 @@ async def powerdc_generate_signoff_report(
     all_options: bool = False,
 ) -> dict:
     """Queue generation of PowerDC's sign-off HTML report from *within* the current Tcl session (before/instead of running PowerDC's separate `-Report` CLI batch mode).
-See `.forjinn/skills/sigrity-pi/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity-pi') for the full verified playbook, pitfalls, and a live example."""
     parts = ["sigrity::do pdcReport"]
     flag_map = {
         "-resultTable": result_table,
@@ -312,7 +312,7 @@ See `.forjinn/skills/sigrity-pi/SKILL.md` for the full verified playbook, pitfal
 @mcp.tool
 async def powerdc_run_session(session_id: str, spd_file: Optional[str] = None) -> dict:
     """Write out the session's accumulated Tcl macro and launch PowerDC against it as a background job.
-See `.forjinn/skills/sigrity-pi/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity-pi') for the full verified playbook, pitfalls, and a live example."""
     tcl_sessions.add_line(session_id, "sigrity::begin simulation {!}")
     record = await run_session(
         session_id,
@@ -332,7 +332,7 @@ See `.forjinn/skills/sigrity-pi/SKILL.md` for the full verified playbook, pitfal
 @mcp.tool
 async def powerdc_export_signoff_report(case_file: str, report_type: _REPORT_TYPE = "all") -> dict:
     """Generate a PowerDC sign-off report against an already-simulated case, via PowerDC's CLI-only `-Report` batch mode (no Tcl session involved).
-See `.forjinn/skills/sigrity-pi/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity-pi') for the full verified playbook, pitfalls, and a live example."""
     args = ["-b", case_file, "-Report", f"-{report_type}"]
     record = await submit_job(tool="powerdc", build_args=args)
     return {"job_id": record.job_id, "state": record.state, "job_dir": record.job_dir, "command": record.command}

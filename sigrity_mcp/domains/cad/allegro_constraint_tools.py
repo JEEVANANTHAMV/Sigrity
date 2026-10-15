@@ -64,7 +64,7 @@ async def allegro_set_spacing_constraint(
     layer: Optional[str] = None,
 ) -> dict:
     """Set a Constraint Manager spacing rule (e.g. line-to-line, line-to-shape clearance), within the current Allegro SKILL session.
-See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity-cad') for the full verified playbook, pitfalls, and a live example."""
     expr = f"(axlCNSSetSpacing {_cset_arg(cset)} {_layer_arg(layer)} '{constraint} {_value_arg(value)})"
     tcl_sessions.add_line(session_id, _skill_line(expr))
     return {"session_id": session_id, "constraint": constraint, "value": value, "cset": cset, "layer": layer}
@@ -79,7 +79,7 @@ async def allegro_set_physical_constraint(
     layer: Optional[str] = None,
 ) -> dict:
     """Set a Constraint Manager physical rule (e.g. minimum line width, allowed via types), within the current Allegro SKILL session.
-See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity-cad') for the full verified playbook, pitfalls, and a live example."""
     expr = f"(axlCNSSetPhysical {_cset_arg(cset)} {_layer_arg(layer)} '{constraint} {_value_arg(value)})"
     tcl_sessions.add_line(session_id, _skill_line(expr))
     return {"session_id": session_id, "constraint": constraint, "value": value, "cset": cset, "layer": layer}
@@ -88,7 +88,7 @@ See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfa
 @mcp.tool
 async def allegro_create_ecset(session_id: str, name: str, copy_from: Optional[str] = None) -> dict:
     """Create a new electrical constraint set (ecset) — e.g. for impedance/length-matching rules on a net group.
-See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity-cad') for the full verified playbook, pitfalls, and a live example."""
     expr = f"(axlCNSEcsetCreate {skill_str(name)}" + (f" {skill_str(copy_from)})" if copy_from else ")")
     tcl_sessions.add_line(session_id, _skill_line(expr))
     return {"session_id": session_id, "name": name, "copy_from": copy_from}
@@ -97,7 +97,7 @@ See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfa
 @mcp.tool
 async def allegro_get_net_constraint(session_id: str, net_name: str, constraint_name: str) -> dict:
     """Queue a read-only query of an electrical constraint value flattened onto a net (e.g. impedance, propagation delay), within the current Allegro SKILL session.
-See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity-cad') for the full verified playbook, pitfalls, and a live example."""
     expr = f"(axlCnsNetFlattened {skill_str(net_name)} {skill_str(constraint_name)})"
     tcl_sessions.add_line(session_id, _skill_line(expr))
     return {"session_id": session_id, "net_name": net_name, "constraint_name": constraint_name}

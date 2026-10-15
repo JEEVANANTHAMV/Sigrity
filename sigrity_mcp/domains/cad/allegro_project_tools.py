@@ -76,7 +76,7 @@ async def allegro_copy_project(
     new_design_name: str,
 ) -> dict:
     """Create a new schematic project by copying an existing one — CONFIRMED LIVE (see module docstring).
-See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity-cad') for the full verified playbook, pitfalls, and a live example."""
     args = [
         "-proj", _resolve(source_project_file),
         "-copytopath", _resolve(copy_to_path),
@@ -98,7 +98,7 @@ async def allegro_package_xcon_project(
     output_folder: Optional[str] = None,
 ) -> dict:
     """Package a `.xcon` connectivity file into a new schematic project — CONFIRMED LIVE (see module docstring).
-See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity-cad') for the full verified playbook, pitfalls, and a live example."""
     args = [
         "-xcon", _resolve(xcon_file),
         "-root", root_design_name,
@@ -123,7 +123,7 @@ async def allegro_generate_sim_variant(
     dielectric_oversize_absolute: Optional[float] = None,
 ) -> dict:
     """Create a new derivative Allegro design with over/undersized traces or dielectrics — CONFIRMED LIVE (see module docstring).
-See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity-cad') for the full verified playbook, pitfalls, and a live example."""
     if cline_oversize_percent is not None and cline_oversize_absolute is not None:
         raise ValueError("give only one of cline_oversize_percent/cline_oversize_absolute, not both")
     if dielectric_oversize_percent is not None and dielectric_oversize_absolute is not None:

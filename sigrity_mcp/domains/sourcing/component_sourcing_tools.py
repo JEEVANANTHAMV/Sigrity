@@ -266,7 +266,7 @@ async def lookup_component_sourcing(
     vendors: Optional[list[str]] = None,
 ) -> dict:
     """Look up one part's sourcing data (stock, lead time, price, lifecycle, alternates) across DigiKey, Mouser, Farnell/element14, Arrow, and Avnet in a single call.
-See `.forjinn/skills/sigrity/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity') for the full verified playbook, pitfalls, and a live example."""
     selected = [v for v in (vendors or list(_ALL_VENDORS)) if v in _LOOKUPS]
     unknown = [v for v in (vendors or []) if v not in _LOOKUPS]
 

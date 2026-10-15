@@ -35,7 +35,7 @@ from sigrity_mcp.mcp_app import mcp
 async def run_con2xml(input_file: str, output_file: Optional[str] = None) -> dict:
     """Translate a Concept-HDL netlist to XML (BLOCKED on this build by a SPB Translators
     capability gate — NOT a license problem — see module docstring).
-    See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+    Call load_skill('sigrity-cad') for the full verified playbook, pitfalls, and a live example."""
     args = [input_file]
     if output_file:
         args.append(output_file)
@@ -47,7 +47,7 @@ async def run_con2xml(input_file: str, output_file: Optional[str] = None) -> dic
 async def run_cap2xml(input_file: str, output_file: Optional[str] = None) -> dict:
     """Translate an OrCAD Capture design to XML (BLOCKED on this build by a SPB Translators
     capability gate — NOT a license problem — see module docstring).
-    See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+    Call load_skill('sigrity-cad') for the full verified playbook, pitfalls, and a live example."""
     args = [input_file]
     if output_file:
         args.append(output_file)
@@ -59,7 +59,7 @@ async def run_cap2xml(input_file: str, output_file: Optional[str] = None) -> dic
 async def run_dml2con(input_file: str, output_file: Optional[str] = None) -> dict:
     """Translate a DML library/design file to Concept-HDL format (BLOCKED on this build by a
     SPB Translators capability gate — NOT a license problem — see module docstring).
-    See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+    Call load_skill('sigrity-cad') for the full verified playbook, pitfalls, and a live example."""
     args = [input_file]
     if output_file:
         args.append(output_file)
@@ -71,7 +71,7 @@ async def run_dml2con(input_file: str, output_file: Optional[str] = None) -> dic
 async def run_apd2con(input_file: str, output_file: Optional[str] = None) -> dict:
     """Bridge an Allegro Package Designer (APD) design to Concept-HDL (BLOCKED on this build
     by a SPB Translators capability gate — NOT a license problem — see module docstring).
-    See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+    Call load_skill('sigrity-cad') for the full verified playbook, pitfalls, and a live example."""
     args = [input_file]
     if output_file:
         args.append(output_file)

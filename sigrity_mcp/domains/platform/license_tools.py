@@ -30,7 +30,7 @@ async def get_license_server_status(license_file: str | None = None) -> dict:
 CAVEAT: on this PREMIUM no-license-required machine this reading has been proven
 UNRELIABLE and is NOT a predictor of whether a specific tool can run (no tool is
 license-gated here) -- see the returned reliability_note.
-See `.forjinn/skills/sigrity/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity') for the full verified playbook, pitfalls, and a live example."""
     spec = license_file or settings.license_file
     result = await run_quick("lmutil", ["lmstat", "-a", "-c", spec], timeout=30.0)
     result["license_file"] = spec
@@ -41,7 +41,7 @@ See `.forjinn/skills/sigrity/SKILL.md` for the full verified playbook, pitfalls,
 @mcp.tool
 async def get_license_feature_status(feature_name: str, license_file: str | None = None) -> dict:
     """Check checkout status of one specific FlexNet feature (equivalent to `lmutil lmstat -f <feature>`).
-See `.forjinn/skills/sigrity/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity') for the full verified playbook, pitfalls, and a live example."""
     spec = license_file or settings.license_file
     result = await run_quick("lmutil", ["lmstat", "-f", feature_name, "-c", spec], timeout=30.0)
     result["license_file"] = spec
@@ -53,7 +53,7 @@ See `.forjinn/skills/sigrity/SKILL.md` for the full verified playbook, pitfalls,
 @mcp.tool
 async def diagnose_license_feature(feature_name: str, license_file: str | None = None) -> dict:
     """Diagnose why checking out a specific FlexNet feature would succeed or fail right now.
-See `.forjinn/skills/sigrity/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity') for the full verified playbook, pitfalls, and a live example."""
     spec = license_file or settings.license_file
     result = await run_quick("lmutil", ["lmdiag", "-c", spec, feature_name], timeout=30.0)
     result["license_file"] = spec
@@ -64,5 +64,5 @@ See `.forjinn/skills/sigrity/SKILL.md` for the full verified playbook, pitfalls,
 @mcp.tool
 async def get_license_host_id() -> dict:
     """Get this machine's FlexNet host ID (`lmutil lmhostid`), needed when requesting or renewing a license file.
-See `.forjinn/skills/sigrity/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity') for the full verified playbook, pitfalls, and a live example."""
     return await run_quick("lmutil", ["lmhostid"], timeout=15.0)

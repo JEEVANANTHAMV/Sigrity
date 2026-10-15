@@ -50,7 +50,7 @@ async def _tool_param_names(tool_name: str) -> Optional[set[str]]:
 @mcp.tool
 async def run_tool_pipeline(steps: list[dict], stop_on_error: bool = True) -> dict:
     """Run a sequence of MCP tool calls in one shot, threading results between steps automatically.
-See `.forjinn/skills/sigrity/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity') for the full verified playbook, pitfalls, and a live example."""
     if len(steps) > MAX_STEPS:
         return {"error": f"Pipeline has {len(steps)} steps, exceeding the {MAX_STEPS}-step limit."}
 

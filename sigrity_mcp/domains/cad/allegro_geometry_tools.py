@@ -211,7 +211,7 @@ async def allegro_create_trace(
     trace with no neck-width violations. There is deliberately no silent default here —
     always read the board's real existing trace width for the layer/net you're routing on
     rather than guessing.
-See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity-cad') for the full verified playbook, pitfalls, and a live example."""
     if len(points) < 2:
         raise ValueError("A trace needs at least two points.")
     _check_self_overlap(points)
@@ -240,7 +240,7 @@ async def allegro_create_via(
     mirror: bool = False,
 ) -> dict:
     """Place a standalone via at an explicit coordinate, within the current Allegro SKILL session.
-See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity-cad') for the full verified playbook, pitfalls, and a live example."""
     net_arg = skill_str(net_name) if net_name is not None else "nil"
     mirror_arg = "t" if mirror else "nil"
     expr = f"(axlDBCreateVia {skill_str(padstack_name)} (list {x} {y}) {net_arg} {mirror_arg} {rotation})"
@@ -259,7 +259,7 @@ async def allegro_create_simple_padstack(
     drill_diameter: Optional[float] = None,
 ) -> dict:
     """Create a simple, single-pad-layer padstack definition, within the current Allegro SKILL session.
-See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity-cad') for the full verified playbook, pitfalls, and a live example."""
     pad_struct = (
         f"(make_axlPadStackPad ?layer {skill_str(pad_layer)} ?type 'REGULAR "
         f"?figure '{pad_figure} ?figureSize {pad_width}:{pad_height})"
@@ -285,7 +285,7 @@ async def allegro_place_module_instance(
     mirror: bool = False,
 ) -> dict:
     """Place a module (component footprint) instance at an explicit board coordinate and rotation, within the current Allegro SKILL session.
-See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity-cad') for the full verified playbook, pitfalls, and a live example."""
     logic_method = 1 if logic_from_schematic else 0
     mirror_arg = "t" if mirror else "nil"
     expr = (
@@ -313,7 +313,7 @@ async def allegro_assign_net(
     ignore_fixed: bool = False,
 ) -> dict:
     """Assign a pin/via/shape to a net (or unassign it to a dummy net), within the current Allegro SKILL session.
-See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity-cad') for the full verified playbook, pitfalls, and a live example."""
     net_arg = skill_str(net_name) if net_name is not None else "nil"
     ripup_arg = "t" if ripup else "nil"
     ignore_arg = "t" if ignore_fixed else "nil"
@@ -371,7 +371,7 @@ async def allegro_delete_connect(
     `allegro_assign_net(object_type="PIN", object_name=<a pin on the net>,
     net_name=<the net's own name>, ripup=True)` instead — see the `warning` field in
     the return value for `object_type="NET"`.
-See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity-cad') for the full verified playbook, pitfalls, and a live example."""
     select_expr = f"(car (axlSelectByName {skill_str(object_type)} {skill_str(object_name)}))"
     mode_arg = " 'ripup" if ripup else ""
     expr = f"(axlDeleteObject {select_expr}{mode_arg})"
@@ -445,7 +445,7 @@ async def allegro_create_copper_shape(
         pour" that conforms to its net and re-floods on update (`axlDBDynamicShapes`) —
         what PCB designers mean by a "copper pour"/"plane shape", not a fixed polygon.
         LIVE-CONFIRMED on a real board (see this tool's own module and
-        `.forjinn/skills/sigrity-cad/SKILL.md`): `axlDBGetShapes("BOUNDARY/<layer>")`
+        load_skill('sigrity-cad')): `axlDBGetShapes("BOUNDARY/<layer>")`
         read back a real non-nil shape dbid after this call + save + run.
       - `dynamic=False`: `"ETCH/<layer>"` — a plain static filled copper shape (e.g. for
         a CONDUCTOR/signal layer where a fixed polygon is actually what's wanted).
@@ -488,14 +488,14 @@ async def allegro_create_copper_shape(
     independently confirm the shape landed (a captured `axlDBGetShapes("<class>/<layer>")`
     query is the reliable check; CONFIRMED LIVE this way 3 independent times, including a
     SECOND, fully separate Allegro process re-opening the saved board from disk — see
-    `.forjinn/skills/sigrity-cad/SKILL.md` Task 7). This tool was originally built to test
+    load_skill('sigrity-cad') Task 7). This tool was originally built to test
     whether missing plane copper was blocking PowerDC `pdcVRM` net-pair binds — it was
     NOT: the exact same PowerDC error reproduced before and after pouring real,
     independently-verified copper (see `core.tool_status`'s `powerdc` note and
-    `.forjinn/skills/sigrity-cad/SKILL.md` Task 7 for the full investigation). So this
+    load_skill('sigrity-cad') Task 7 for the full investigation). So this
     tool is confirmed to do what it says (pour real, net-bound copper) — just don't
     expect that alone to fix a `pdcVRM` net-pair failure.
-See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity-cad') for the full verified playbook, pitfalls, and a live example."""
     if len(points) < 3:
         raise ValueError("An explicit shape boundary needs at least 3 points.")
     path_expr = _closed_path_expr(points)
@@ -524,7 +524,7 @@ async def allegro_create_film(
     mirrored: bool = False,
 ) -> dict:
     """Create (or replace) an artwork film record, within the current Allegro SKILL session.
-See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity-cad') for the full verified playbook, pitfalls, and a live example."""
     layer_list = "(list " + " ".join(skill_str(l) for l in layers) + ")"
     parts = [skill_str(film_name), "?layers", layer_list]
     if negative:
@@ -539,7 +539,7 @@ See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfa
 @mcp.tool
 async def allegro_get_module_instance_location(session_id: str, instance_name: str) -> dict:
     """Queue a read-only query of a placed module instance's current location/rotation, within the current Allegro SKILL session.
-See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity-cad') for the full verified playbook, pitfalls, and a live example."""
     expr = f'(axlGetModuleInstanceLocation (car (axlSelectByName "GROUP" {skill_str(instance_name)})))'
     tcl_sessions.add_line(session_id, _skill_line(expr))
     return {"session_id": session_id, "instance_name": instance_name}
@@ -573,7 +573,7 @@ async def allegro_get_net_length(session_id: str, net_name: str) -> dict:
     `(let ((f (outfile "lengths.txt" "a"))) (fprintf f "%s %L\\n" net_name (axlDBGetLength
     (car (axlSelectByName "NET" net_name)))) (close f))`, then read that file after the
     job completes.
-See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity-cad') for the full verified playbook, pitfalls, and a live example."""
     expr = f'(axlDBGetLength (car (axlSelectByName "NET" {skill_str(net_name)})))'
     tcl_sessions.add_line(session_id, _skill_line(expr))
     return {"session_id": session_id, "net_name": net_name}

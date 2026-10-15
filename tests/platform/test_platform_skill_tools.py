@@ -68,3 +68,11 @@ def test_load_skill_unknown_name_reports_missing_directory_distinctly(tmp_path, 
     result = _run(skill_tools.load_skill("sigrity-cad"))
     assert result["available_skills"] == []
     assert "does not exist" in result["error"]
+
+
+def test_load_skills_alias_matches_load_skill():
+    result_singular = _run(skill_tools.load_skill("sigrity"))
+    result_plural = _run(skill_tools.load_skills("sigrity"))
+    assert result_singular == result_plural
+    assert "content" in result_plural
+

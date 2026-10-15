@@ -43,7 +43,7 @@ _IbisVersion = Literal["3", "4", "5", "6"]
 @mcp.tool
 async def run_ibis_check(model_file: str, ibis_version: _IbisVersion = "6") -> dict:
     """Validate an IBIS model file against a specific IBIS spec version, as a background job.
-See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity-cad') for the full verified playbook, pitfalls, and a live example."""
     tool_name = f"ibischk{ibis_version}"
     record = await submit_job(tool=tool_name, build_args=[model_file])
     return {"job_id": record.job_id, "state": record.state, "job_dir": record.job_dir, "command": record.command}
@@ -58,7 +58,7 @@ async def run_die_abstract_check(
     skip_layer_info: bool = False,
 ) -> dict:
     """Validate a die-abstract file's syntax/semantics (3D-IC/interposer flows), as a background job.
-See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity-cad') for the full verified playbook, pitfalls, and a live example."""
     args = [die_abstract_file]
     if output_file:
         args.append(output_file)
@@ -75,7 +75,7 @@ See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfa
 @mcp.tool
 async def run_die_abstract_compare(golden_file: str, eco_file: str, output_file: Optional[str] = None) -> dict:
     """Compare two die-abstract files (golden vs. ECO) and report differences, as a background job.
-See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity-cad') for the full verified playbook, pitfalls, and a live example."""
     args = [golden_file, eco_file]
     if output_file:
         args.append(output_file)
@@ -99,7 +99,7 @@ async def allegro_create_symbol(
     dra_file: str, output_symbol_file: Optional[str] = None, symbol_type: Optional[_SYMBOL_TYPES] = None
 ) -> dict:
     """Compile a `.dra` source into an Allegro symbol — CONFIRMED LIVE (see module docstring).
-See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity-cad') for the full verified playbook, pitfalls, and a live example."""
     args: list[str] = []
     if symbol_type:
         args.append(_SYMBOL_TYPE_FLAGS[symbol_type])

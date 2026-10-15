@@ -211,7 +211,7 @@ async def run_schematic_checklist(
     rules: Optional[list[str]] = None,
 ) -> dict:
     """Run an organizational design checklist (decoupling, pull-ups/downs, clocks, resets, test points) over a real Allegro net/BOM report.
-See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity-cad') for the full verified playbook, pitfalls, and a live example."""
     selected_rules = rules or list(_ALL_RULES)
     unknown_rules = [r for r in selected_rules if r not in _ALL_RULES]
     if unknown_rules:

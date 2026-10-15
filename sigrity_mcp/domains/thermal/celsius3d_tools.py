@@ -88,7 +88,7 @@ def _clear_prior_celsius_results(project_file: str) -> None:
 @mcp.tool
 async def start_celsius3d_session(project_file: str) -> dict:
     """Begin a new Celsius3D automation session by opening a `.3dth` thermal project.
-See `.forjinn/skills/sigrity-celsius/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity-celsius') for the full verified playbook, pitfalls, and a live example."""
     session = tcl_sessions.create("celsius3d")
     tcl_sessions.add_line(session.session_id, "sigrity::configure version -version {5}")
     tcl_sessions.add_line(session.session_id, f"sigrity::open file -file {tcl_path(project_file)}")
@@ -98,7 +98,7 @@ See `.forjinn/skills/sigrity-celsius/SKILL.md` for the full verified playbook, p
 @mcp.tool
 async def celsius3d_run_session(session_id: str, project_file: str, clean_prior_results: bool = True) -> dict:
     """Write out the session's accumulated Tcl macro and launch Celsius3D against it as a background job.
-See `.forjinn/skills/sigrity-celsius/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity-celsius') for the full verified playbook, pitfalls, and a live example."""
     if clean_prior_results:
         _clear_prior_celsius_results(project_file)
 

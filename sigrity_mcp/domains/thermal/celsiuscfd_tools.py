@@ -53,7 +53,7 @@ def _clear_prior_celsius_results(project_file: str) -> None:
 @mcp.tool
 async def start_celsiuscfd_session(project_file: str) -> dict:
     """Begin a new CelsiusCFD automation session by opening a `.3dth` CFD-thermal project.
-See `.forjinn/skills/sigrity-celsius/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity-celsius') for the full verified playbook, pitfalls, and a live example."""
     session = tcl_sessions.create("celsiuscfd")
     tcl_sessions.add_line(session.session_id, "sigrity::configure version -version {5}")
     tcl_sessions.add_line(session.session_id, f"sigrity::open file -file {tcl_path(project_file)}")
@@ -63,7 +63,7 @@ See `.forjinn/skills/sigrity-celsius/SKILL.md` for the full verified playbook, p
 @mcp.tool
 async def celsiuscfd_set_solver_cpu_percentage(session_id: str, cpu_percentage: int) -> dict:
     """Set what percentage of available CPU the CFD solver is allowed to use.
-See `.forjinn/skills/sigrity-celsius/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity-celsius') for the full verified playbook, pitfalls, and a live example."""
     tcl_sessions.add_line(
         session_id, f"sigrity::update CFDSolverOptions -SolverCPUPercentage {{{cpu_percentage}}}"
     )
@@ -73,7 +73,7 @@ See `.forjinn/skills/sigrity-celsius/SKILL.md` for the full verified playbook, p
 @mcp.tool
 async def celsiuscfd_run_session(session_id: str, project_file: str, clean_prior_results: bool = True) -> dict:
     """Write out the session's accumulated Tcl macro and launch CelsiusCFD against it as a background job.
-See `.forjinn/skills/sigrity-celsius/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity-celsius') for the full verified playbook, pitfalls, and a live example."""
     if clean_prior_results:
         _clear_prior_celsius_results(project_file)
 

@@ -32,7 +32,7 @@ _REPORT_SCOPE = Literal["decap", "circuit", "all"]
 @mcp.tool
 async def start_xcitepi_session(feature: _FEATURES, tech_file: str) -> dict:
     """Begin a new XcitePI automation session by selecting an analysis feature and loading a technology file.
-See `.forjinn/skills/sigrity-pi/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity-pi') for the full verified playbook, pitfalls, and a live example."""
     session = tcl_sessions.create("xcitepi")
     tcl_sessions.add_line(session.session_id, f"xpi_set_feature {tcl_str(feature)}")
     tcl_sessions.add_line(session.session_id, f"xpi_set_tech_file {tcl_path(tech_file)}")
@@ -42,7 +42,7 @@ See `.forjinn/skills/sigrity-pi/SKILL.md` for the full verified playbook, pitfal
 @mcp.tool
 async def xcitepi_open_layout(session_id: str, layout_file: str, map_file: Optional[str] = None) -> dict:
     """Open a layout (e.g. a GDS file) into the current XcitePI session, optionally with a companion pin/net map file.
-See `.forjinn/skills/sigrity-pi/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity-pi') for the full verified playbook, pitfalls, and a live example."""
     parts = [f"xpi_open_file {tcl_path(layout_file)}"]
     if map_file is not None:
         parts.append(tcl_path(map_file))
@@ -53,7 +53,7 @@ See `.forjinn/skills/sigrity-pi/SKILL.md` for the full verified playbook, pitfal
 @mcp.tool
 async def xcitepi_save_design(session_id: str, xpi_file: str) -> dict:
     """Save the current XcitePI design to a `.xpi` project file.
-See `.forjinn/skills/sigrity-pi/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity-pi') for the full verified playbook, pitfalls, and a live example."""
     tcl_sessions.add_line(session_id, f"xpi_save_design {tcl_path(xpi_file)}")
     return {"session_id": session_id, "xpi_file": xpi_file}
 
@@ -66,7 +66,7 @@ async def xcitepi_set_spice_output(
     extraction: _SPICE_EXTRACTION = "rc",
 ) -> dict:
     """Configure where and how XcitePI writes its extracted SPICE model.
-See `.forjinn/skills/sigrity-pi/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity-pi') for the full verified playbook, pitfalls, and a live example."""
     tcl_sessions.add_line(session_id, f"xpi_set_spice_output_path {tcl_path(output_file)}")
     tcl_sessions.add_line(session_id, f"xpi_set_spice_option -{style} -{extraction}")
     return {"session_id": session_id, "output_file": output_file, "style": style, "extraction": extraction}
@@ -75,7 +75,7 @@ See `.forjinn/skills/sigrity-pi/SKILL.md` for the full verified playbook, pitfal
 @mcp.tool
 async def xcitepi_generate_report(session_id: str, output_file: str, scope: _REPORT_SCOPE = "all") -> dict:
     """Queue a decap/circuit report once the extraction has run.
-See `.forjinn/skills/sigrity-pi/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity-pi') for the full verified playbook, pitfalls, and a live example."""
     tcl_sessions.add_line(session_id, f"xpi_report -{scope} -output {tcl_path(output_file)}")
     return {"session_id": session_id, "output_file": output_file, "scope": scope}
 
@@ -83,7 +83,7 @@ See `.forjinn/skills/sigrity-pi/SKILL.md` for the full verified playbook, pitfal
 @mcp.tool
 async def xcitepi_save_iome_result(session_id: str, result_file: str) -> dict:
     """Queue saving the IO-model-extraction (IOME) result to a file, matching the confirmed sample's `xpi_save_iome_result {demo_decap}` step.
-See `.forjinn/skills/sigrity-pi/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity-pi') for the full verified playbook, pitfalls, and a live example."""
     tcl_sessions.add_line(session_id, f"xpi_save_iome_result {tcl_path(result_file)}")
     return {"session_id": session_id, "result_file": result_file}
 
@@ -91,7 +91,7 @@ See `.forjinn/skills/sigrity-pi/SKILL.md` for the full verified playbook, pitfal
 @mcp.tool
 async def xcitepi_run_session(session_id: str) -> dict:
     """Write out the session's accumulated Tcl macro and launch XcitePI against it as a background job.
-See `.forjinn/skills/sigrity-pi/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity-pi') for the full verified playbook, pitfalls, and a live example."""
     tcl_sessions.add_line(session_id, "xpi_start")
     tcl_sessions.add_line(session_id, "xpi_close_design")
     tcl_sessions.add_line(session_id, "xpi_exit")

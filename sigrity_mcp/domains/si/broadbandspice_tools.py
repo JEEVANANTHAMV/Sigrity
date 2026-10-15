@@ -38,7 +38,7 @@ async def run_broadbandspice_extraction(
     ignore_threshold: Optional[float] = None,
 ) -> dict:
     """Fit a broadband SPICE-compatible circuit model to a network file's S-parameters, as a background job.
-See `.forjinn/skills/sigrity-si/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity-si') for the full verified playbook, pitfalls, and a live example."""
     args = ["-b", f"-{mode}", f"-{netlist_format}", f"-i{max_iterations}", f"-uf{upper_frequency_ghz}"]
     if output_circuit_file:
         args.append(f"-cf:{output_circuit_file}")
@@ -60,7 +60,7 @@ See `.forjinn/skills/sigrity-si/SKILL.md` for the full verified playbook, pitfal
 @mcp.tool
 async def run_broadbandspice_check(network_file: str) -> dict:
     """Check a network file for passivity/causality violations without fitting a circuit model, as a background job.
-See `.forjinn/skills/sigrity-si/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity-si') for the full verified playbook, pitfalls, and a live example."""
     record = await submit_job(tool="broadbandspice", build_args=["-b", "-Checking", network_file])
     return {
         "job_id": record.job_id,

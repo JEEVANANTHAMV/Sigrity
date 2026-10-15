@@ -25,6 +25,6 @@ from sigrity_mcp.mcp_app import mcp
 @mcp.tool
 async def run_pspice_simulation(circuit_file: str) -> dict:
     """Run a batch PSpice circuit simulation against a `.cir` netlist, as a background job.
-See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity-cad') for the full verified playbook, pitfalls, and a live example."""
     record = await submit_job(tool="psp_cmd", build_args=[circuit_file])
     return {"job_id": record.job_id, "state": record.state, "job_dir": record.job_dir, "command": record.command}

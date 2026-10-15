@@ -119,11 +119,8 @@ class SigritySettings(BaseSettings):
     byte cap"."""
 
     skills_dir: Path = Path(".forjinn/skills")
-    """Where the domain skill playbooks (`<name>/SKILL.md`) live. Relative to CWD unless
-    absolute. Claude Code reads these off disk directly; `list_skills`/`load_skill`
-    (see `domains/platform/skill_tools.py`) serve the same files over the MCP protocol
-    itself for clients with no filesystem access to this machine (e.g. a deepagents/
-    LangChain agent connected over http/sse from elsewhere)."""
+    """Where the domain skill playbooks (`<name>/SKILL.md`) live on the server.
+    Served over MCP via `load_skill` (and `list_skills`)."""
 
     mcp_transport: str = "stdio"
     """`stdio` (default, for a same-machine launcher like Claude Code's mcp.json),

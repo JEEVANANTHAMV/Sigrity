@@ -21,7 +21,7 @@ from sigrity_mcp.mcp_app import mcp
 @mcp.tool
 async def copy_file(source_file: str, destination_file: str, overwrite: bool = False) -> dict:
     """Copy a file (e.g. a read-only Cadence sample) to a new location before running a tool against it.
-See `.forjinn/skills/sigrity/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity') for the full verified playbook, pitfalls, and a live example."""
     src = Path(source_file)
     dst = Path(destination_file)
     if not src.is_file():
@@ -36,7 +36,7 @@ See `.forjinn/skills/sigrity/SKILL.md` for the full verified playbook, pitfalls,
 @mcp.tool
 async def move_file(source_file: str, destination_file: str, overwrite: bool = False) -> dict:
     """Move (rename) a file to a new location.
-See `.forjinn/skills/sigrity/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity') for the full verified playbook, pitfalls, and a live example."""
     src = Path(source_file)
     dst = Path(destination_file)
     if not src.is_file():
@@ -53,7 +53,7 @@ See `.forjinn/skills/sigrity/SKILL.md` for the full verified playbook, pitfalls,
 @mcp.tool
 async def delete_file(file_path: str) -> dict:
     """Delete a single file. DESTRUCTIVE — there is no undo.
-See `.forjinn/skills/sigrity/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity') for the full verified playbook, pitfalls, and a live example."""
     path = Path(file_path)
     if path.is_dir():
         raise IsADirectoryError(f"delete_file only deletes a single file, not a directory: {path}")
@@ -66,6 +66,6 @@ See `.forjinn/skills/sigrity/SKILL.md` for the full verified playbook, pitfalls,
 @mcp.tool
 async def check_design_lock(design_path: str) -> dict:
     """Check whether a `<design_path>.lck` file exists next to an Allegro/Capture design.
-See `.forjinn/skills/sigrity/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity') for the full verified playbook, pitfalls, and a live example."""
     lock_path = Path(f"{design_path}.lck")
     return {"design_path": design_path, "lock_exists": lock_path.is_file(), "lock_path": str(lock_path)}

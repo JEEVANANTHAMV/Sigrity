@@ -69,7 +69,7 @@ _ALTERNATIVES = [
 @mcp.tool
 async def get_aurora_scope_notice() -> dict:
     """Explain what this MCP suite can and cannot do for Sigrity Aurora / in-design analysis, and why.
-See `.forjinn/skills/sigrity/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity') for the full verified playbook, pitfalls, and a live example."""
     return {
         "aurora_available": True,
         "automation_modes": [
@@ -88,7 +88,7 @@ async def run_aurora_workflow(
     output_file: Optional[str] = None,
 ) -> dict:
     """Execute a Sigrity Aurora in-design SI/PI workflow check via Allegro script form replay, as a background job.
-See `.forjinn/skills/sigrity/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity') for the full verified playbook, pitfalls, and a live example."""
     clear_stale_design_lock(board_file)
     session = tcl_sessions.create("allegro")
 
@@ -143,5 +143,5 @@ See `.forjinn/skills/sigrity/SKILL.md` for the full verified playbook, pitfalls,
 @mcp.tool
 async def get_in_design_analysis_alternatives() -> dict:
     """List the standalone-tool equivalents in this suite for each kind of check Sigrity Aurora performs in-design.
-See `.forjinn/skills/sigrity/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity') for the full verified playbook, pitfalls, and a live example."""
     return {"alternatives": _ALTERNATIVES}

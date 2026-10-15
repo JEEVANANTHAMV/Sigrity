@@ -128,7 +128,7 @@ async def allegro_import_dxf(
     use_default_text: bool = False,
 ) -> dict:
     """Import a DXF mechanical outline into Allegro — CREATES A BRAND-NEW .brd BY DEFAULT (CONFIRMED LIVE — see module docstring).
-See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity-cad') for the full verified playbook, pitfalls, and a live example."""
     args: list[str] = []
     if output_units:
         args += ["-u", output_units]
@@ -185,7 +185,7 @@ async def allegro_export_dxf(
     export_drill_info: bool = False,
 ) -> dict:
     """Export Allegro mechanical data to DXF (CONFIRMED LIVE — see module docstring).
-See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity-cad') for the full verified playbook, pitfalls, and a live example."""
     args: list[str] = []
     if output_units:
         args += ["-u", output_units]
@@ -203,7 +203,7 @@ See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfa
 @mcp.tool
 async def allegro_new_blank_board(output_board_file: str, overwrite: bool = False, template_file: Optional[str] = None) -> dict:
     """Create a brand-new, empty Allegro board by copying a real blank template — no DXF outline needed.
-See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity-cad') for the full verified playbook, pitfalls, and a live example."""
     src = Path(template_file) if template_file else (settings.cadence_spb_home / BLANK_BOARD_TEMPLATE)
     dst = Path(output_board_file)
     if not src.is_file():

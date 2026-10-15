@@ -77,7 +77,7 @@ async def run_allegro_placement(
     print_connection_matrix: bool = False,
 ) -> dict:
     """Run Allegro's standalone auto-placement engine over a board, as a background job.
-See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity-cad') for the full verified playbook, pitfalls, and a live example."""
     args = []
     if iterate_while_improving:
         args.append("-a")
@@ -100,7 +100,7 @@ async def run_allegro_ncroute(
     verbose: bool = False,
 ) -> dict:
     """Generate NC (numerically-controlled) drill-route data for a board, as a background job.
-See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity-cad') for the full verified playbook, pitfalls, and a live example."""
     args = []
     if quiet:
         args.append("-q")
@@ -121,7 +121,7 @@ async def run_allegro_zrouter(
     grid_spacing: Optional[float] = None,
 ) -> dict:
     """Run Allegro's Z-Router for via/pin-escape fanout routing via automated Allegro script-form replay, as a background job.
-See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity-cad') for the full verified playbook, pitfalls, and a live example."""
     clear_stale_design_lock(board_file)
     session = tcl_sessions.create("allegro")
     clean_ctrl = str(control_file).replace("\\", "/")

@@ -130,7 +130,7 @@ async def analyze_manufacturing_package(
     bom_report_file: Optional[str] = None,
 ) -> dict:
     """Check a generated manufacturing package (Gerber/.art, IPC-2581, IPC-356, BOM) for completeness and real-format well-formedness.
-See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity-cad') for the full verified playbook, pitfalls, and a live example."""
     gerber_results = [_check_gerber_file(f) for f in (gerber_files or [])]
     ipc2581_result = _check_ipc2581_file(ipc2581_file) if ipc2581_file else None
     ipc356_result = _check_ipc356_file(ipc356_file) if ipc356_file else None

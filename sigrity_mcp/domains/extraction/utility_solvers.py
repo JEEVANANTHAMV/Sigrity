@@ -57,7 +57,7 @@ async def run_touchstone_deembed(
     right_touchstone_file: Optional[str] = None,
 ) -> dict:
     """Cascade or de-embed Touchstone S-parameter files with Sigrity's standalone `abcd.exe`, as a background job.
-See `.forjinn/skills/sigrity-extraction/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity-extraction') for the full verified playbook, pitfalls, and a live example."""
     # abcd.exe resolves -tsfile/-lefttsfile/-righttsfile/-duttsfile against -filepath's
     # value ONLY when that value ends in a trailing path separator; without one it
     # silently does nothing (rc 0, no output, no error) -- a real, confirmed defect in
@@ -86,7 +86,7 @@ async def run_xhatch_field_solver(
     hatch_angle_degrees: Optional[float] = None,
 ) -> dict:
     """Run Sigrity's standalone 2D static field solver (`bem2d3.exe`) for transmission-line impedance/delay over x-hatched ground, as a background job.
-See `.forjinn/skills/sigrity-extraction/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity-extraction') for the full verified playbook, pitfalls, and a live example."""
     args = ["-in", input_file, "-out", output_file]
     if xhatch_mode:
         args.append("-xhatchmode")

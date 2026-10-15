@@ -92,7 +92,7 @@ def _make_axlxsection(
 @mcp.tool
 async def start_allegro_session() -> dict:
     """Begin a new Allegro SKILL automation session.
-See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity-cad') for the full verified playbook, pitfalls, and a live example."""
     session = tcl_sessions.create("allegro")
     return {"session_id": session.session_id}
 
@@ -105,7 +105,7 @@ async def allegro_create_net(session_id: str, net_name: str, net_type: Optional[
     For a batch of nets, prefer `allegro_create_nets` (one queued SKILL line per net,
     one round-trip for the whole set) to avoid the per-net round-trip cost that the
     single-net tool incurs when called in a loop.
-    See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+    Call load_skill('sigrity-cad') for the full verified playbook, pitfalls, and a live example."""
     tcl_sessions.add_line(session_id, _skill_line(f"(axlDBCreateNet {skill_str(net_name)})"))
     return {"session_id": session_id, "net_name": net_name, "net_type": net_type, "idempotent": True}
 
@@ -122,7 +122,7 @@ async def allegro_create_nets(
     mutation path as the single-net tool, so the result is idempotent for already-present
     names). `net_type` is applied to any name that accepts it (it is silently ignored
     for a net already created without one); omit it to keep nets at Allegro's default
-    type. See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook."""
+    type. Call load_skill('sigrity-cad') for the full verified playbook."""
     if not net_names:
         raise ValueError("net_names must be a non-empty list")
     for net_name in net_names:
@@ -151,7 +151,7 @@ async def allegro_create_component(
     Pass an actually-installed part (e.g. one of the .olb/.psm you staged into
     `C:\\Cadence\\SPB_22.1\\tools\\capture\\library` + `pcbdw_lib`), not a made-up name.
     For a real placement at a coordinate, prefer `allegro_place_module_instance`.
-    See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook."""
+    Call load_skill('sigrity-cad') for the full verified playbook."""
     args = [skill_str(ref_des), skill_str(device_name)]
     if package is not None:
         args.append(skill_str(package))
@@ -184,7 +184,7 @@ async def allegro_create_board_outline(session_id: str, points: list[list[float]
     proper `r_path` via `closed_outline_path_expr` and left unclosed-on-purpose is NOT an
     option: the path is auto-closed (first point repeated as last) per the SKILL doc's
     "a path that does not end at its start point is an ERROR" rule.
-    See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook."""
+    Call load_skill('sigrity-cad') for the full verified playbook."""
     if len(points) < 3:
         raise ValueError("A board outline needs at least 3 points.")
     path_expr = closed_outline_path_expr(points)
@@ -236,7 +236,7 @@ async def allegro_create_stackup(
     layer in the correct top-to-bottom order in a single session, prefer
     `generate_multilayer_stackup` (in `rigid_flex_stackup_tools.py`), which applies
     Cadence's own documented ordering convention automatically.
-See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity-cad') for the full verified playbook, pitfalls, and a live example."""
     defstruct = _make_axlxsection(name, layer_type, material, thickness_mil)
     expr = f"(axlXSectionCreate nil {_xsection_position_arg(position)} {defstruct})"
     tcl_sessions.add_line(session_id, _skill_line(expr))
@@ -272,7 +272,7 @@ async def allegro_set_variable(session_id: str, name: str, value: str) -> dict:
     `axlSetVariable("psmpath" '("." "symbols"))`); to APPEND to an existing path
     rather than replace it, read the current value back with
     `axlGetVariableList` first and pass the combined, slash-joined list.
-    See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+    Call load_skill('sigrity-cad') for the full verified playbook, pitfalls, and a live example."""
     tcl_sessions.add_line(session_id, _skill_line(f"(axlSetVariable {skill_str(name)} '({skill_str(value)}))"))
     return {"session_id": session_id, "name": name, "value": value}
 
@@ -280,7 +280,7 @@ async def allegro_set_variable(session_id: str, name: str, value: str) -> dict:
 @mcp.tool
 async def allegro_run_drc(session_id: str, batch_mode: bool = False) -> dict:
     """Queue a design-rule-check update (UNVERIFIED live — see module docstring).
-See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity-cad') for the full verified playbook, pitfalls, and a live example."""
     tcl_sessions.add_line(session_id, _skill_line(f"(axlDRCUpdate {'t' if batch_mode else 'nil'})"))
     return {"session_id": session_id, "batch_mode": batch_mode}
 
@@ -297,7 +297,7 @@ async def allegro_save_design(session_id: str, output_file: Optional[str] = None
     the board file is whatever was opened on the command line. Always verify the
     target `.brd` actually grew after `allegro_run_session` returns `succeeded`
     (see that tool's note — `axlSaveDesign` errors land in the `.jrl`, not run.log).
-    See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+    Call load_skill('sigrity-cad') for the full verified playbook, pitfalls, and a live example."""
     tcl_sessions.add_line(session_id, _skill_line("(axlSaveDesign)"))
     note = {"session_id": session_id, "output_file": output_file}
     if output_file is not None:
@@ -313,7 +313,7 @@ async def allegro_save_design(session_id: str, output_file: Optional[str] = None
 @mcp.tool
 async def allegro_run_session(session_id: str, board_file: str) -> dict:
     """Write out the session's accumulated SKILL macro and launch Allegro against a real board as a background job.
-See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity-cad') for the full verified playbook, pitfalls, and a live example."""
     session = tcl_sessions.add_line(session_id, "quit")
     has_save = any("axlSaveDesign" in line for line in session.script._lines)
     clear_stale_design_lock(board_file)

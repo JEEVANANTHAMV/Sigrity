@@ -15,7 +15,7 @@ from sigrity_mcp.mcp_app import mcp
 @mcp.tool
 async def preview_tcl_session(session_id: str) -> dict:
     """Show the Tcl macro accumulated so far in an open automation session, without running anything.
-See `.forjinn/skills/sigrity/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity') for the full verified playbook, pitfalls, and a live example."""
     try:
         session = tcl_sessions.get(session_id)
         return {
@@ -31,7 +31,7 @@ See `.forjinn/skills/sigrity/SKILL.md` for the full verified playbook, pitfalls,
 @mcp.tool
 async def close_tcl_session(session_id: str) -> dict:
     """Discard an open automation session without running it.
-See `.forjinn/skills/sigrity/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity') for the full verified playbook, pitfalls, and a live example."""
     try:
         tcl_sessions.get(session_id)  # raise if unknown before reporting success
     except SessionNotFoundError as exc:
@@ -48,7 +48,7 @@ async def restore_tcl_session(session_id: str) -> dict:
     is the self-healing path `run_session` already tries on your behalf internally, but
     calling it directly lets you confirm a session is recoverable (or inspect its
     restored script) before re-attempting the run.
-See `.forjinn/skills/sigrity/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity') for the full verified playbook, pitfalls, and a live example."""
     try:
         session = tcl_sessions.restore(session_id)
         return {
@@ -65,7 +65,7 @@ See `.forjinn/skills/sigrity/SKILL.md` for the full verified playbook, pitfalls,
 @mcp.tool
 async def list_tcl_sessions() -> dict:
     """List every Tcl automation session currently open (composed but not yet run, or run but not closed) on this server.
-See `.forjinn/skills/sigrity/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity') for the full verified playbook, pitfalls, and a live example."""
     sessions = tcl_sessions.list_sessions()
     return {
         "count": len(sessions),

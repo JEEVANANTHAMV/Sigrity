@@ -48,7 +48,7 @@ from sigrity_mcp.mcp_app import mcp
 @mcp.tool
 async def run_xtractim_workspace(workspace_xml: str, spd_override: Optional[str] = None) -> dict:
     """Run XtractIM against a pre-built \"ExtractorWorkspace\" XML file, as a background job.
-See `.forjinn/skills/sigrity-extraction/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity-extraction') for the full verified playbook, pitfalls, and a live example."""
     args = ["-b", workspace_xml]
     if spd_override:
         args.append(spd_override)
@@ -75,7 +75,7 @@ See `.forjinn/skills/sigrity-extraction/SKILL.md` for the full verified playbook
 @mcp.tool
 async def start_xtractim_session(spd_file: str) -> dict:
     """Begin a new XtractIM Tcl automation session by opening a layout (.spd) document.
-See `.forjinn/skills/sigrity-extraction/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity-extraction') for the full verified playbook, pitfalls, and a live example."""
     session = tcl_sessions.create("xtractim")
     sid = session.session_id
     tcl_sessions.add_line(sid, "sigrity::open document {!}")
@@ -86,7 +86,7 @@ See `.forjinn/skills/sigrity-extraction/SKILL.md` for the full verified playbook
 @mcp.tool
 async def xtractim_select_net(session_id: str, net_name: Optional[str] = None, selected: bool = True) -> dict:
     """Select or deselect one net by name, or every net at once when `net_name` is omitted.
-See `.forjinn/skills/sigrity-extraction/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity-extraction') for the full verified playbook, pitfalls, and a live example."""
     flag = 1 if selected else 0
     if net_name is None:
         tcl_sessions.add_line(session_id, f"sigrity::update net selected {flag} -all {{!}}")
@@ -98,7 +98,7 @@ See `.forjinn/skills/sigrity-extraction/SKILL.md` for the full verified playbook
 @mcp.tool
 async def xtractim_set_mode(session_id: str, mode: Literal["EPA"] = "EPA") -> dict:
     """Set the XtractIM analysis mode for this session (currently only 'EPA' — Electrical Package Analysis — is confirmed).
-See `.forjinn/skills/sigrity-extraction/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity-extraction') for the full verified playbook, pitfalls, and a live example."""
     tcl_sessions.add_line(session_id, f"sigrity::update Mode {tcl_str(mode)} {{!}}")
     return {"session_id": session_id, "mode": mode}
 
@@ -106,7 +106,7 @@ See `.forjinn/skills/sigrity-extraction/SKILL.md` for the full verified playbook
 @mcp.tool
 async def xtractim_set_package_type(session_id: str, die: int = 0, board: int = 0, assembly: int = 1) -> dict:
     """Set which package layers (die/board/assembly) participate in the extraction, as 0/1 flags.
-See `.forjinn/skills/sigrity-extraction/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity-extraction') for the full verified playbook, pitfalls, and a live example."""
     tcl_sessions.add_line(
         session_id, f"sigrity::update PackageType -d {{{die}}} -b {{{board}}} -a {{{assembly}}} {{!}}"
     )
@@ -121,7 +121,7 @@ async def xtractim_set_circuits(
     component_ref_des_list: list[str],
 ) -> dict:
     """Assign the die/board reference designators and the component(s) to extract for this circuit.
-See `.forjinn/skills/sigrity-extraction/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity-extraction') for the full verified playbook, pitfalls, and a live example."""
     parts = [
         "sigrity::update Circuits",
         f"-d {tcl_str(die_ref_des)}",
@@ -149,7 +149,7 @@ async def xtractim_set_pg_analysis_options(
     frequency_mode: int = 2,
 ) -> dict:
     """Configure power/ground (PG) analysis options: which quantities to extract and at what resolution.
-See `.forjinn/skills/sigrity-extraction/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity-extraction') for the full verified playbook, pitfalls, and a live example."""
     i_flag = 1 if inductance else 0
     d_flag = 1 if dcr else 0
     l_flag = 1 if loop_inductance else 0
@@ -173,7 +173,7 @@ See `.forjinn/skills/sigrity-extraction/SKILL.md` for the full verified playbook
 @mcp.tool
 async def xtractim_process_and_save(session_id: str, workspace_file: str) -> dict:
     """Process the current shape/setup and save the accumulated setup as a workspace file.
-See `.forjinn/skills/sigrity-extraction/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity-extraction') for the full verified playbook, pitfalls, and a live example."""
     tcl_sessions.add_line(session_id, "sigrity::process shape {!}")
     tcl_sessions.add_line(session_id, f"sigrity::save -workspace {tcl_path(workspace_file)} {{!}}")
     return {"session_id": session_id, "workspace_file": workspace_file}
@@ -182,7 +182,7 @@ See `.forjinn/skills/sigrity-extraction/SKILL.md` for the full verified playbook
 @mcp.tool
 async def xtractim_run_session(session_id: str) -> dict:
     """Write out the session's accumulated Tcl macro and launch XtractIM against it as a background job.
-See `.forjinn/skills/sigrity-extraction/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity-extraction') for the full verified playbook, pitfalls, and a live example."""
     tcl_sessions.add_line(session_id, "sigrity::apply OutputACR {1}")
     tcl_sessions.add_line(session_id, "sigrity::begin simulation {!}")
     record = await run_session(

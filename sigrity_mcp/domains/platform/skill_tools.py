@@ -1,14 +1,9 @@
 """MCP-native skill discovery/loading.
 
-Every tool's one-line description points at a domain "skill" file
-(`.forjinn/skills/<name>/SKILL.md`) for the full verified playbook. Claude Code reads
-that path directly off its own disk because it runs on the same filesystem as this
-repo. A client that isn't Claude Code — a deepagents/LangChain agent connected over
-`http`/`sse`, possibly from a different machine entirely — has no such access: the
-*only* channel it has into this server is the MCP protocol itself, and a bare file path
-in a docstring is meaningless to it.
+Operational documentation, playbooks, and verified workflows are accessible
+exclusively through the `load_skill` (and `list_skills`) tool over MCP.
 
-So every skill is also served two ways over MCP:
+Every domain skill is served two ways over MCP:
   - `list_skills` / `load_skill` — plain tools. Every MCP client that can call tools at
     all (which is all of them) can use these; this is the one to reach for first.
   - `skill://{name}` — an MCP resource template, for clients that read resources
@@ -18,9 +13,9 @@ So every skill is also served two ways over MCP:
     call `load_skill(name)`, which returns the identical content without needing
     resource support at all).
 
-Recommended flow for a non-Claude-Code client on any transport: call `list_skills()`
-once at the start of a task to see what's available, then `load_skill(name)` for the
-one or two domains the task actually needs before calling that domain's tools.
+Recommended flow on any transport: call `list_skills()` once at the start of a task
+to see what's available, then `load_skill(name)` for the domain(s) the task actually
+needs before calling that domain's tools.
 """
 
 from __future__ import annotations
@@ -77,15 +72,14 @@ def _resolve_skill_path(name: str) -> Optional[Path]:
 
 @mcp.tool
 async def list_skills() -> dict:
-    """List every domain skill playbook available (name + one-line description each) — call this first, especially on a non-stdio connection where you cannot read `.forjinn/skills/` off disk directly.
+    """List every domain skill playbook available (name + one-line description each) — call this first.
 Then call load_skill(name) for the domain(s) your task actually needs before calling its tools."""
     root = _skills_root()
     files = list(_iter_skill_files())
     if not files:
         if not root.is_dir():
             error = (
-                f"Skills directory does not exist: {root} — SIGRITY_SKILLS_DIR (or "
-                "the default .forjinn/skills relative to the repo root) resolves to "
+                f"Skills directory does not exist: {root} — SIGRITY_SKILLS_DIR resolves to "
                 "a missing path. Unset SIGRITY_SKILLS_DIR to use the built-in default."
             )
         else:
@@ -99,8 +93,7 @@ Then call load_skill(name) for the domain(s) your task actually needs before cal
 
 @mcp.tool
 async def load_skill(name: str) -> dict:
-    """Fetch the full verified playbook (exact call sequences, pitfalls, real sample file paths, live examples) for one domain skill by name, as returned by list_skills.
-Use this in place of reading `.forjinn/skills/<name>/SKILL.md` off disk when you have no filesystem access to this machine."""
+    """Fetch the full verified playbook (exact call sequences, pitfalls, real sample file paths, live examples) for one domain skill by name, as returned by list_skills."""
     path = _resolve_skill_path(name)
     if path is None:
         root = _skills_root()
@@ -113,6 +106,12 @@ Use this in place of reading `.forjinn/skills/<name>/SKILL.md` off disk when you
         return {"error": f"No skill named '{name}'.", "available_skills": available}
     parsed = _parse_skill_file(path)
     return {"name": parsed["name"], "description": parsed["description"], "content": parsed["body"]}
+
+
+@mcp.tool
+async def load_skills(name: str) -> dict:
+    """Fetch the full verified playbook for one domain skill by name (alias for load_skill)."""
+    return await load_skill(name)
 
 
 @mcp.resource("skill://{name}")

@@ -70,7 +70,7 @@ def _win32_user32():
 @mcp.tool
 async def start_capture_session(project_file: str) -> dict:
     """Begin a new OrCAD Capture automation session by opening a project (.opj).
-See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity-cad') for the full verified playbook, pitfalls, and a live example."""
     clear_stale_design_lock(project_file)
     session = tcl_sessions.create("capture")
     tcl_sessions.add_line(session.session_id, f"Open {str(project_file).replace(chr(92), '/')}")
@@ -82,7 +82,7 @@ async def capture_select_page(
     session_id: str, design: str, schematic_folder: str, page: str
 ) -> dict:
     """Select a design/schematic page so subsequent placement acts on a real page.
-See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity-cad') for the full verified playbook, pitfalls, and a live example."""
     tcl_sessions.add_line(session_id, f'SelectPMItem {tcl_str(design)}')
     tcl_sessions.add_line(session_id, f'OPage {tcl_str(schematic_folder)} {tcl_str(page)}')
     return {"session_id": session_id, "design": design, "page": f"{schematic_folder}/{page}"}
@@ -98,7 +98,7 @@ async def capture_place_part(
     package: str = "",
 ) -> dict:
     """Place a part from a library at an absolute page coordinate.
-See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity-cad') for the full verified playbook, pitfalls, and a live example."""
     line = f"PlacePart {x} {y} {tcl_str(library_file)} {tcl_str(part_name)} {tcl_str(package)} FALSE"
     tcl_sessions.add_line(session_id, line)
     return {"session_id": session_id, "part_name": part_name, "x": x, "y": y}
@@ -107,7 +107,7 @@ See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfa
 @mcp.tool
 async def capture_place_wire(session_id: str, x1: float, y1: float, x2: float, y2: float) -> dict:
     """Place a wire segment between two page coordinates. Appends `PlaceWire {x1} {y1} {x2} {y2}`.
-See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity-cad') for the full verified playbook, pitfalls, and a live example."""
     tcl_sessions.add_line(session_id, f"PlaceWire {x1} {y1} {x2} {y2}")
     return {"session_id": session_id, "from": [x1, y1], "to": [x2, y2]}
 
@@ -121,7 +121,7 @@ async def capture_place_pin(
     pin_type: str = "Passive",
 ) -> dict:
     """Place a pin at a page coordinate (for symbol/mechanical-drawing construction).
-See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity-cad') for the full verified playbook, pitfalls, and a live example."""
     tcl_sessions.add_line(session_id, f"PlacePin {x} {y} {tcl_str(pin_name)} {tcl_str(pin_type)} FALSE")
     return {"session_id": session_id, "pin_name": pin_name}
 
@@ -129,7 +129,7 @@ See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfa
 @mcp.tool
 async def capture_set_property(session_id: str, property_name: str, value: str) -> dict:
     """Set a property on the currently-selected object(s). Appends `SetProperty {property_name} {value}`.
-See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity-cad') for the full verified playbook, pitfalls, and a live example."""
     tcl_sessions.add_line(session_id, f"SetProperty {tcl_str(property_name)} {tcl_str(value)}")
     return {"session_id": session_id, "property_name": property_name, "value": value}
 
@@ -188,7 +188,7 @@ def _click_button_in_window(top_hwnd: int, button_text: str) -> bool:
 @mcp.tool
 async def capture_handle_custom_launch_dialog(button: str = "No") -> dict:
     """Auto-dismiss Capture's modal \"Capture Custom Launch\" recovery dialog.
-See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity-cad') for the full verified playbook, pitfalls, and a live example."""
     top = _find_window("Capture Custom Launch")
     if top is None:
         return {"found": False, "clicked": False, "note": "No 'Capture Custom Launch' dialog currently open."}
@@ -199,7 +199,7 @@ See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfa
 @mcp.tool
 async def capture_annotate(session_id: str) -> dict:
     """Queue reference-designator annotation for the open design.
-See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity-cad') for the full verified playbook, pitfalls, and a live example."""
     tcl_sessions.add_line(session_id, 'Menu "Tools::Annotate"')
     return {"session_id": session_id}
 
@@ -207,7 +207,7 @@ See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfa
 @mcp.tool
 async def capture_check_design_rules(session_id: str) -> dict:
     """Queue Capture's electrical/design rules check (ERC) for the open design.
-See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity-cad') for the full verified playbook, pitfalls, and a live example."""
     tcl_sessions.add_line(session_id, 'Menu "PCB::Design Rules Check"')
     return {"session_id": session_id}
 
@@ -215,7 +215,7 @@ See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfa
 @mcp.tool
 async def capture_create_netlist(session_id: str) -> dict:
     """Queue netlist creation for the open design, for handoff to PCB layout.
-See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity-cad') for the full verified playbook, pitfalls, and a live example."""
     tcl_sessions.add_line(session_id, 'Menu "Tools::Create Netlist"')
     return {"session_id": session_id}
 
@@ -223,7 +223,7 @@ See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfa
 @mcp.tool
 async def capture_save(session_id: str) -> dict:
     """Queue saving the open design. Appends `Menu \"File::Save\"`.
-See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity-cad') for the full verified playbook, pitfalls, and a live example."""
     tcl_sessions.add_line(session_id, 'Menu "File::Save"')
     return {"session_id": session_id}
 
@@ -231,7 +231,7 @@ See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfa
 @mcp.tool
 async def capture_run_session(session_id: str, product: str = "OrCAD Capture") -> dict:
     """Write out the session's accumulated Tcl macro and launch Capture against it as a background job.
-See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity-cad') for the full verified playbook, pitfalls, and a live example."""
     tcl_sessions.add_line(session_id, 'Menu "File::Close"')
     tcl_sessions.add_line(session_id, 'Menu "File::Exit"')
     record = await run_session(

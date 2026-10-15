@@ -620,15 +620,13 @@ real, licensed Cadence install with real file-system access, so treat the port l
 would an unauthenticated admin endpoint: put it behind a VPN/firewall to trusted hosts
 only, never expose it to the open internet.
 
-**Skill discovery over the wire.** Every tool's one-line description points at a
-`.forjinn/skills/<domain>/SKILL.md` playbook file — Claude Code reads that straight off
-disk because it shares this filesystem. A remote client has no such access, so the same
-content is also served through the MCP protocol itself via two extra tools registered
-alongside the other 181 (`sigrity_mcp/domains/platform/skill_tools.py`):
+**Skill discovery over the wire.** Operational playbooks and verified workflows are
+served through the MCP protocol itself via tools registered alongside the domain
+tools (`sigrity_mcp/domains/platform/skill_tools.py`):
 
 - **`list_skills()`** — every skill's name + one-line description (cheap, call this
   once per task).
-- **`load_skill(name)`** — the full verified playbook body for one skill by name.
+- **`load_skill(name)`** (or **`load_skills(name)`**) — the full verified playbook body for one skill by name.
 
 (There's also a `skill://{name}` MCP *resource* template for clients that read
 resources directly — e.g. `client.read_resource("skill://sigrity-pi")` — but it won't

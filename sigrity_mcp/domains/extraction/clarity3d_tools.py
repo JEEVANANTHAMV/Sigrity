@@ -75,7 +75,7 @@ def _vertex(vertex: list) -> str:
 @mcp.tool
 async def start_clarity3d_session(design_file: str, tcl_version: int = 6) -> dict:
     """Begin a new Clarity3D automation session by opening a 3D EM design (.3dem).
-See `.forjinn/skills/sigrity-extraction/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity-extraction') for the full verified playbook, pitfalls, and a live example."""
     _require_clarity3d_input_format(design_file)
     session = tcl_sessions.create("clarity3d_workbench")
     sid = session.session_id
@@ -94,7 +94,7 @@ async def clarity3d_import_layout(
     log_file: Optional[str] = None,
 ) -> dict:
     """Import a GDSII layout directly into the open Clarity3D design, bypassing a separate Gds2Spd translation step.
-See `.forjinn/skills/sigrity-extraction/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity-extraction') for the full verified playbook, pitfalls, and a live example."""
     parts = ["sigrity::import file", f"-file {tcl_path(gds_file)}"]
     if map_file:
         parts.append(f"-map {tcl_path(map_file)}")
@@ -113,7 +113,7 @@ async def clarity3d_add_net(
     net_type: Literal["UnnamedNet", "Power", "Ground", "Signal"] = "Signal",
 ) -> dict:
     """Add/tag a net in the open Clarity3D design.
-See `.forjinn/skills/sigrity-extraction/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity-extraction') for the full verified playbook, pitfalls, and a live example."""
     code = _NET_TYPE_CODES[net_type]
     tcl_sessions.add_line(session_id, f"sigrity::add net -name {tcl_str(net_name)} -type {{{code}}}")
     return {"session_id": session_id, "net_name": net_name, "net_type": net_type, "type_code": code}
@@ -128,7 +128,7 @@ async def clarity3d_create_lumped_port(
     impedance: float = 50,
 ) -> dict:
     """Create a lumped port between two edges (each edge given as a list of [x, y, z] vertices).
-See `.forjinn/skills/sigrity-extraction/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity-extraction') for the full verified playbook, pitfalls, and a live example."""
     edge1_str = "{" + " ".join(_vertex(v) for v in edge1_vertices) + "}"
     edge2_str = "{" + " ".join(_vertex(v) for v in edge2_vertices) + "}"
     tcl_sessions.add_line(
@@ -149,7 +149,7 @@ async def clarity3d_create_wave_port(
     port_type: Literal["TERMINAL", "MODAL"] = "TERMINAL",
 ) -> dict:
     """Create a wave port spanning one or more named geometry faces.
-See `.forjinn/skills/sigrity-extraction/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity-extraction') for the full verified playbook, pitfalls, and a live example."""
     faces_str = "{" + " ".join(_tcl_word(f) for f in faces) + "}"
     tcl_sessions.add_line(
         session_id,
@@ -165,7 +165,7 @@ async def clarity3d_set_mesh_options(
     mesh_algorithm: Optional[str] = None,
 ) -> dict:
     """Set 3D mesh generation options for the simulation (max edge length and/or mesh algorithm).
-See `.forjinn/skills/sigrity-extraction/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity-extraction') for the full verified playbook, pitfalls, and a live example."""
     parts = ["sigrity::update simulationMeshOption"]
     if max_edge_length is not None:
         parts.append(f"-signalNetMaxEdgeLength {{{max_edge_length}}} -isSignalNetMaxEdgeLength {{1}}")
@@ -178,7 +178,7 @@ See `.forjinn/skills/sigrity-extraction/SKILL.md` for the full verified playbook
 @mcp.tool
 async def clarity3d_set_frequency_sweep(session_id: str, bands: list[dict]) -> dict:
     """Define the frequency sweep as one or more bands, each either log-stepped, linear-stepped, or a single point.
-See `.forjinn/skills/sigrity-extraction/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity-extraction') for the full verified playbook, pitfalls, and a live example."""
     band_strs = []
     for band in bands:
         kind = band["type"]
@@ -197,7 +197,7 @@ See `.forjinn/skills/sigrity-extraction/SKILL.md` for the full verified playbook
 @mcp.tool
 async def clarity3d_configure_local_resource(session_id: str, cpus: int = 8) -> dict:
     """Configure Clarity3D to run the simulation locally (not on a remote/cloud/HPC queue) using `cpus` CPU cores.
-See `.forjinn/skills/sigrity-extraction/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity-extraction') for the full verified playbook, pitfalls, and a live example."""
     tcl_sessions.add_line(
         session_id,
         (
@@ -211,7 +211,7 @@ See `.forjinn/skills/sigrity-extraction/SKILL.md` for the full verified playbook
 @mcp.tool
 async def clarity3d_export_touchstone(session_id: str, file: str) -> dict:
     """Queue an export of the simulated result (e.g. Touchstone S-parameters) to a file once the run finishes.
-See `.forjinn/skills/sigrity-extraction/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity-extraction') for the full verified playbook, pitfalls, and a live example."""
     tcl_sessions.add_line(session_id, f"sigrity::export file -file {tcl_path(file)}")
     return {"session_id": session_id, "file": file}
 
@@ -219,7 +219,7 @@ See `.forjinn/skills/sigrity-extraction/SKILL.md` for the full verified playbook
 @mcp.tool
 async def clarity3d_run_session(session_id: str, design_file: str) -> dict:
     """Write out the session's accumulated Tcl macro and launch Clarity3D Workbench against it as a background job.
-See `.forjinn/skills/sigrity-extraction/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity-extraction') for the full verified playbook, pitfalls, and a live example."""
     _require_clarity3d_input_format(design_file)
     tcl_sessions.add_line(session_id, f"sigrity::begin simulation -fileName {tcl_path(design_file)}")
     tcl_sessions.add_line(session_id, f"sigrity::end simulation -fileName {tcl_path(design_file)}")

@@ -37,7 +37,7 @@ async def run_spdsim_simulation(
     logs: Optional[str] = None,
 ) -> dict:
     """Run a SPDSIM transmission-line field simulation against a `.spd` project (built beforehand in SPDGEN) as a background job.
-See `.forjinn/skills/sigrity-si/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity-si') for the full verified playbook, pitfalls, and a live example."""
     args = ["-b"]
     if minimized_window:
         args.append("-s")

@@ -75,7 +75,7 @@ async def run_placement_and_routing_assistance(
     stage_timeout_seconds: float = 300.0,
 ) -> dict:
     """Run auto-placement, SPECCTRA export+autoroute+import, and a post-route batch DRC pass over a real Allegro board, as one call.
-See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity-cad') for the full verified playbook, pitfalls, and a live example."""
     stages: list[dict] = []
 
     placement = await run_allegro_placement(

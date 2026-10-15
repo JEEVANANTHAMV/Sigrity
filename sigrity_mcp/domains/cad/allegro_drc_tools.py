@@ -70,7 +70,7 @@ async def run_allegro_batch_drc(
     state that will never change. If neither happens within the window, today's
     original behavior is preserved exactly (the record as-is, no note) -- not a
     regression for genuinely slow/stuck runs.
-See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity-cad') for the full verified playbook, pitfalls, and a live example."""
     args = []
     if nographic:
         args.append("-nographic")
@@ -118,7 +118,7 @@ async def run_allegro_checkplus(
     rule_file: Optional[str] = None,
 ) -> dict:
     """Run Allegro's standalone constraint/rule checker (`checkplus.exe`) against a project file, as a background job.
-See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity-cad') for the full verified playbook, pitfalls, and a live example."""
     args = ["-proj", project_file]
     if verbose:
         args.append("-verbose")

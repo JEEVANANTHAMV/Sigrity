@@ -38,7 +38,7 @@ async def run_allegro_report(
     html: bool = False,
 ) -> dict:
     """Generate a legacy Allegro design report (BOM, DRC, net list, summary, cross-section, ...) as a background job.
-See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity-cad') for the full verified playbook, pitfalls, and a live example."""
     args = ["-v", report_code]
     if html:
         args.append("-H")
@@ -62,7 +62,7 @@ async def run_allegro_dbdoctor(
     regenerate_xnets: bool = False,
 ) -> dict:
     """Check (and optionally repair) an Allegro board database's integrity, as a background job.
-See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity-cad') for the full verified playbook, pitfalls, and a live example."""
     args = []
     if check_only:
         args.append("-check_only")

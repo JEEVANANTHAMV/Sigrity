@@ -109,7 +109,7 @@ async def test_generate_multilayer_stackup_accepts_the_real_18layer_definition()
     """Confirms the actual production 18-layer definition (same shape used by
     generate_18layer_rigid_flex_stackup) round-trips through generate_multilayer_stackup's
     input contract -- this exact list was also run live against a real board (see
-    the tool's docstring's FULL-SCALE LIVE TEST note and .forjinn/skills/sigrity-cad/SKILL.md).
+    the tool's docstring's FULL-SCALE LIVE TEST note and load_skill("sigrity-cad")).
     """
     raw_layers = build_18layer_rigid_flex_stackup_definition()
     mapped = [

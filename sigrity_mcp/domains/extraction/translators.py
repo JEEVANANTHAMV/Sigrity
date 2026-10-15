@@ -51,7 +51,7 @@ async def translate_gds_to_spd(
     log_file: Optional[str] = None,
 ) -> dict:
     """Convert a GDSII layout (.gds) to Sigrity's `.spd` format using Gds2Spd, as a background job.
-See `.forjinn/skills/sigrity-extraction/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity-extraction') for the full verified playbook, pitfalls, and a live example."""
     if log_file:
         args = ["-b", "-log", log_file, gds_file, spd_file]
     else:
@@ -73,7 +73,7 @@ async def translate_oasis_to_spd(
     log_file: Optional[str] = None,
 ) -> dict:
     """Convert an OASIS layout (.oasis) to Sigrity's `.spd` format using Oasis2Spd, as a background job.
-See `.forjinn/skills/sigrity-extraction/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity-extraction') for the full verified playbook, pitfalls, and a live example."""
     if log_file:
         args = ["-b", "-log", log_file, oasis_file, spd_file]
     else:
@@ -89,7 +89,7 @@ See `.forjinn/skills/sigrity-extraction/SKILL.md` for the full verified playbook
 @mcp.tool
 async def translate_ndd_to_spd(ndd_file: str, spd_file: str, log_file: Optional[str] = None) -> dict:
     """Convert a Cadence Allegro/NDD design (.ndd) to Sigrity's `.spd` format using Ndd2Spd, as a background job.
-See `.forjinn/skills/sigrity-extraction/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity-extraction') for the full verified playbook, pitfalls, and a live example."""
     if log_file:
         args = ["-b", "-log", log_file, ndd_file, spd_file]
     else:
@@ -100,7 +100,7 @@ See `.forjinn/skills/sigrity-extraction/SKILL.md` for the full verified playbook
 @mcp.tool
 async def translate_pads_to_spd(asc_file: str, spd_file: str, log_file: Optional[str] = None) -> dict:
     """Convert a PADS ASCII design (.asc) to Sigrity's `.spd` format using Pads2Spd, as a background job.
-See `.forjinn/skills/sigrity-extraction/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity-extraction') for the full verified playbook, pitfalls, and a live example."""
     if log_file:
         args = ["-b", "-log", log_file, asc_file, spd_file]
     else:
@@ -111,7 +111,7 @@ See `.forjinn/skills/sigrity-extraction/SKILL.md` for the full verified playbook
 @mcp.tool
 async def translate_rif_to_spd(rif_file: str, spd_file: str, log_file: Optional[str] = None) -> dict:
     """Convert a RIF layout (.rif) to Sigrity's `.spd` format using Rif2Spd, as a background job.
-See `.forjinn/skills/sigrity-extraction/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity-extraction') for the full verified playbook, pitfalls, and a live example."""
     if log_file:
         args = ["-b", "-log", log_file, rif_file, spd_file]
     else:
@@ -122,7 +122,7 @@ See `.forjinn/skills/sigrity-extraction/SKILL.md` for the full verified playbook
 @mcp.tool
 async def translate_dsn_to_spd(dsn_file: str, spd_file: str, log_file: Optional[str] = None) -> dict:
     """Convert a Cadence Allegro design (.dsn) to Sigrity's `.spd` format using Dsn2Spd, as a background job.
-See `.forjinn/skills/sigrity-extraction/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity-extraction') for the full verified playbook, pitfalls, and a live example."""
     if log_file:
         args = ["-b", "-log", log_file, dsn_file, spd_file]
     else:
@@ -138,7 +138,7 @@ async def translate_to_spd_via_spdlinks(
     log_file: Optional[str] = None,
 ) -> dict:
     """Convert a broader range of third-party layout/netlist formats to `.spd` using SPDLinks, as a background job.
-See `.forjinn/skills/sigrity-extraction/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity-extraction') for the full verified playbook, pitfalls, and a live example."""
     if log_file:
         args = ["-b", "-log", log_file, input_file, spd_file]
     else:

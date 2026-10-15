@@ -23,7 +23,7 @@ def _tools_with_status(names: dict[str, bool]) -> dict[str, dict]:
 @mcp.tool
 async def list_sigrity_tools() -> dict:
     """List every Sigrity/FlexNet/Allegro-OrCAD executable this MCP suite knows how to drive: is it installed, and has it actually been proven to work.
-See `.forjinn/skills/sigrity/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity') for the full verified playbook, pitfalls, and a live example."""
     report = executables.available_tools()
     tools = _tools_with_status(report)
     return {
@@ -40,7 +40,7 @@ See `.forjinn/skills/sigrity/SKILL.md` for the full verified playbook, pitfalls,
 @mcp.tool
 async def list_allegro_tools() -> dict:
     """List the Allegro/OrCAD (CAD creation) executables this suite knows about, whether each is installed, and its verification status.
-See `.forjinn/skills/sigrity/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity') for the full verified playbook, pitfalls, and a live example."""
     cad_names = set(executables.CAD_EXECUTABLES)
     report = {name: present for name, present in executables.available_tools().items() if name in cad_names}
     return {
@@ -54,7 +54,7 @@ See `.forjinn/skills/sigrity/SKILL.md` for the full verified playbook, pitfalls,
 @mcp.tool
 async def get_install_info() -> dict:
     """Read this machine's Sigrity install manifest (release version, install date, licensed product bundles).
-See `.forjinn/skills/sigrity/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity') for the full verified playbook, pitfalls, and a live example."""
     dat_files = sorted(settings.home.glob("compnts_sig*.dat"))
     if not dat_files:
         return {"error": f"No compnts_sig*.dat manifest found under {settings.home}"}
@@ -77,7 +77,7 @@ See `.forjinn/skills/sigrity/SKILL.md` for the full verified playbook, pitfalls,
 @mcp.tool
 async def check_name_server() -> dict:
     """Check whether the Cadence common name server (cdsNameServer) is running for this session.
-See `.forjinn/skills/sigrity/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity') for the full verified playbook, pitfalls, and a live example."""
     result = await run_quick("mpsinfo", ["-c1"], timeout=15.0)
     result["name_server_running"] = result["returncode"] == 0
     return result
@@ -86,6 +86,6 @@ See `.forjinn/skills/sigrity/SKILL.md` for the full verified playbook, pitfalls,
 @mcp.tool
 async def get_cds_environment_info(lookup_entry: str | None = None) -> dict:
     """Inspect Cadence's shared environment/config layer via cdsinfo.
-See `.forjinn/skills/sigrity/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity') for the full verified playbook, pitfalls, and a live example."""
     args = ["-lookup", lookup_entry] if lookup_entry else ["-show"]
     return await run_quick("cdsinfo", args, timeout=15.0)

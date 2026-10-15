@@ -91,7 +91,7 @@ def _record_to_dict(record) -> dict:
 @mcp.tool
 async def get_job_status(job_id: str) -> dict:
     """Get the current state of a background Sigrity job started by any run_* tool.
-See `.forjinn/skills/sigrity/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity') for the full verified playbook, pitfalls, and a live example."""
     try:
         return _record_to_dict(job_manager.get(job_id))
     except JobNotFoundError as exc:
@@ -101,7 +101,7 @@ See `.forjinn/skills/sigrity/SKILL.md` for the full verified playbook, pitfalls,
 @mcp.tool
 async def wait_for_job(job_id: str, timeout_seconds: float = 60.0) -> dict:
     """Block until a background job finishes or `timeout_seconds` elapses, then report its state.
-See `.forjinn/skills/sigrity/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity') for the full verified playbook, pitfalls, and a live example."""
     try:
         record = await job_manager.wait(job_id, timeout=timeout_seconds)
         return _record_to_dict(record)
@@ -112,7 +112,7 @@ See `.forjinn/skills/sigrity/SKILL.md` for the full verified playbook, pitfalls,
 @mcp.tool
 async def tail_job_log(job_id: str, max_lines: int = 200) -> dict:
     """Return the last `max_lines` lines of a job's combined stdout/stderr log.
-See `.forjinn/skills/sigrity/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity') for the full verified playbook, pitfalls, and a live example."""
     try:
         lines = job_manager.tail_log(job_id, max_lines=max_lines)
         return {"job_id": job_id, "line_count": len(lines), "lines": lines}
@@ -123,7 +123,7 @@ See `.forjinn/skills/sigrity/SKILL.md` for the full verified playbook, pitfalls,
 @mcp.tool
 async def list_job_files(job_id: str) -> dict:
     """List every output file a job's working directory contains (paths relative to it).
-See `.forjinn/skills/sigrity/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity') for the full verified playbook, pitfalls, and a live example."""
     try:
         files = job_manager.list_output_files(job_id)
         return {"job_id": job_id, "file_count": len(files), "files": files}
@@ -134,7 +134,7 @@ See `.forjinn/skills/sigrity/SKILL.md` for the full verified playbook, pitfalls,
 @mcp.tool
 async def read_job_output_file(job_id: str, relative_path: str, max_lines: int = 80) -> dict:
     """Read one output file from a job's directory (path from list_job_files), auto-detecting its kind.
-See `.forjinn/skills/sigrity/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity') for the full verified playbook, pitfalls, and a live example."""
     try:
         record = job_manager.get(job_id)
     except JobNotFoundError as exc:
@@ -157,7 +157,7 @@ See `.forjinn/skills/sigrity/SKILL.md` for the full verified playbook, pitfalls,
 @mcp.tool
 async def cancel_job(job_id: str) -> dict:
     """Forcibly kill a still-running background job (e.g. a simulation started with wrong inputs).
-See `.forjinn/skills/sigrity/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity') for the full verified playbook, pitfalls, and a live example."""
     try:
         record, outcome = await job_manager.cancel(job_id)
     except JobNotFoundError as exc:
@@ -178,7 +178,7 @@ See `.forjinn/skills/sigrity/SKILL.md` for the full verified playbook, pitfalls,
 @mcp.tool
 async def list_all_jobs(state: Literal["any", "running", "succeeded", "failed"] = "any") -> dict:
     """List every job this server instance has launched since it started, optionally filtered by state.
-See `.forjinn/skills/sigrity/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity') for the full verified playbook, pitfalls, and a live example."""
     jobs = job_manager.list_jobs()
     if state != "any":
         jobs = [j for j in jobs if j.state == state]

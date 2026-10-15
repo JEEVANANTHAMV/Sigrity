@@ -59,7 +59,7 @@ async def run_t2b_conversion(
     wait_timeout: Optional[float] = None,
 ) -> dict:
     """Convert a SPICE I/O buffer model to an IBIS behavioral model using T2B, as a background job.
-See `.forjinn/skills/sigrity-extraction/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity-extraction') for the full verified playbook, pitfalls, and a live example."""
     args = ["-b"]
     if check_ibis:
         args.append("-check")

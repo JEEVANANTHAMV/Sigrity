@@ -35,7 +35,7 @@ async def run_allegro_design_extractor(
     connectivity_server_as_source: bool = False,
 ) -> dict:
     """Extract an Allegro design's connectivity/data model to JSON, as a background job.
-See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+Call load_skill('sigrity-cad') for the full verified playbook, pitfalls, and a live example."""
     args = ["-p", project_file]
     if output_file:
         args += ["-o", output_file]
