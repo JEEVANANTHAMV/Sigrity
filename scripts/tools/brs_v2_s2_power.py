@@ -40,7 +40,7 @@ import traceback
 from datetime import datetime
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 os.environ.setdefault("SIGRITY_HOME", r"C:\Cadence\Sigrity2024.0")
 os.environ.setdefault("SIGRITY_LICENSE_MANAGER_HOME", r"C:\Cadence\LicenseManager")
 os.environ.setdefault("SIGRITY_CADENCE_SPB_HOME", r"C:\Cadence\SPB_22.1")

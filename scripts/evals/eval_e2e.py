@@ -268,7 +268,7 @@ async def main() -> None:
             else:
                 print("  NO FINAL ANSWER (ran out of turns or errored)")
 
-    report_path = Path(__file__).parent.parent / "runs" / "eval_report.json"
+    report_path = Path(__file__).parents[2] / "runs" / "eval_report.json"
     report_path.parent.mkdir(parents=True, exist_ok=True)
     report_path.write_text(
         json.dumps([asdict(r) for r in all_results], indent=2, default=str), encoding="utf-8"

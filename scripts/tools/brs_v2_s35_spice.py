@@ -22,8 +22,8 @@ from pathlib import Path
 from sigrity_mcp.domains.cad.pspice_tools import run_pspice_simulation
 from sigrity_mcp.domains.platform.job_tools import wait_for_job
 
-ROOT = Path(__file__).resolve().parent.parent
-SCRIPTS = ROOT / "scripts"
+ROOT = Path(__file__).resolve().parents[2]
+SCRIPTS = ROOT / "scripts" / "data"
 RUNS = ROOT / "runs"
 RUNS.mkdir(exist_ok=True)
 

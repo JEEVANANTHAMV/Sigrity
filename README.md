@@ -864,7 +864,7 @@ identified — not "we didn't get to it"):
 
 ## Multi-model end-to-end evaluation
 
-`scripts/eval_e2e.py` runs a fixed set of realistic, complex tasks against multiple
+`scripts/evals/eval_e2e.py` runs a fixed set of realistic, complex tasks against multiple
 OpenAI-compatible endpoints (this project's runs used two vLLM nodes,
 `172.16.34.5:8000` and `172.16.34.11:8000`, both serving `qwen3-max`), tracking
 per-task turns/tool-calls/errors/wall-clock time instead of just printing a transcript,
@@ -889,7 +889,7 @@ export, plus an IBIS model check with real error/warning content), and
 pre-staged real sample project, citing the engine's own log). Learning from the prior
 pass's "no file-copy tool" pitfall, every new task prompt points directly at an
 already-staged real file under `runs/` rather than asking the model to copy one first.
-Run with `python -m uv run python scripts/eval_e2e.py` against both endpoints — **12/12
+Run with `python -m uv run python scripts/evals/eval_e2e.py` against both endpoints — **12/12
 task+endpoint combinations reached a final answer** (`eval_results_summary.json` holds
 this run):
 
@@ -932,18 +932,18 @@ retry/diagnostic tool (`wait_for_job`, `tail_job_log`, `get_license_server_statu
 
 ```powershell
 python -m uv run pytest -q                          # unit tests (no Sigrity install required for most)
-python -m uv run python scripts/smoke_test.py        # lists every registered MCP tool
-python -m uv run python scripts/smoke_call.py         # calls a few real platform tools live
-python -m uv run python scripts/smoke_amm.py          # runs AmLibGen against a real sample spreadsheet (currently fails on a missing Excel COM dependency — see Known gaps)
-python -m uv run python scripts/smoke_powersi_real.py # real PowerSI session against a shipped sample .spd
-python -m uv run python scripts/smoke_powerdc_real.py # real PowerDC session against a shipped sample .spd
-python -m uv run python scripts/smoke_allegro_batch_real.py  # real Allegro report/dbdoctor against a shipped sample .brd
-python -m uv run python scripts/smoke_brd_bridge.py    # real .brd -> PowerSI -> .spd bridge, end to end
-python -m uv run python scripts/smoke_new_cad_tools.py # real batch_drc/placement/ncroute/manufacturing-export/checkplus/ibischk run against a real sample board
-python -m uv run python scripts/smoke_capture_retest.py          # re-verifies Capture's batch invocation is still unreliable (not license-related)
-python -m uv run python scripts/smoke_allegro_mutation_retest.py # re-verifies allegro_create_net now completes live
-python -m uv run python scripts/smoke_specctra_bridge.py         # real spif_batch export + specctra headless autoroute, through the actual MCP tools
-python -m uv run python scripts/smoke_dxf_bridge.py               # real dxf2a new-board creation + a2dxf export + blank-template copy, through the actual MCP tools
-python -m uv run python scripts/test_llm_e2e.py "<prompt>"   # real LLM-driven MCP tool-calling test, single task
-python -m uv run python scripts/eval_e2e.py             # multi-task, multi-endpoint evaluation with metrics
+python -m uv run python scripts/smoke/smoke_test.py        # lists every registered MCP tool
+python -m uv run python scripts/smoke/smoke_call.py         # calls a few real platform tools live
+python -m uv run python scripts/smoke/smoke_amm.py          # runs AmLibGen against a real sample spreadsheet (currently fails on a missing Excel COM dependency — see Known gaps)
+python -m uv run python scripts/smoke/smoke_powersi_real.py # real PowerSI session against a shipped sample .spd
+python -m uv run python scripts/smoke/smoke_powerdc_real.py # real PowerDC session against a shipped sample .spd
+python -m uv run python scripts/smoke/smoke_allegro_batch_real.py  # real Allegro report/dbdoctor against a shipped sample .brd
+python -m uv run python scripts/smoke/smoke_brd_bridge.py    # real .brd -> PowerSI -> .spd bridge, end to end
+python -m uv run python scripts/smoke/smoke_new_cad_tools.py # real batch_drc/placement/ncroute/manufacturing-export/checkplus/ibischk run against a real sample board
+python -m uv run python scripts/smoke/smoke_capture_retest.py          # re-verifies Capture's batch invocation is still unreliable (not license-related)
+python -m uv run python scripts/smoke/smoke_allegro_mutation_retest.py # re-verifies allegro_create_net now completes live
+python -m uv run python scripts/smoke/smoke_specctra_bridge.py         # real spif_batch export + specctra headless autoroute, through the actual MCP tools
+python -m uv run python scripts/smoke/smoke_dxf_bridge.py               # real dxf2a new-board creation + a2dxf export + blank-template copy, through the actual MCP tools
+python -m uv run python scripts/smoke/test_llm_e2e.py "<prompt>"   # real LLM-driven MCP tool-calling test, single task
+python -m uv run python scripts/evals/eval_e2e.py             # multi-task, multi-endpoint evaluation with metrics
 ```

@@ -45,7 +45,7 @@ from sigrity_mcp.domains.cad.allegro_batch_tools import run_allegro_report
 from sigrity_mcp.domains.aurora.scope_tools import run_aurora_workflow, get_aurora_scope_notice
 from sigrity_mcp.domains.platform.job_tools import wait_for_job, tail_job_log
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parents[2]
 RUNS = ROOT / "runs"
 
 MAIN_BOARD = str(RUNS / "imx8mp_main_soc_board.brd")
