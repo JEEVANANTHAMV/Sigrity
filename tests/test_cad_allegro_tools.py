@@ -10,6 +10,7 @@ from sigrity_mcp.domains.cad.allegro_tools import (
     allegro_run_drc,
     allegro_run_session,
     allegro_save_design,
+    allegro_set_variable,
     start_allegro_session,
 )
 from sigrity_mcp.domains.platform.session_tools import close_tcl_session
@@ -76,6 +77,23 @@ async def test_allegro_create_stackup_real_attributes_and_position_forms():
 
 
 @pytest.mark.asyncio
+async def test_allegro_set_variable_emits_single_element_list_form():
+    # Regression (SPMHNX-9): PSMPATH/PADPATH/STEPPATH/DEVPATH must cover the
+    # directories that actually hold the .psm/.pad/.step/.pdra files before
+    # axlDBCreateComponent runs. axlSetVariable's list form '("v")' keeps the
+    # value type unambiguous for a single path, per the vendored axlSetVariable.txt.
+    sess = (await start_allegro_session())["session_id"]
+    result = await allegro_set_variable(sess, "PSMPATH", r"C:\Cadence\SPB_22.1\tools\capture\library")
+    assert result == {"session_id": sess, "name": "PSMPATH", "value": r"C:\Cadence\SPB_22.1\tools\capture\library"}
+    preview = tcl_sessions.preview(sess)
+    assert (
+        r"""skill (axlSetVariable "PSMPATH" '("C:\\Cadence\\SPB_22.1\\tools\\capture\\library"))"""
+        in preview
+    )
+    await close_tcl_session(sess)
+
+
+@pytest.mark.asyncio
 async def test_run_session_builds_correct_argv_and_appends_quit(fake_exe):
     session = await start_allegro_session()
     sid = session["session_id"]
@@ -124,4 +142,17 @@ async def test_allegro_create_nets_rejects_empty():
     sess = (await start_allegro_session())["session_id"]
     with pytest.raises(ValueError):
         await allegro_create_nets(sess, [])
+    await close_tcl_session(sess)
+
+
+@pytest.mark.asyncio
+async def test_allegro_save_design_emits_bare_axlsavedesign():
+    # Regression: axlSaveDesign takes NO path argument in SKILL. Passing one is
+    # rejected with 'extra arguments or keyword missing' and silently breaks the
+    # whole save (board never persists). output_file must NOT be forwarded.
+    sess = (await start_allegro_session())["session_id"]
+    await allegro_save_design(sess, output_file=r"C:\some\board.brd")
+    preview = tcl_sessions.preview(sess)
+    assert "skill (axlSaveDesign)" in preview
+    assert "board.brd" not in preview.replace("axlSaveDesign", "")
     await close_tcl_session(sess)

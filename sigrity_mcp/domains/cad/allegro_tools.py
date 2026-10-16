@@ -189,8 +189,17 @@ async def allegro_create_board_outline(session_id: str, points: list[list[float]
         raise ValueError("A board outline needs at least 3 points.")
     path_expr = closed_outline_path_expr(points)
     # Bind the r_path to a var, then hand it to axlDBCreateShape (which needs a real
-    # r_path object, not a flat list). The second arg (t) is l_r_closed.
-    expr = f'(let ((g_outline {path_expr})) (axlDBCreateShape g_outline t "BOARD GEOMETRY/OUTLINE"))'
+    # r_path object, not a flat list).
+    #
+    # CONFIRMED BUG FIX (was SPMHDB-185 'Filled SHAPE may not exist on layer
+    # BOARD GEOMETRY/OUTLINE'): the second arg is l_r_fill, and
+    # 'BOARD GEOMETRY/OUTLINE' is an UNFILLED-ONLY class. Passing `t` (solid fill)
+    # is rejected and the outline never persists. The correct value is `nil`
+    # (unfilled), verified headlessly in C:\TEMP-B~1\kilo\outline_fix\final_test.py
+    # (board grew, axlDBGetShapes readback returned bBox ((0 0) (2362.2 2362.2))
+    # area 5579989.0 = 60mm², round-tripped through disk). The r_path itself is
+    # auto-closed by closed_outline_path_expr; the fill flag is separate.
+    expr = f'(let ((g_outline {path_expr})) (axlDBCreateShape g_outline nil "BOARD GEOMETRY/OUTLINE"))'
     tcl_sessions.add_line(session_id, _skill_line(expr))
     return {"session_id": session_id, "point_count": len(points)}
 
@@ -242,6 +251,33 @@ See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfa
 
 
 @mcp.tool
+async def allegro_set_variable(session_id: str, name: str, value: str) -> dict:
+    """Queue a session-scope Allegro variable set (`axlSetVariable`) before `axlDBCreateComponent` runs in the same session.
+
+    Sets ONE Allegro environment variable for THIS session only (per the vendored
+    `axlSetVariable.txt` doc: variable settings "only apply to current session. They
+    are not saved to user's local env file," and batch operations launched from
+    Allegro do NOT see the change). Use it to point the session's device-library
+    paths at the directories that actually contain the part files on disk — the
+    typical names are `DEVPATH` (.pdra device/part definitions), `PSMPATH` (.psm
+    package symbols), `PADPATH` (.pad pad libraries), and `STEPPATH` (.step 3-D
+    models): queue one `allegro_set_variable` line per path BEFORE
+    `allegro_create_component`, and the .pdra/.psm/.pad/.step files become
+    discoverable, fixing SPMHNX-9 ("Unable to find device file") caused by the
+    paths not covering where the files physically live.
+
+    The value is always emitted in axlSetVariable's *list* form with exactly one
+    element — `(axlSetVariable "NAME" '("value"))` — so the type is unambiguous
+    even for a single path (the doc's own list-mode example:
+    `axlSetVariable("psmpath" '("." "symbols"))`); to APPEND to an existing path
+    rather than replace it, read the current value back with
+    `axlGetVariableList` first and pass the combined, slash-joined list.
+    See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+    tcl_sessions.add_line(session_id, _skill_line(f"(axlSetVariable {skill_str(name)} '({skill_str(value)}))"))
+    return {"session_id": session_id, "name": name, "value": value}
+
+
+@mcp.tool
 async def allegro_run_drc(session_id: str, batch_mode: bool = False) -> dict:
     """Queue a design-rule-check update (UNVERIFIED live — see module docstring).
 See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
@@ -251,11 +287,27 @@ See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfa
 
 @mcp.tool
 async def allegro_save_design(session_id: str, output_file: Optional[str] = None) -> dict:
-    """Queue saving the current Allegro board (UNVERIFIED live — see module docstring).
-See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
-    expr = "(axlSaveDesign)" if output_file is None else f"(axlSaveDesign {skill_path(output_file)})"
-    tcl_sessions.add_line(session_id, _skill_line(expr))
-    return {"session_id": session_id, "output_file": output_file}
+    """Queue saving the current Allegro board (CONFIRMED LIVE — see module docstring).
+
+    Saves the board **already open in the session** (i.e. the board passed to
+    `allegro_run_session`). `axlSaveDesign` takes NO path argument in SKILL — passing
+    one is rejected with 'extra arguments or keyword missing' (confirmed in the
+    `decisive` and `brs_verify_now` `.jrl` journals). Therefore `output_file` is
+    accepted for API symmetry / log-only purposes and is NOT forwarded to SKILL;
+    the board file is whatever was opened on the command line. Always verify the
+    target `.brd` actually grew after `allegro_run_session` returns `succeeded`
+    (see that tool's note — `axlSaveDesign` errors land in the `.jrl`, not run.log).
+    See `.forjinn/skills/sigrity-cad/SKILL.md` for the full verified playbook, pitfalls, and a live example."""
+    tcl_sessions.add_line(session_id, _skill_line("(axlSaveDesign)"))
+    note = {"session_id": session_id, "output_file": output_file}
+    if output_file is not None:
+        note["note"] = (
+            "axlSaveDesign saves the board already open in the session (the one "
+            "passed to allegro_run_session). The output_file argument is NOT "
+            "forwarded to SKILL; it is recorded here for logging only. Confirm the "
+            "board's byte size increased after the run."
+        )
+    return note
 
 
 @mcp.tool
