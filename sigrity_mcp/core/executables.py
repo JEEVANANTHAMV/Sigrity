@@ -90,6 +90,14 @@ CAD_EXECUTABLES: dict[str, str] = {
     "generate_sim_variant": "generate_sim_variant.exe",
     # --- Library/symbol authoring (confirmed live CLI, see allegro_library_tools.py) ---
     "create_sym": "create_sym.exe",
+    # --- Headless Capture DB read + native netlist import (confirmed live, see
+    # capture_headless_tools.py / netlist_import_tools.py). `tclsh.exe` is the standalone
+    # Tcl 8.6 shell Capture's own `orDb_Dll_Tcl64.dll` loads into -- no Capture.exe
+    # process, no GUI, at all. `netrev`/`netin` import a netlist straight into an Allegro
+    # .brd, the same native path Capture's own File > PCB > Netlist menu item drives. ---
+    "tclsh": "tclsh.exe",
+    "netrev": "netrev.exe",
+    "netin": "netin.exe",
 }
 
 # logical name -> exe filename under SIGRITY_HOME/tools/bin

@@ -84,6 +84,7 @@ async def submit_job(
     script_filename: str = "macro.tcl",
     dismiss_dialogs: bool = False,
     stall_timeout_seconds: int | None = None,
+    extra_env: dict[str, str] | None = None,
 ) -> JobRecord:
     """Write `tcl_script` (if given) into a fresh job directory, then launch `tool` against it.
 
@@ -102,6 +103,9 @@ async def submit_job(
     jobs, auto-enabled by `core.tclsession.run_session` for `tool="allegro"`).
     `stall_timeout_seconds` overrides the global silent-log watchdog timeout for this one
     job -- see `JobManager.submit`'s docstring.
+    `extra_env` is merged on top of this server's own environment for this one launched
+    process only -- see `JobManager.submit`'s docstring for why `tool="capture"` callers
+    (`core.tclsession.run_session`) pass `ENABLE_CAPTURE_AUTOMATION=TRUE` here.
 
     GUI tools (PowerDC, PowerSI, XtractIM, Clarity3DWorkbench, OptimizePI, XcitePI,
     XcitePICon, BroadbandSPICE, SPDSIM, SPDsimCon, PowerTree, Optimality, Celsius3D —
@@ -137,4 +141,5 @@ async def submit_job(
         job_id=job_id,
         dismiss_dialogs=dismiss_dialogs,
         stall_timeout_seconds=stall_timeout_seconds,
+        extra_env=extra_env,
     )

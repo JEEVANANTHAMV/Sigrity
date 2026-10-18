@@ -251,7 +251,7 @@ def build_openapi_schema(
         paths[f"/tools/{t.name}"] = {
             "post": {
                 "summary": summary,
-                "description": desc,
+                "description": getattr(t, "description", None) or f"Execute the {t.name} tool.",
                 "operationId": f"call_{t.name}",
                 "tags": all_tags,
                 "requestBody": {

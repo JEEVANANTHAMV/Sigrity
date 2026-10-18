@@ -25,7 +25,18 @@ does not fix that underlying reliability issue — it only removes the *sequenci
 burden from the caller. Treat a `succeeded` result from this tool the same way
 `capture_run_session` itself warns to: check the job's actual log content (via
 `tail_job_log`/`list_job_files`), not just the returncode, before trusting that the
-parts/wires described below actually landed in the saved design. Per-part property
+parts/wires described below actually landed in the saved design.
+
+UPDATE: this module's underlying reliability problem is now SOLVED by a different
+mechanism, not yet wired into this specific tool — see
+`capture_headless_tools.author_capture_schematic_headless`, which creates a design,
+places real parts from a real library, draws real wires, and saves a valid `.dsn`
+via `tclsh.exe` loading Capture's own database DLL directly (NO Capture.exe process,
+no GUI, no non-determinism), independently re-verified by reopening the result. It is
+the recommended path for new schematic authoring going forward; this `capture_tools.py`
+-composing tool is kept for the cases that genuinely need Capture.exe itself (e.g. an
+interactive-session-only property or menu action), with its known unreliability
+unchanged. Per-part property
 assignment (e.g. setting a specific REFDES on a specific placed part) is deliberately
 NOT attempted here: Capture's own `SetProperty` Tcl command operates on "the currently
 selected object(s)", and there is no confirmed way to select a specific just-placed part

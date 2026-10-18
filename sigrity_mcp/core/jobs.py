@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import time
 import uuid
 from dataclasses import asdict, dataclass, field
@@ -188,8 +189,32 @@ class JobManager:
         job_id: str,
         dismiss_dialogs: bool = False,
         stall_timeout_seconds: int | None = None,
+        extra_env: dict[str, str] | None = None,
     ) -> JobRecord:
-        """`dismiss_dialogs=True` starts a `win32gui_helper.DismissWatcher` against this
+        """`extra_env`, if given, is merged on top of this server's own environment
+        (never replacing it) for this one launched process only -- e.g.
+        `core.tclsession.run_session` sets `ENABLE_CAPTURE_AUTOMATION=TRUE` for every
+        `tool="capture"` launch. This is a real, Cadence-provided switch (confirmed by
+        reading `tools/capture/tclscripts/capOrCADStartPage/startpage.tcl`'s own source):
+        when set, Capture's embedded CEF "Start Page" widget is skipped entirely instead
+        of making its normal startup call (`orPrm::RequestURL ... $orPrm::WF_CEF ... {1}`
+        -- a *synchronous* CEF network request) to `https://pcb.cadence.com/startpage/
+        health`. On a machine whose WinHTTP system proxy demands authentication (common
+        behind a corporate gateway), that request can never complete non-interactively --
+        CEF raises a native, unanswerable Windows "Proxy Server Credential" dialog and the
+        whole process blocks on it forever, pegging one core at ~100% CPU with zero log
+        output and zero *visible* windows of its own (the credential prompt is a separate
+        top-level window, easy to miss when watching only the main Capture window).
+        CONFIRMED LIVE on this exact install: reproduced the hang with the env var unset
+        (indefinite CPU climb, no log, Capture Custom Launch crash-recovery dialog on the
+        next relaunch from the resulting unclean exit), then reproduced a clean, idle
+        startup with it set -- same machine, same proxy, same install, only this one
+        env var different. This is almost certainly the real root cause of this suite's
+        long-standing `capture` `known_blocked` status (previously attributed solely to
+        the `Open <project>` step itself); see `core.tool_status.TOOL_STATUS_NOTES["capture"]`
+        for the full writeup and what is/isn't fixed by it.
+
+        `dismiss_dialogs=True` starts a `win32gui_helper.DismissWatcher` against this
         job's pid for its whole lifetime -- for interactive Cadence GUI launches (Allegro
         session jobs: `allegro.exe -s <script> <board>`) that can raise a modal dialog
         mid-startup with nothing else present to click it. See `DismissWatcher`'s
@@ -253,11 +278,13 @@ class JobManager:
             gui_tool = False
 
         log_file = open(log_path, "wb")
+        env = {**os.environ, **extra_env} if extra_env else None
         proc = await asyncio.create_subprocess_exec(
             *command,
             cwd=str(job_dir),
             stdout=log_file,
             stderr=asyncio.subprocess.STDOUT,
+            env=env,
         )
         record.pid = proc.pid
         self._procs[job_id] = proc

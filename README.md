@@ -22,7 +22,27 @@ output, Constraint Manager, SKILL-scripted trace/via/padstack/component-placemen
 authoring, PSpice batch simulation) via SKILL, Tcl, and standalone CLI tools
 respectively, closing the loop from blank design through simulated signoff.
 
-**188+ MCP tools across 8 domains**, one Python package. Covers all engineering and IT workflows specified in the **InnoSynth × L&T Semiconductor Technologies FORJINN POC Technical Discovery Form**:
+**211+ MCP tools across 8 domains**, one Python package. Covers all engineering and IT workflows specified in the **InnoSynth × L&T Semiconductor Technologies FORJINN POC Technical Discovery Form**:
+
+> **Update (2026-10-17, later pass) — OrCAD Capture's long-standing `known_blocked`
+> status is substantially resolved.** Two separate findings, both confirmed live:
+> 1. The hang that made even *opening* Capture unreliable was root-caused: an embedded
+>    Start Page widget makes a blocking network call through the system proxy at
+>    startup. Setting `ENABLE_CAPTURE_AUTOMATION=TRUE` (now injected automatically by
+>    `core.jobs.JobManager.submit` for every Capture launch) skips it entirely.
+> 2. Reading a netlist out of an existing `.dsn`, and AUTHORING a brand-new schematic
+>    (placing parts, drawing wires), are both now possible fully headlessly — no
+>    Capture.exe process, no GUI, no COM, no `syscap.exe` — by loading Capture's own
+>    database DLL (`orDb_Dll_Tcl64.dll`) directly into the standalone `tclsh.exe`. See
+>    `sigrity_mcp/domains/cad/capture_headless_tools.py` and
+>    `core.tool_status.TOOL_STATUS_NOTES["tclsh"]`/`["capture"]` for the full evidence.
+>
+> What remains genuinely `known_blocked`: Capture.exe's own interactive Tcl *session*
+> batch invocation (the historical `capture_tools.py` primitives) still does not
+> execute a supplied script unattended, and refdes annotation / ERC / Capture's native
+> menu-driven netlist export have no confirmed headless equivalent yet. The rest of
+> this README predates this fix; `known_blocked`/Capture mentions below describe that
+> earlier state accurately for what they cover, but are not the full current picture.
 - **Requirement-to-Schematic & Design Generation**: OrCAD Capture Tcl generation, headless project creation (`copyproject`/`xcon2project`), and PSpice batch simulation.
 - **Documentation & Deliverables Intelligence**: Auto-generation of Hardware Design Documents (HDD), Validation & Bring-Up Test Plans, Board User Guides, and Requirement-to-Design Traceability Matrices.
 - **Vendor Preferences & Sourcing Policy Engine**: Multi-distributor API lookups (DigiKey, Mouser, Farnell, Arrow, Avnet) with project-specific AVL rules, authorized distributor filters, and BOM compliance scoring.

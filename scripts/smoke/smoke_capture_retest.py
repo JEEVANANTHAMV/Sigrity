@@ -1,5 +1,17 @@
-"""Retest of OrCAD Capture's batch-script invocation (previously known_blocked/unreliable)
-against a real sample .opj project, now that licensing is reportedly sorted.
+"""Retest of OrCAD Capture's batch-script invocation (known_blocked/unreliable)
+against a real sample .opj project.
+
+UPDATE: the "licensing is reportedly sorted" premise this script was written under was
+WRONG — there was never a license problem. The real root cause (found later) is an
+embedded Start Page widget making a blocking network call through a corporate proxy at
+startup; see `core.tool_status.TOOL_STATUS_NOTES["capture"]` and
+`core.jobs.JobManager.submit`'s docstring for the fix (`ENABLE_CAPTURE_AUTOMATION=TRUE`,
+now applied automatically). That fix stops the HANG but does not make this script's
+underlying mechanism (`capture_run_session`'s Tcl batch invocation) actually execute a
+script — this smoke test still exercises a path that remains known_blocked for that
+separate reason. For new work, prefer `capture_headless_tools.py`
+(`extract_capture_netlist_headless` / `author_capture_schematic_headless`), which needs
+no Capture.exe process at all.
 """
 
 import asyncio

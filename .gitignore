@@ -16,3 +16,4 @@ scripts/*.prd
 *.jrl
 *.jrl,*
 .venv-eval/
+.claude/

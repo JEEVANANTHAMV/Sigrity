@@ -243,12 +243,29 @@ async def run_session(
     `core.tool_status`'s "capture" note documents three distinct real dialogs seen on
     this exact install (a 'Product Choices' product-chooser, a 'Capture Custom
     Launch' crash-recovery prompt, and a stale-.lck-file 'already open/locked, override?'
-    prompt). Capture's batch invocation is separately still `known_blocked` for an
-    unrelated reason (the `Open <project>` step itself hangs with zero windows at all,
-    which DismissWatcher correctly can't help with -- see capture_tools.py's module
-    docstring), so this does not make `capture_run_session` reliable end-to-end, but it
-    closes the same dialog-hang gap for it that Allegro already has, at zero cost (a
-    dialog-watching thread that finds nothing to click is a harmless no-op).
+    prompt). This is ALSO where `tool="capture"` gets `ENABLE_CAPTURE_AUTOMATION=TRUE`
+    injected into its process environment (via `submit_job`'s `extra_env` -- see
+    `JobManager.submit`'s docstring for the full root-cause writeup): confirmed live to
+    be the actual fix for what was previously misdiagnosed purely as an `Open`-step
+    hang -- Capture's embedded Start Page widget makes a *synchronous* network call at
+    startup that this env var skips entirely, closing off an unanswerable native "Proxy
+    Server Credential" dialog that otherwise blocks the whole process forever (zero log,
+    zero visible windows of its own, ~100% CPU on one core) on any machine whose system
+    proxy demands authentication. What this does NOT yet fix: making a *supplied Tcl
+    script* actually execute unattended once Capture is open. Multiple invocation forms
+    were tried live and confirmed NOT to work (`Capture.exe script.tcl` and
+    `Capture.exe -product=... script.tcl` both just open an idle interactive 'Capture>'
+    console in the Command Window without ever sourcing the file; piping the script via
+    redirected stdin does nothing because that console is a GUI widget, not a real
+    process stdin reader; a per-user `capinit.tcl` at the documented
+    `%HOME%\\cdssetup\\capture\\capinit.tcl` path, and at the launch CWD, both went
+    unloaded). So `capture_run_session`'s batch invocation remains `known_blocked` for
+    genuine unattended schematic EDITING -- see `core.tool_status.TOOL_STATUS_NOTES
+    ["capture"]` for the full evidence trail, the real `Capture.Application` COM
+    automation interface found as a promising next lead (`OpenDesign`/`Save`/`Close`/
+    `Exit` all confirmed callable), and `capture_headless_tools.py` for a working,
+    Capture.exe-free alternative for the specific case of extracting a netlist from an
+    EXISTING `.dsn` (not authoring a new one).
 
     If `session_id` is not in this server instance's memory but has an on-disk snapshot
     (written by every `*_start_session`/`add_*` call — see `ScriptSessionManager._snapshot`),
@@ -277,6 +294,7 @@ async def run_session(
         stall_timeout_seconds=(
             settings.allegro_session_stall_timeout_seconds if tool in ("allegro", "capture") else None
         ),
+        extra_env=({"ENABLE_CAPTURE_AUTOMATION": "TRUE"} if tool == "capture" else None),
     )
     if close_after:
         tcl_sessions.close(session_id)

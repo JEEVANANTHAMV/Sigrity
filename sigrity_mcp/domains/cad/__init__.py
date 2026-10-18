@@ -95,7 +95,10 @@ or stronger caveats — see its own module docstring for specifics):
 - `schematic_generation_tools.py` — `generate_schematic_from_spec`, composing
   `capture_tools.py`'s primitives into one requirement-to-schematic authoring call.
   Inherits Capture's own documented `known_blocked` batch-reliability caveat — see its
-  docstring's "HONEST LIMITATION" section.
+  docstring's "HONEST LIMITATION" section. UPDATE: the underlying problem this tool
+  works around is now solved by a different mechanism —
+  `capture_headless_tools.author_capture_schematic_headless` — not yet wired into this
+  specific composite tool; see that module and this tool's own "UPDATE" note.
 - `placement_routing_assistance_tools.py` — one call chaining real placement,
   SPECCTRA export+autoroute, the (confirmed-broken-on-this-machine) round-trip import,
   and a post-route batch DRC pass — honestly scoped around both of those already-known
@@ -121,26 +124,72 @@ syntax (space-separated, not attached — attached form was live-tested and reje
 candidate importers and confirmed to be interactive-stdin-prompt-only with no headless
 mode — not wrapped, documented as a known gap rather than silently skipped.
 
-**A promising, NOT-yet-implemented lead found this same pass, for whoever picks this up
-next**: `syscap.exe` (`Allegro System Capture` — a distinct, more modern schematic-
-capture product from the classic `Capture.exe`/OrCAD Capture already wrapped in
-`capture_tools.py`) has a real, extensively documented Tcl command reference
+**`capture_headless_tools.py` / `netlist_import_tools.py`, added after root-causing the
+long-standing Capture batch-automation block**: the Start Page proxy-credential hang that
+made even OPENING Capture unreliable is now understood and fixed (`ENABLE_CAPTURE_
+AUTOMATION=TRUE`, injected automatically for every `tool="capture"` job — see
+`core.jobs.JobManager.submit`'s docstring), but making a *supplied Tcl script* actually
+execute unattended is still unresolved (every invocation form tried lands on an idle
+interactive console instead of sourcing the file — see `core.tool_status.
+TOOL_STATUS_NOTES["capture"]` for the full evidence trail and a real `Capture.Application`
+COM automation interface found as a promising next lead). For the specific, high-value
+case of reading a netlist out of an EXISTING `.dsn`, there is a complete, CONFIRMED-LIVE,
+Capture.exe-free alternative: `capture_headless_tools.extract_capture_netlist_headless`
+loads Capture's own schematic-database DLL directly into the standalone `tclsh.exe`
+(no GUI, no window, no proxy call, nothing to hang), and `netlist_import_tools.py`
+(`run_netrev_import`/`run_netin_import`) feeds the result straight into a real Allegro
+`.brd` — independently re-verified with `report.exe`/`dbdoctor.exe` to match a sample
+design's known-good component/net/pin counts exactly.
+
+**UPDATE — schematic AUTHORING is also solved, by the same mechanism**:
+`capture_headless_tools.author_capture_schematic_headless` creates a brand-new design
+from nothing (`CreateDesign` -> `NewSchematic` -> `NewPage`), places real part instances
+resolved from a real `.olb` library, draws real wires, and saves a valid `.dsn` — all via
+the same DLL-in-`tclsh` mechanism, CONFIRMED LIVE and independently re-verified by
+reopening the result with the read-side tool (2 placed parts / 6 pins / 1 wire, all
+genuinely present). The `Capture.Application` COM interface mentioned above as a
+"promising lead" was investigated and ruled OUT for authoring specifically (a safe
+`GetIDsOfNames` existence probe found no `CreateDesign`/page/property surface on it at
+all — just a thin 7-method file-lifecycle wrapper), as was `syscap.exe` (Allegro System
+Capture — confirmed to have no batch/headless launch mode either). See
+`core.tool_status.TOOL_STATUS_NOTES["tclsh"]` for the full evidence trail. Remaining
+honest gap: placed instances keep a placeholder refdes (`DN?`) rather than the requested
+one — annotation (`capBatchAnnotate`) was not confirmed scriptable from this path.
+
+**RESOLVED — the `syscap.exe` lead below was investigated and RULED OUT; schematic
+authoring is solved a different way.** `syscap.exe` (`Allegro System Capture`) has a
+real, extensively documented Tcl command reference (`doc/scap_tcl_comms/`, ~600
+commands) including `newProject`/`createSchematicPage`/`addComponent`/`drawWire`/
+`saveDesign` — but a follow-up pass confirmed it has NO batch/headless launch mode at
+all: `syscap.exe -tclfile scap_min.tcl -nograph` (and `-help`/`-?`) all still pop its
+GUI "Cadence Product Choices" product-chooser dialog with empty stdout/stderr, and no
+script-at-launch flag is documented anywhere in its doc tree (the UG says only "type
+syscap in a command window and press Enter" — interactive by design). The original
+text of this note is kept below for the historical trail; do not act on it as a live
+lead.
+
+The REAL answer turned out to be `capture_headless_tools.author_capture_schematic_
+headless`: load Capture's OWN database DLL (`orDb_Dll_Tcl64.dll`) directly into the
+standalone `tclsh.exe` — no Capture.exe, no syscap.exe, no GUI at all —
+`CreateDesign` -> `NewSchematic`/`NewPage` -> resolve a package/part/device from a real
+`.olb` -> `NewPlacedInst` -> `NewWireScalar` -> `SaveDesignAs`. CONFIRMED LIVE: created
+a design from nothing, placed 2 real parts, drew 1 real wire, saved a valid `.dsn`,
+independently re-verified by reopening it through the companion read tool
+(`extract_capture_netlist_headless`): parts/pins/wire all genuinely present. See
+`core.tool_status.TOOL_STATUS_NOTES["tclsh"]` for the complete evidence trail,
+including why `Capture.Application`'s COM interface was ALSO investigated and ruled
+out for authoring (a safe `GetIDsOfNames` existence probe found no `CreateDesign`/
+page/property surface on it — just a thin 7-method file-lifecycle wrapper).
+
+Original (now-superseded) note, kept for the historical trail: "A promising,
+NOT-yet-implemented lead found this same pass, for whoever picks this up next:
+`syscap.exe` ... has a real, extensively documented Tcl command reference
 (`doc/scap_tcl_comms/`, ~600 commands) including `newProject <name> <design_name>
-<project_path> sch composite` — a genuinely-documented, from-nothing "create a brand
-new schematic project" call (real worked example given in its own doc page, returns 0
-on success) — plus `createSchematicPage`, `addComponent`, `drawWire`, `saveDesign`,
-`openProject`. This would be a much more promising schematic-authoring path than
-`capture_tools.py`'s already-documented `known_blocked` Tcl batch reliability, IF
-`syscap.exe` has a working headless/batch launch mode. That launch mechanism is NOT
-confirmed: `syscap.exe -help`/`-tcl <script>` were both tried live this pass and
-neither produced a usable result — `-help` opened a GUI window with no console output
-(had to be killed) and `-tcl probe.tcl` exited immediately with no output at all
-(ambiguous: could mean the flag isn't recognized, or that it ran and produced no
-visible result for a `puts` call). Not wrapped here because that's not enough evidence
-to claim a working automation surface, per this suite's own discipline — but the Tcl
-vocabulary itself is real and worth revisiting if a documented `syscap.exe` CLI/batch
-invocation is found (check for an "Allegro System Capture" install/admin guide chapter
-this pass didn't locate).
+<project_path> sch composite` — a genuinely-documented, from-nothing 'create a brand
+new schematic project' call ... This would be a much more promising schematic-authoring
+path than `capture_tools.py`'s already-documented `known_blocked` Tcl batch
+reliability, IF `syscap.exe` has a working headless/batch launch mode. That launch
+mechanism is NOT confirmed [at the time this note was written] ..."
 """
 
 from sigrity_mcp.domains.cad import (  # noqa: F401
@@ -156,10 +205,12 @@ from sigrity_mcp.domains.cad import (  # noqa: F401
     allegro_project_tools,
     allegro_tools,
     audit_approval_tools,
+    capture_headless_tools,
     capture_tools,
     document_generation_tools,
     interchange_tools,
     manufacturing_analysis_tools,
+    netlist_import_tools,
     placement_routing_assistance_tools,
     pspice_tools,
     rigid_flex_stackup_tools,

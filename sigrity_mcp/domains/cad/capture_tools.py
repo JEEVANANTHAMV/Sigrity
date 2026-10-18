@@ -1,5 +1,21 @@
 """OrCAD Capture schematic-capture automation — Tcl-scripted, session-based.
 
+UPDATE, read this first: for the two most common needs — reading the netlist out of
+an EXISTING schematic, and AUTHORING a brand-new one (placing parts, drawing wires) —
+there is now a complete, CONFIRMED-LIVE, Capture.exe-free alternative in
+`capture_headless_tools.py` (`extract_capture_netlist_headless` /
+`author_capture_schematic_headless`), which loads Capture's own database DLL directly
+into the standalone `tclsh.exe`. It has none of this module's reliability problems
+(no GUI, no proxy-credential hang, no idle-console non-execution) and is the
+recommended path for both use cases going forward. The hang that used to make even
+OPENING Capture unreliable is also separately root-caused and fixed
+(`ENABLE_CAPTURE_AUTOMATION=TRUE`, injected automatically — see
+`core.jobs.JobManager.submit`'s docstring). This module's own Tcl-session primitives
+below remain `known_blocked` for genuine unattended use (the CLI/stdin/capinit.tcl
+script-execution problem described below was never solved) — keep using them only for
+whatever genuinely needs a live interactive Capture.exe session; see
+`core.tool_status.TOOL_STATUS_NOTES["capture"]` for the complete evidence trail.
+
 Confirmed live on this machine: a bare `Capture.exe` launch (no arguments) opens
 normally. What is NOT reliably confirmed: batch script execution via
 `Capture.exe -product=<name> script.tcl` (the form Cadence's own docs document,

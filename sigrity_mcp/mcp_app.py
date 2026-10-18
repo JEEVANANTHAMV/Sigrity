@@ -15,7 +15,7 @@ from sigrity_mcp.core.config import settings
 mcp = FastMCP(
     name="sigrity-mcp",
     instructions=(
-        "181 tools driving a local Cadence Sigrity 2024.0 + Allegro/OrCAD SPB 22.1 "
+        "211 tools driving a local Cadence Sigrity 2024.0 + Allegro/OrCAD SPB 22.1 "
         "installation: Signal Integrity (SI), Power Integrity (PI), interconnect "
         "extraction, thermal analysis (Celsius), PCB layout/routing/DRC/manufacturing, "
         "project creation, and the unified Sigrity X platform.\n\n"

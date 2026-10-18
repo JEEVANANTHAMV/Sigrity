@@ -10,6 +10,16 @@ nothing" call) but NO confirmed headless/batch launch mode — both `-help` and 
 <script>` were tried live and neither produced usable evidence either way (see
 `domains/cad/__init__.py`'s module docstring for the full write-up).
 
+UPDATE: `syscap.exe` was subsequently re-investigated and definitively RULED OUT (not
+just unconfirmed) — `-tclfile ... -nograph` still pops its GUI product-chooser dialog
+with empty stdout/stderr, and no script-at-launch flag is documented anywhere in its
+doc tree. The real answer for *schematic* creation-from-nothing turned out to be the
+same DB-DLL mechanism these project-level tools use for the *board* side:
+`capture_headless_tools.author_capture_schematic_headless` loads Capture's own database
+DLL into `tclsh.exe` directly (no Capture.exe GUI at all) to create a design/schematic/
+page and place/wire real parts — confirmed live and independently re-verified. See
+`core.tool_status.TOOL_STATUS_NOTES["tclsh"]` for the full evidence.
+
 The real, confirmed answer turned out to be a pair of standalone CLI executables that
 are the non-interactive equivalents of the Tcl `copyProjectAs`/`createProject` commands
 `doc/scap_tcl_comms/` documents (those Tcl procs require a live GUI session; these do
