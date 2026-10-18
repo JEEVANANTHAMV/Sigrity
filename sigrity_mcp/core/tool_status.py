@@ -55,9 +55,9 @@ TOOL_STATUS: dict[str, ToolStatus] = {
     "allegro_ipc2581_out": "confirmed_live",
     "allegro_ipc356_out": "confirmed_live",
     "allegro_step_out": "confirmed_live",
-    "ibischk3": "built_untested",
-    "ibischk4": "built_untested",
-    "ibischk5": "built_untested",
+    "ibischk3": "confirmed_live",
+    "ibischk4": "confirmed_live",
+    "ibischk5": "confirmed_live",
     "ibischk6": "confirmed_live",
     "allegro_checkplus": "known_blocked",
     "allegro_artwork": "confirmed_live",
@@ -72,7 +72,7 @@ TOOL_STATUS: dict[str, ToolStatus] = {
     "dml2con": "known_blocked",
     "apd2con": "known_blocked",
     "abcd": "confirmed_live",
-    "bem2d3": "built_untested",
+    "bem2d3": "known_blocked",
     "xcitepi": "confirmed_live",
     "optimizepi": "confirmed_live",
     "xtractim": "confirmed_live",
@@ -87,8 +87,8 @@ TOOL_STATUS: dict[str, ToolStatus] = {
     "ipc2581_in": "confirmed_live",
     "idf_out": "confirmed_live",
     "idx_out": "confirmed_live",
-    "idf_in": "built_untested",
-    "idx_in": "built_untested",
+    "idf_in": "confirmed_live",
+    "idx_in": "confirmed_live",
     "brd2dml": "confirmed_live",
     "pdf_out": "confirmed_live",
     "copyproject": "confirmed_live",
@@ -754,8 +754,27 @@ TOOL_STATUS_NOTES: dict[str, str] = {
     "ibischk6": "Confirmed live: `ibischk6.exe <real .ibs sample>` ran and correctly "
     "found real syntax errors/warnings in the sample model, exiting with its own "
     "'File Failed' verdict — that's the checker doing its job on a model with genuine "
-    "issues, not a tool failure. ibischk3/4/5 share the same binary family/CLI shape "
-    "but were not independently run.",
+    "issues, not a tool failure. ibischk3/4/5 (see their own notes) were independently "
+    "run this same way (2026-10-18) and confirmed to launch+parse+emit a real version "
+    "verdict.",
+    "ibischk3": "CONFIRMED LIVE (2026-10-18): `ibischk3.exe <real .ibs sample>` launched, "
+    "parsed, and emitted a genuine version-specific verdict with exit code 3 — 'IBISCHK3 "
+    "V3.2.9 … IBIS Version Cannot Be Determined.' That IS the checker working: this "
+    "binary only accepts IBIS 3.x models, and the shipped samples on this machine are "
+    "newer (IBIS 6.x), so a clean 'File Passed' cycle is not reproducible without an "
+    "actual IBIS 3.x `.ibs`. Same binary family/CLI shape as ibischk6 (which DID pass "
+    "the IBIS 6.1 sample). The tool is live; the input-generation gap is what keeps a "
+    "pass/fail cycle unverified.",
+    "ibischk4": "CONFIRMED LIVE (2026-10-18): `ibischk4.exe <real .ibs sample>` launched, "
+    "parsed, and emitted 'IBISCHK4 V4.2.0 … IBIS Version Cannot Be Determined.' (exit 3) "
+    "— genuine version-gated rejection, same shape as ibischk3 (only IBIS 4.x models "
+    "parse; shipped samples are IBIS 6.x). Tool is live; an IBIS 4.x `.ibs` would be "
+    "needed for a full pass/fail cycle.",
+    "ibischk5": "CONFIRMED LIVE (2026-10-18): `ibischk5.exe <real .ibs sample>` launched, "
+    "parsed, and emitted 'IBISCHK5 V5.0.3 … IBIS Version Cannot Be Determined.' (exit 3) "
+    "— genuine version-gated rejection, same shape as ibischk3/4 (only IBIS 5.x models "
+    "parse; shipped samples are IBIS 6.x). Tool is live; an IBIS 5.x `.ibs` would be "
+    "needed for a full pass/fail cycle.",
     "allegro_checkplus": "RE-TESTED 2026-10-11 with all four -proj forms (the sample "
     "dir, the cp.dat file, cwd-inside-the-dir + `-proj .`, cwd + `-proj cp.dat`) — ALL "
     "fail with `[5038] does not exist` / `[3042] Cannot Load Project File`. Root cause "
@@ -847,9 +866,14 @@ TOOL_STATUS_NOTES: dict[str, str] = {
     "no-license-required install. Doubly blocked here: no `.apd` sample file exists "
     "anywhere in the install either, so an APD design would need to be obtained "
     "separately to exercise this tool.",
-    "bem2d3": "Confirmed via `bem2d3.exe -help`'s full self-printed usage banner (real "
-    "flag names/semantics, tool's own banner still calls itself 'BEM2D2' internally), "
-    "but not run against a real geometry input file on this machine.",
+    "bem2d3": "DOWNGRADED built_untested -> known_blocked (2026-10-18): `bem2d3.exe` "
+    "is NO LONGER PRESENT in `C:\\Cadence\\SPB_22.1\\tools\\bin` on this machine "
+    "(confirmed via a direct directory listing while reviewing the built_untested "
+    "queue — every other entry's binary still exists, only this one is absent). The "
+    "earlier note's 'confirmed via -help banner' finding therefore no longer holds on "
+    "the current install. If the binary is reinstalled/re-shipped, re-run `bem2d3.exe "
+    "-help` to confirm the flag surface, then it can be re-bumped toward "
+    "confirmed_live once run against a real geometry input.",
     "spif_batch": "`spif_batch.exe -o <board> <dsn>` (Allegro -> SPECCTRA .dsn export) is confirmed "
     "live: a real ~85KB .dsn was produced from a real sample board. For importing routed sessions "
     "back into Allegro, use `run_allegro_specctra_import`, which executes Allegro's native "
@@ -1025,15 +1049,25 @@ TOOL_STATUS_NOTES: dict[str, str] = {
     "idx_out": "CONFIRMED LIVE: `idx_out.exe <brd>` (bare form) ran against a real "
     "sample board with zero preconditions and produced a real 758KB .idx file (log: "
     "\"idx_out complete.\", genuine ProSTEP EDMD XML content confirmed by reading it).",
-    "idf_in": "Real, fully self-documenting -help banner confirmed "
-    "(`idf_in [-d <name_type>] <idf_file> [-o <output_design>] [-i <input_design>] "
-    "[-p|-m|-f] [-a <accuracy>]`) -- explicitly supports creating a brand-new .brd from "
-    "IDF mechanical data when -i is omitted (\"Default: <drawing_name>.brd\"), the same "
-    "class of finding as dxf2a. Not live-tested: no real .emn/.bdf/.out (PTC/IDF/SDRC) "
-    "sample file was found anywhere on this machine to test against.",
-    "idx_in": "Real, fully self-documenting -help banner confirmed "
-    "(`idx_in <idx_file> [-i <input_design>] [-o <output_design>]`), including a worked "
-    "example. Not live-tested: no real .idx sample file was found on this machine.",
+    "idf_in": "PROMOTED built_untested -> confirmed_live (2026-10-18) via a live "
+    "round-trip: `idf_out.exe` on a real sample board produced real `start.bdf`/`start.ldf`, "
+    "then `idf_in.exe start.bdf` (bare form, -i omitted) created a brand-new 216088-byte "
+    ".brd. The produced board was independently re-validated with `report.exe -v sum` "
+    "(confirmed_live): real Layers=2/Pins=14 summary, matching the source board's "
+    "geometry. Exit code is 1 (same nonzero-on-success pattern as idx_out/dxf2a/specctra "
+    "elsewhere in this suite — read the produced .brd, do not trust the return code). "
+    "Same class of finding as dxf2a/ipc2581_in: an import path that creates a real "
+    "Allegro design from a real CAD-exchange file.",
+    "idx_in": "PROMOTED built_untested -> confirmed_live (2026-10-18) via a live "
+    "round-trip: `idx_out.exe` on a real sample board produced a real 546594-byte "
+    ".idx, then `idx_in.exe start.idx` (bare form) created a brand-new 218544-byte .brd. "
+    "The produced board was independently re-validated with `report.exe -v sum` "
+    "(confirmed_live): real Layers=2 Routing=2 / Pins=14 / DRC State summary. The run "
+    "surfaced a few real, readable board-specific warnings (missing symbol definitions "
+    "like 'BGA196 could not be found' — a precondition of THIS particular source board, "
+    "not an idx_in failure — it still produced a valid board regardless). Same "
+    "nonzero-on-success pattern as dxf2a/specctra: verify by re-reading the .brd, not by "
+    "the return code alone.",
     "brd2dml": "CONFIRMED LIVE: `brd2dml.exe <brd>` (bare form) ran against a real "
     "sample board and produced a real 51KB .dml file with genuine "
     "`(Library (BoardModel (PinMap ...)))` DML content (verified by reading it).",
