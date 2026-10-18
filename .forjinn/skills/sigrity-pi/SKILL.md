@@ -42,15 +42,20 @@ copy_file(source_file="C:\Cadence\Sigrity2024.0\share\PostInstallationCheck\powe
 Compose → run (all in ONE in-proc flow so the `session_id`/`job_id` stay in one server lifetime):
 ```
 s = start_powerdc_session(spd_file=".../powerdc_smoke/IR_Package.spd")          # -> {"session_id":"powerdc-session-e..."}
-powerdc_set_simulation_mode(s.session_id, ir_drop_analysis=true)                # sigrity::set pdcSimMode -irDropAnalysis {1} {!}
+powerdc_configure(s.session_id, operations=[
+    {"op": "set_simulation_mode", "ir_drop_analysis": true},                   # sigrity::set pdcSimMode -irDropAnalysis {1} {!}
+    {"op": "enable_autosave_results"},                                        # sigrity::update option -AutoSaveSimulationResult {1} -AutoSaveExcelResult {1} {!}
+    {"op": "generate_signoff_report", "output_file": ".../powerdc_smoke/ir_report.html"},
+    {"op": "save_workspace", "pdcx_file": ".../powerdc_smoke/IR_Package.pdcx"},  # sigrity::save -w {...} {!}
+])
 preview_tcl_session(s.session_id)                                              # sanity: prints the queued macro lines
-powerdc_enable_autosave_results(s.session_id)                                  # sigrity::update option -AutoSaveSimulationResult {1} -AutoSaveExcelResult {1} {!}
-powerdc_generate_signoff_report(s.session_id, output_file=".../powerdc_smoke/ir_report.html")
-powerdc_save_workspace(s.session_id, pdcx_file=".../powerdc_smoke/IR_Package.pdcx")   # sigrity::save -w {...} {!}
 run = powerdc_run_session(s.session_id)                                         # -> {"job_id","state":"running","command":[PowerDC.exe,-b,-tcl,macro.tcl]}
 wait_for_job(run.job_id, timeout_seconds=300)                                   # -> state:"succeeded", rc 0
 get_job_status(run.job_id)                                                      # terminal; license_issue_suspected:false
 ```
+`powerdc_configure` applies each listed operation in order within the same macro — the
+`generate_signoff_report` op must still come after `enable_autosave_results` in the list (same
+ordering dependency as before, now expressed as list order instead of call order).
 `powerdc_run_session` itself appends `sigrity::begin simulation {!}` as the final macro line (the
 actual run trigger) — you do NOT add it. `PowerDC.exe -b -tcl <macro.tcl>` is the CLI; the `-tcl`
 batch switch is empirically WORKING on this install (despite not being in the public docs).
@@ -103,15 +108,19 @@ copy_file("...\xcitepi\demo1_pme_circuit_def.txt", ".../xcitepi_smoke/demo1_pme_
 Compose → run:
 ```
 s = start_xcitepi_session(feature="IOME", tech_file=".../xcitepi_smoke/demo1_pme_ckt.tech")
-xcitepi_open_layout(s.session_id, layout_file=".../xcitepi_smoke/demo_decap.gds", map_file=".../xcitepi_smoke/demo1.map")
-xcitepi_save_design(s.session_id, xpi_file=".../xcitepi_smoke/demo_decap.xpi")     # checkpoint once (macro calls it twice)
-xcitepi_set_spice_output(s.session_id, output_file=".../xcitepi_smoke/demo_decap.sp", style="pin", extraction="rc")
-xcitepi_save_design(s.session_id, xpi_file=".../xcitepi_smoke/demo_decap.xpi")     # second checkpoint
-xcitepi_save_iome_result(s.session_id, result_file=".../xcitepi_smoke/demo_decap")  # base name WITHOUT extension
+xcitepi_configure(s.session_id, operations=[
+    {"op": "open_layout", "layout_file": ".../xcitepi_smoke/demo_decap.gds", "map_file": ".../xcitepi_smoke/demo1.map"},
+    {"op": "save_design", "xpi_file": ".../xcitepi_smoke/demo_decap.xpi"},          # checkpoint once (macro calls it twice)
+    {"op": "set_spice_output", "output_file": ".../xcitepi_smoke/demo_decap.sp", "style": "pin", "extraction": "rc"},
+    {"op": "save_design", "xpi_file": ".../xcitepi_smoke/demo_decap.xpi"},          # second checkpoint
+    {"op": "save_iome_result", "result_file": ".../xcitepi_smoke/demo_decap"},      # base name WITHOUT extension
+])
 preview_tcl_session(s.session_id)
 run = xcitepi_run_session(s.session_id)        # appends xpi_start / xpi_close_design / xpi_exit itself
 wait_for_job(run.job_id, timeout_seconds=600)   # re-call while still "running" — this one IS a long real job
 ```
+`xcitepi_configure`'s `operations` list preserves the confirmed macro's exact repeat of `save_design`
+around `set_spice_output` — both ops stay in the list, in the same order as the two original calls.
 `xcitepi_set_spice_output(style="pin", extraction="rc")` emits `xpi_set_spice_output_path {...}` then
 `xpi_set_spice_option -pin -rc` (the confirmed macro's `-pin` flag + rc). The `xpi_start`/`xpi_close_design`/
 `xpi_exit` terminators are appended by `xcitepi_run_session` for you — do NOT queue them manually.
@@ -176,15 +185,17 @@ Compose → run — VERIFIED sequence (job `optimizepi-029df6c93e`, rc 0; macro 
 ```
 s = start_optimizepi_session(workflow_key="BestCapatitorLocationEstimation")
     # ^^^ REAL key, Cadence's OWN typo ("Capatitor"). DO NOT fix to "Capacitor" — only the exact string matches.
-optimizepi_attach_layout(s.session_id, "runs\optimizepi_smoke\demo_OPI.spd")
-optimizepi_add_vrm(s.session_id, power_net="VCC", ground_net="GND", ref_des="J1")
-optimizepi_add_decap_candidate(s.session_id, "VCC","GND", decap_type="Device", ref_des="C2")   # mounted RefDes, not PartNo
-optimizepi_add_decap_candidate(s.session_id, "VCC","GND", decap_type="Device", ref_des="C3")
-optimizepi_add_decap_candidate(s.session_id, "VCC","GND", decap_type="Device", ref_des="C24")
-optimizepi_add_decap_candidate(s.session_id, "VCC","GND", decap_type="Device", ref_des="C25")
-optimizepi_add_impedance_observation(s.session_id, positive_pin="10", negative_pin="15", ref_des="U1")
-optimizepi_set_frequency_range(s.session_id, start_freq="1e4", end_freq="1e9")    # plain Hz strings, NOT "10kHz"
-optimizepi_generate_report(s.session_id)
+optimizepi_configure(s.session_id, operations=[
+    {"op": "attach_layout", "spd_file": "runs\optimizepi_smoke\demo_OPI.spd"},
+    {"op": "add_vrm", "power_net": "VCC", "ground_net": "GND", "ref_des": "J1"},
+    {"op": "add_decap_candidate", "power_net": "VCC", "ground_net": "GND", "decap_type": "Device", "ref_des": "C2"},   # mounted RefDes, not PartNo
+    {"op": "add_decap_candidate", "power_net": "VCC", "ground_net": "GND", "decap_type": "Device", "ref_des": "C3"},
+    {"op": "add_decap_candidate", "power_net": "VCC", "ground_net": "GND", "decap_type": "Device", "ref_des": "C24"},
+    {"op": "add_decap_candidate", "power_net": "VCC", "ground_net": "GND", "decap_type": "Device", "ref_des": "C25"},
+    {"op": "add_impedance_observation", "positive_pin": "10", "negative_pin": "15", "ref_des": "U1"},
+    {"op": "set_frequency_range", "start_freq": "1e4", "end_freq": "1e9"},    # plain Hz strings, NOT "10kHz"
+    {"op": "generate_report"},
+])
 run = optimizepi_run_session(s.session_id)      # OptimizePI.exe -b -export_report -tcl <macro.tcl>
 wait_for_job(run.job_id, timeout_seconds=300)   # finishes in ~4 s
 get_job_status(run.job_id)
@@ -253,15 +264,20 @@ in the XML so a rebuilt local library without the S-param paths is a valid worka
 
 ## One-line per tool (quick recall)
 
-- PowerDC IR-drop: `start_powerdc_session` → `powerdc_set_simulation_mode(ir_drop_analysis=true)` →
-  `powerdc_generate_signoff_report` + `powerdc_save_workspace` → `powerdc_run_session`. **VERIFIED** —
-  produces `ir_report.html` + rewritten `.pdcx` next to the input; `-tcl` batch works. `e_t_co_simulation=true` is REJECTED.
-- XcitePI IOME: `start_xcitepi_session(feature="IOME", tech_file)` → `xcitepi_open_layout(gds, map)` →
-  `xcitepi_set_spice_output(output, style="pin", extraction="rc")` → `xcitepi_save_iome_result` →
+- PowerDC IR-drop: `start_powerdc_session` → `powerdc_configure(operations=[{"op":"set_simulation_mode",
+  "ir_drop_analysis":true}, {"op":"enable_autosave_results"}, {"op":"generate_signoff_report",
+  "output_file":...}, {"op":"save_workspace", "pdcx_file":...}])` → `powerdc_run_session`.
+  **VERIFIED** — produces `ir_report.html` + rewritten `.pdcx` next to the input; `-tcl` batch
+  works. `e_t_co_simulation=true` is REJECTED.
+- XcitePI IOME: `start_xcitepi_session(feature="IOME", tech_file)` → `xcitepi_configure(operations=[
+  {"op":"open_layout", "layout_file":gds, "map_file":map}, {"op":"save_design", "xpi_file":...},
+  {"op":"set_spice_output", "output_file":..., "style":"pin", "extraction":"rc"},
+  {"op":"save_design", "xpi_file":...}, {"op":"save_iome_result", "result_file":...}])` →
   `xcitepi_run_session`. **VERIFIED** — 108 MB GDS = a genuinely long real extraction (state stays `running` for 15+ min; don't cancel). All four inputs must be co-located.
 - OptimizePI: `start_optimizepi_session(workflow_key="BestCapatitorLocationEstimation")` →
-  `optimizepi_attach_layout(.spd)` → `add_vrm` / `add_decap_candidate` (mounted RefDes!) /
-  `add_impedance_observation` → `optimizepi_set_frequency_range` → `optimizepi_run_session`.
+  `optimizepi_configure(operations=[{"op":"attach_layout", "spd_file":...}, {"op":"add_vrm", ...},
+  {"op":"add_decap_candidate", ...} (mounted RefDes!, one per candidate), {"op":"add_impedance_observation", ...},
+  {"op":"set_frequency_range", ...}, {"op":"generate_report"}])` → `optimizepi_run_session`.
   **VERIFIED-LIMITED** — every setup command is accepted and rc 0, but `genReport` reports
   "simulation result is not ready. Run a simulation first." and `deviceOPTI` can't find any
   optimization on a bare `.spd`. No `begin simulation` trigger is appended by `optimizepi_run_session`;

@@ -1,20 +1,30 @@
 """OrCAD Capture schematic-capture automation — Tcl-scripted, session-based.
 
-UPDATE, read this first: for the two most common needs — reading the netlist out of
-an EXISTING schematic, and AUTHORING a brand-new one (placing parts, drawing wires) —
-there is now a complete, CONFIRMED-LIVE, Capture.exe-free alternative in
-`capture_headless_tools.py` (`extract_capture_netlist_headless` /
-`author_capture_schematic_headless`), which loads Capture's own database DLL directly
-into the standalone `tclsh.exe`. It has none of this module's reliability problems
-(no GUI, no proxy-credential hang, no idle-console non-execution) and is the
-recommended path for both use cases going forward. The hang that used to make even
-OPENING Capture unreliable is also separately root-caused and fixed
+RETIRED FROM THE PUBLIC MCP TOOL SURFACE (compact-tool-surface pass). Every function
+below is kept as a plain importable Python function (for the rare case something still
+needs to compose a raw interactive-Capture Tcl script by hand) but NONE of them are
+`@mcp.tool` anymore. This is not a demotion for verbosity's sake — it's because the
+mechanism they all depend on, `capture_run_session`'s batch invocation of `Capture.exe`,
+is provably broken for unattended use (see below and `core.tool_status.
+TOOL_STATUS_NOTES["capture"]` for the full evidence): a supplied Tcl script never
+actually gets sourced, no matter how it's passed. Since `capture_run_session` doesn't
+work, none of the compose tools built on top of it (`capture_place_part`,
+`capture_annotate`, etc.) accomplish anything either when driven through this module —
+unlike PowerDC/OptimizePI/PowerSI's consolidation (a working `run_session` wrapped by a
+single `_configure` dispatcher), there is no working launcher here left to consolidate
+*around*. Retiring the whole module from the tool list is the honest compact move, not
+a partial one.
+
+For the two things this module existed to do, use the real, CONFIRMED-LIVE,
+Capture.exe-free alternative instead: `capture_headless_tools.py`
+(`extract_capture_netlist_headless` / `author_capture_schematic_headless`), which loads
+Capture's own database DLL directly into the standalone `tclsh.exe` — no GUI, no
+proxy-credential hang, no idle-console non-execution. The hang that used to make even
+OPENING Capture.exe unreliable is separately root-caused and fixed
 (`ENABLE_CAPTURE_AUTOMATION=TRUE`, injected automatically — see
-`core.jobs.JobManager.submit`'s docstring). This module's own Tcl-session primitives
-below remain `known_blocked` for genuine unattended use (the CLI/stdin/capinit.tcl
-script-execution problem described below was never solved) — keep using them only for
-whatever genuinely needs a live interactive Capture.exe session; see
-`core.tool_status.TOOL_STATUS_NOTES["capture"]` for the complete evidence trail.
+`core.jobs.JobManager.submit`'s docstring) and still applies if anyone resurrects this
+module's `capture_run_session` for a genuine interactive-session use case in the future
+— it fixes the hang, not the script-non-execution problem.
 
 Confirmed live on this machine: a bare `Capture.exe` launch (no arguments) opens
 normally. What is NOT reliably confirmed: batch script execution via
@@ -65,7 +75,6 @@ from typing import Optional
 
 from sigrity_mcp.core.tclscript import tcl_str
 from sigrity_mcp.core.tclsession import clear_stale_design_lock, run_session, tcl_sessions
-from sigrity_mcp.mcp_app import mcp
 
 # Windows modal auto-dismiss, used only by capture_handle_custom_launch_dialog below.
 if hasattr(ctypes, "WINFUNCTYPE") and hasattr(ctypes, "wintypes"):
@@ -83,7 +92,6 @@ def _win32_user32():
     return None
 
 
-@mcp.tool
 async def start_capture_session(project_file: str) -> dict:
     """Begin a new OrCAD Capture automation session by opening a project (.opj).
 Call load_skill('sigrity-cad') for the full verified playbook, pitfalls, and a live example."""
@@ -93,7 +101,6 @@ Call load_skill('sigrity-cad') for the full verified playbook, pitfalls, and a l
     return {"session_id": session.session_id, "project_file": project_file}
 
 
-@mcp.tool
 async def capture_select_page(
     session_id: str, design: str, schematic_folder: str, page: str
 ) -> dict:
@@ -104,7 +111,6 @@ Call load_skill('sigrity-cad') for the full verified playbook, pitfalls, and a l
     return {"session_id": session_id, "design": design, "page": f"{schematic_folder}/{page}"}
 
 
-@mcp.tool
 async def capture_place_part(
     session_id: str,
     x: float,
@@ -120,7 +126,6 @@ Call load_skill('sigrity-cad') for the full verified playbook, pitfalls, and a l
     return {"session_id": session_id, "part_name": part_name, "x": x, "y": y}
 
 
-@mcp.tool
 async def capture_place_wire(session_id: str, x1: float, y1: float, x2: float, y2: float) -> dict:
     """Place a wire segment between two page coordinates. Appends `PlaceWire {x1} {y1} {x2} {y2}`.
 Call load_skill('sigrity-cad') for the full verified playbook, pitfalls, and a live example."""
@@ -128,7 +133,6 @@ Call load_skill('sigrity-cad') for the full verified playbook, pitfalls, and a l
     return {"session_id": session_id, "from": [x1, y1], "to": [x2, y2]}
 
 
-@mcp.tool
 async def capture_place_pin(
     session_id: str,
     x: float,
@@ -142,7 +146,6 @@ Call load_skill('sigrity-cad') for the full verified playbook, pitfalls, and a l
     return {"session_id": session_id, "pin_name": pin_name}
 
 
-@mcp.tool
 async def capture_set_property(session_id: str, property_name: str, value: str) -> dict:
     """Set a property on the currently-selected object(s). Appends `SetProperty {property_name} {value}`.
 Call load_skill('sigrity-cad') for the full verified playbook, pitfalls, and a live example."""
@@ -201,7 +204,6 @@ def _click_button_in_window(top_hwnd: int, button_text: str) -> bool:
     return True
 
 
-@mcp.tool
 async def capture_handle_custom_launch_dialog(button: str = "No") -> dict:
     """Auto-dismiss Capture's modal \"Capture Custom Launch\" recovery dialog.
 Call load_skill('sigrity-cad') for the full verified playbook, pitfalls, and a live example."""
@@ -212,7 +214,6 @@ Call load_skill('sigrity-cad') for the full verified playbook, pitfalls, and a l
     return {"found": True, "clicked": clicked, "dialog_title_hint": "Capture Custom Launch", "button": button}
 
 
-@mcp.tool
 async def capture_annotate(session_id: str) -> dict:
     """Queue reference-designator annotation for the open design.
 Call load_skill('sigrity-cad') for the full verified playbook, pitfalls, and a live example."""
@@ -220,7 +221,6 @@ Call load_skill('sigrity-cad') for the full verified playbook, pitfalls, and a l
     return {"session_id": session_id}
 
 
-@mcp.tool
 async def capture_check_design_rules(session_id: str) -> dict:
     """Queue Capture's electrical/design rules check (ERC) for the open design.
 Call load_skill('sigrity-cad') for the full verified playbook, pitfalls, and a live example."""
@@ -228,7 +228,6 @@ Call load_skill('sigrity-cad') for the full verified playbook, pitfalls, and a l
     return {"session_id": session_id}
 
 
-@mcp.tool
 async def capture_create_netlist(session_id: str) -> dict:
     """Queue netlist creation for the open design, for handoff to PCB layout.
 Call load_skill('sigrity-cad') for the full verified playbook, pitfalls, and a live example."""
@@ -236,7 +235,6 @@ Call load_skill('sigrity-cad') for the full verified playbook, pitfalls, and a l
     return {"session_id": session_id}
 
 
-@mcp.tool
 async def capture_save(session_id: str) -> dict:
     """Queue saving the open design. Appends `Menu \"File::Save\"`.
 Call load_skill('sigrity-cad') for the full verified playbook, pitfalls, and a live example."""
@@ -244,7 +242,6 @@ Call load_skill('sigrity-cad') for the full verified playbook, pitfalls, and a l
     return {"session_id": session_id}
 
 
-@mcp.tool
 async def capture_run_session(session_id: str, product: str = "OrCAD Capture") -> dict:
     """Write out the session's accumulated Tcl macro and launch Capture against it as a background job.
 Call load_skill('sigrity-cad') for the full verified playbook, pitfalls, and a live example."""

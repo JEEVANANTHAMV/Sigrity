@@ -1,6 +1,20 @@
 """PowerDC automation — DC IR-drop analysis, electro-thermal (E-T) co-simulation, and
 thermal power-integrity analysis.
 
+CONSOLIDATED (compact-tool-surface pass): the 11 individual "compose" functions below
+(`powerdc_set_simulation_mode`, `powerdc_add_vrm`, etc. — same Tcl-line-building logic
+as before, kept as plain importable Python functions with their original names so
+existing direct-call test code is unaffected, just no longer each its own top-level MCP
+tool) are now driven through ONE dispatcher tool, `powerdc_configure(session_id,
+operations)`, where `operations` is a list of `{"op": "<short-name>", **kwargs}` dicts
+(`short-name` = the function name with the `powerdc_` prefix stripped, e.g.
+`{"op": "add_vrm", "power_net": ...}` calls `powerdc_add_vrm`). This cuts a full
+PowerDC flow from ~13 MCP round trips (one per compose call) to 3:
+`start_powerdc_session` -> `powerdc_configure([...])` -> `powerdc_run_session`. Every
+operation's underlying validation/Tcl-quoting is UNCHANGED — this only changes how many
+separate tool calls an agent needs, not what each operation does or how safely it's
+built. See `powerdc_configure`'s own docstring for the full op list.
+
 NOTE: PowerDC's own user guide never documents a raw `-tcl <script.tcl>` batch switch
 the way PowerSI's does. `powerdc_run_session` (below) uses it anyway (`-b -tcl <script>
 [spd]`), following the same shared-launcher-family convention as PowerSI/OptimizePI/
@@ -66,7 +80,6 @@ Call load_skill('sigrity-pi') for the full verified playbook, pitfalls, and a li
     return {"session_id": session.session_id, "spd_file": spd_file}
 
 
-@mcp.tool
 async def powerdc_set_simulation_mode(
     session_id: str,
     ir_drop_analysis: bool = False,
@@ -92,7 +105,6 @@ Call load_skill('sigrity-pi') for the full verified playbook, pitfalls, and a li
     }
 
 
-@mcp.tool
 async def powerdc_add_vrm(
     session_id: str,
     power_net: str,
@@ -121,7 +133,6 @@ Call load_skill('sigrity-pi') for the full verified playbook, pitfalls, and a li
     return {"session_id": session_id, "power_net": power_net, "ground_net": ground_net, "ref_des": ref_des}
 
 
-@mcp.tool
 async def powerdc_add_sink(
     session_id: str,
     power_net: str,
@@ -154,7 +165,6 @@ Call load_skill('sigrity-pi') for the full verified playbook, pitfalls, and a li
     return {"session_id": session_id, "power_net": power_net, "ground_net": ground_net, "ref_des": ref_des}
 
 
-@mcp.tool
 async def powerdc_add_interconnect(
     session_id: str,
     power_net: str,
@@ -177,7 +187,6 @@ Call load_skill('sigrity-pi') for the full verified playbook, pitfalls, and a li
     return {"session_id": session_id, "ref_des": ref_des, "resistance": resistance}
 
 
-@mcp.tool
 async def powerdc_mark_thermal_component(session_id: str, ref_des: str) -> dict:
     """Flag a component as a thermal component so PowerDC includes it in thermal/electro-thermal analysis.
 Call load_skill('sigrity-pi') for the full verified playbook, pitfalls, and a live example."""
@@ -187,7 +196,6 @@ Call load_skill('sigrity-pi') for the full verified playbook, pitfalls, and a li
     return {"session_id": session_id, "ref_des": ref_des}
 
 
-@mcp.tool
 async def powerdc_set_power_dissipation(
     session_id: str,
     ref_des: str,
@@ -212,7 +220,6 @@ Call load_skill('sigrity-pi') for the full verified playbook, pitfalls, and a li
     return {"session_id": session_id, "ref_des": ref_des, "watts": watts, "power_map_file": power_map_file}
 
 
-@mcp.tool
 async def powerdc_set_thermal_test_board(
     session_id: str,
     board_type: _BOARD_TYPE,
@@ -233,7 +240,6 @@ Call load_skill('sigrity-pi') for the full verified playbook, pitfalls, and a li
     return {"session_id": session_id, "board_type": board_type}
 
 
-@mcp.tool
 async def powerdc_enable_autosave_results(session_id: str, save_excel: bool = True) -> dict:
     """Enable PowerDC's auto-save of simulation results (and optionally the Excel results workbook) once the run finishes.
 Call load_skill('sigrity-pi') for the full verified playbook, pitfalls, and a live example."""
@@ -244,7 +250,6 @@ Call load_skill('sigrity-pi') for the full verified playbook, pitfalls, and a li
     return {"session_id": session_id, "save_excel": save_excel}
 
 
-@mcp.tool
 async def powerdc_save_workspace(session_id: str, pdcx_file: str) -> dict:
     """Save the current PowerDC workspace/setup to a `.pdcx` file within the session's macro.
 Call load_skill('sigrity-pi') for the full verified playbook, pitfalls, and a live example."""
@@ -252,7 +257,6 @@ Call load_skill('sigrity-pi') for the full verified playbook, pitfalls, and a li
     return {"session_id": session_id, "pdcx_file": pdcx_file}
 
 
-@mcp.tool
 async def powerdc_run_one_step_powertree(
     session_id: str,
     vrm_sink_csv: str,
@@ -276,7 +280,6 @@ Call load_skill('sigrity-pi') for the full verified playbook, pitfalls, and a li
     }
 
 
-@mcp.tool
 async def powerdc_generate_signoff_report(
     session_id: str,
     output_file: str,
@@ -307,6 +310,59 @@ Call load_skill('sigrity-pi') for the full verified playbook, pitfalls, and a li
     parts.append("{!}")
     tcl_sessions.add_line(session_id, " ".join(parts))
     return {"session_id": session_id, "output_file": output_file}
+
+
+_CONFIGURE_OPS = {
+    "set_simulation_mode": powerdc_set_simulation_mode,
+    "add_vrm": powerdc_add_vrm,
+    "add_sink": powerdc_add_sink,
+    "add_interconnect": powerdc_add_interconnect,
+    "mark_thermal_component": powerdc_mark_thermal_component,
+    "set_power_dissipation": powerdc_set_power_dissipation,
+    "set_thermal_test_board": powerdc_set_thermal_test_board,
+    "enable_autosave_results": powerdc_enable_autosave_results,
+    "save_workspace": powerdc_save_workspace,
+    "run_one_step_powertree": powerdc_run_one_step_powertree,
+    "generate_signoff_report": powerdc_generate_signoff_report,
+}
+
+
+@mcp.tool
+async def powerdc_configure(session_id: str, operations: list[dict]) -> dict:
+    """Apply a list of PowerDC session-configuration operations in one call (replaces calling the 11 individual compose tools one at a time).
+
+    Each item in `operations` is `{"op": "<name>", **kwargs}` where `<name>` is one of:
+    `set_simulation_mode, add_vrm, add_sink, add_interconnect,
+    mark_thermal_component, set_power_dissipation, set_thermal_test_board,
+    enable_autosave_results, save_workspace, run_one_step_powertree,
+    generate_signoff_report` and `kwargs` are that operation's own parameters (everything
+    except `session_id`, which is threaded through automatically) — see each
+    corresponding `powerdc_*` function's own docstring (still present in this module,
+    just no longer individually exposed as a top-level tool) for its exact kwargs and
+    caveats (e.g. `add_vrm`'s unconfirmed Net-Class requirement). Operations are applied
+    in list order, since later ones (e.g. a dissipation update) can depend on earlier
+    ones (e.g. the component existing). Raises `ValueError` naming the exact index and
+    op on an unknown `op` or a bad/missing kwarg, rather than silently skipping it.
+
+    Example: `operations=[{"op": "set_simulation_mode", "ir_drop_analysis": True},
+    {"op": "add_sink", "power_net": "+3V3", "ground_net": "GND", "ref_des": "U1",
+    "current": 1.2}]`.
+Call load_skill('sigrity-pi') for the full verified playbook, pitfalls, and a live example."""
+    results = []
+    for i, raw_op in enumerate(operations):
+        op = dict(raw_op)
+        name = op.pop("op", None)
+        fn = _CONFIGURE_OPS.get(name)
+        if fn is None:
+            raise ValueError(
+                f"operations[{i}]: unknown op {name!r}. Valid ops: {sorted(_CONFIGURE_OPS)}"
+            )
+        try:
+            result = await fn(session_id, **op)
+        except TypeError as e:
+            raise ValueError(f"operations[{i}] (op={name!r}): {e}") from e
+        results.append({"op": name, **result})
+    return {"session_id": session_id, "operations_applied": len(results), "results": results}
 
 
 @mcp.tool

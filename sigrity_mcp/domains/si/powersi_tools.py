@@ -1,5 +1,29 @@
 """PowerSI automation — S-parameter / signal-integrity extraction.
 
+CONSOLIDATED (compact-tool-surface pass): the 9 individual "compose" functions below
+(`powersi_save_document`, `powersi_set_mode`, `powersi_set_frequency_sweep`,
+`powersi_add_ports_auto`, `powersi_add_edge_port`, `powersi_add_excitation`,
+`powersi_export_network`, `powersi_export_rlgc`, `powersi_generate_html_report` — same
+Tcl-line-building logic as before, kept as plain importable Python functions with their
+original names so existing direct-call test code is unaffected, just no longer each its
+own top-level MCP tool) are now driven through ONE dispatcher tool,
+`powersi_configure(session_id, operations)`, where `operations` is a list of
+`{"op": "<short-name>", **kwargs}` dicts (`short-name` = the function name with the
+`powersi_` prefix stripped, e.g. `{"op": "set_mode", "mode": "extraction"}` calls
+`powersi_set_mode`). This cuts a full PowerSI flow from ~10 MCP round trips (one per
+compose call) down to 3: `start_powersi_session` -> `powersi_configure([...])` ->
+`powersi_run_session`. Every operation's underlying validation/Tcl-quoting is UNCHANGED.
+
+IMPORTANT ORDERING CAVEAT (unchanged from before consolidation, just now expressed
+through the dispatcher): for a non-`.spd` design, `save_document` MUST be the FIRST
+operation in the `operations` list passed to `powersi_configure`, and that
+`powersi_configure` call must itself be the very first thing done after
+`start_powersi_session` (before any other `powersi_configure` call) — PowerSI silently
+fails later (rc 0, empty Options.xml only, no .sNp produced) if the design isn't saved to
+native SPD form as its very first follow-up step. See `powersi_run_session`'s own
+ordering check (which still fires regardless of whether `save_document` was called
+directly or via `powersi_configure`) and `powersi_configure`'s own docstring for details.
+
 Confirmed real batch invocation (doc/psi_ug/ch5_run_simulation_re_Command_Line_and_Parameters.html):
     powersi.exe -b -tcl <script.tcl> <layout_file.spd>
 and the `sigrity::` Tcl command vocabulary below is transcribed from doc/psi_ug's Tcl
@@ -91,7 +115,6 @@ Call load_skill('sigrity-si') for the full verified playbook, pitfalls, and a li
     return {"session_id": session.session_id, "spd_file": spd_file}
 
 
-@mcp.tool
 async def powersi_save_document(session_id: str, spd_file: str) -> dict:
     """Save the currently-open design to a native `.spd` file.
 Call load_skill('sigrity-si') for the full verified playbook, pitfalls, and a live example."""
@@ -99,7 +122,6 @@ Call load_skill('sigrity-si') for the full verified playbook, pitfalls, and a li
     return {"session_id": session_id, "spd_file": spd_file}
 
 
-@mcp.tool
 async def powersi_set_mode(session_id: str, mode: _MODES) -> dict:
     """Set the PowerSI analysis mode for this session (e.g. 'extraction' for S-parameter extraction, 'resonance' for resonance analysis).
 Call load_skill('sigrity-si') for the full verified playbook, pitfalls, and a live example."""
@@ -107,7 +129,6 @@ Call load_skill('sigrity-si') for the full verified playbook, pitfalls, and a li
     return {"session_id": session_id, "mode": mode}
 
 
-@mcp.tool
 async def powersi_set_frequency_sweep(
     session_id: str,
     start: str,
@@ -128,7 +149,6 @@ Call load_skill('sigrity-si') for the full verified playbook, pitfalls, and a li
     return {"session_id": session_id, "start": start, "end": end, "use_afs": use_afs}
 
 
-@mcp.tool
 async def powersi_add_ports_auto(
     session_id: str,
     ref_des: Optional[str] = None,
@@ -149,7 +169,6 @@ Call load_skill('sigrity-si') for the full verified playbook, pitfalls, and a li
     return {"session_id": session_id, "ref_des": ref_des}
 
 
-@mcp.tool
 async def powersi_add_edge_port(
     session_id: str,
     name: str,
@@ -171,7 +190,6 @@ Call load_skill('sigrity-si') for the full verified playbook, pitfalls, and a li
     return {"session_id": session_id, "name": name}
 
 
-@mcp.tool
 async def powersi_add_excitation(
     session_id: str,
     positive_net: str,
@@ -195,7 +213,6 @@ Call load_skill('sigrity-si') for the full verified playbook, pitfalls, and a li
     return {"session_id": session_id, "positive_net": positive_net, "negative_net": negative_net}
 
 
-@mcp.tool
 async def powersi_export_network(
     session_id: str,
     network_name: str,
@@ -218,7 +235,6 @@ Call load_skill('sigrity-si') for the full verified playbook, pitfalls, and a li
     return {"session_id": session_id, "output_file": output_file}
 
 
-@mcp.tool
 async def powersi_export_rlgc(
     session_id: str,
     network_name: str,
@@ -250,12 +266,69 @@ Call load_skill('sigrity-si') for the full verified playbook, pitfalls, and a li
     return {"session_id": session_id, "output_file": output_file}
 
 
-@mcp.tool
 async def powersi_generate_html_report(session_id: str) -> dict:
     """Queue generation of PowerSI's standard HTML simulation report. Appends `sigrity::do GenReport {!}`.
 Call load_skill('sigrity-si') for the full verified playbook, pitfalls, and a live example."""
     tcl_sessions.add_line(session_id, "sigrity::do GenReport {!}")
     return {"session_id": session_id}
+
+
+_CONFIGURE_OPS = {
+    "save_document": powersi_save_document,
+    "set_mode": powersi_set_mode,
+    "set_frequency_sweep": powersi_set_frequency_sweep,
+    "add_ports_auto": powersi_add_ports_auto,
+    "add_edge_port": powersi_add_edge_port,
+    "add_excitation": powersi_add_excitation,
+    "export_network": powersi_export_network,
+    "export_rlgc": powersi_export_rlgc,
+    "generate_html_report": powersi_generate_html_report,
+}
+
+
+@mcp.tool
+async def powersi_configure(session_id: str, operations: list[dict]) -> dict:
+    """Apply a list of PowerSI session-configuration operations in one call (replaces calling the 9 individual compose tools one at a time).
+
+    Each item in `operations` is `{"op": "<name>", **kwargs}` where `<name>` is one of:
+    `save_document, set_mode, set_frequency_sweep, add_ports_auto, add_edge_port,
+    add_excitation, export_network, export_rlgc, generate_html_report` and `kwargs` are
+    that operation's own parameters (everything except `session_id`, which is threaded
+    through automatically) — see each corresponding `powersi_*` function's own docstring
+    (still present in this module, just no longer individually exposed as a top-level
+    tool) for its exact kwargs. Operations are applied in list order, since later ones
+    (e.g. adding ports) typically depend on earlier ones (e.g. the mode being set).
+    Raises `ValueError` naming the exact index and op on an unknown `op` or a bad/missing
+    kwarg, rather than silently skipping it.
+
+    ORDERING CAVEAT for `save_document`: if the session's design is a non-`.spd` file
+    (opened via `start_powersi_session`), `save_document` MUST be the FIRST operation in
+    THIS list, and this must be the first `powersi_configure` call made after
+    `start_powersi_session` -- PowerSI silently fails later (rc 0, empty Options.xml
+    only, no .sNp produced) if the design isn't saved to native SPD form as its very
+    first follow-up step. `powersi_run_session` re-checks this ordering itself and will
+    raise/warn if it's violated, but don't rely on that -- get the order right here.
+
+    Example: `operations=[{"op": "save_document", "spd_file": "out.spd"},
+    {"op": "set_mode", "mode": "extraction"},
+    {"op": "set_frequency_sweep", "start": "1e6", "end": "1e9"},
+    {"op": "add_ports_auto"}]`.
+Call load_skill('sigrity-si') for the full verified playbook, pitfalls, and a live example."""
+    results = []
+    for i, raw_op in enumerate(operations):
+        op = dict(raw_op)
+        name = op.pop("op", None)
+        fn = _CONFIGURE_OPS.get(name)
+        if fn is None:
+            raise ValueError(
+                f"operations[{i}]: unknown op {name!r}. Valid ops: {sorted(_CONFIGURE_OPS)}"
+            )
+        try:
+            result = await fn(session_id, **op)
+        except TypeError as e:
+            raise ValueError(f"operations[{i}] (op={name!r}): {e}") from e
+        results.append({"op": name, **result})
+    return {"session_id": session_id, "operations_applied": len(results), "results": results}
 
 
 @mcp.tool

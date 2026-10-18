@@ -1,5 +1,20 @@
 """XcitePI automation — chip/package power integrity, decap placement, and IO model extraction.
 
+CONSOLIDATED (compact-tool-surface pass): the 5 individual "compose" functions below
+(`xcitepi_open_layout`, `xcitepi_save_design`, `xcitepi_set_spice_output`,
+`xcitepi_generate_report`, `xcitepi_save_iome_result` — same Tcl-line-building logic as
+before, kept as plain importable Python functions with their original names so existing
+direct-call test code is unaffected, just no longer each its own top-level MCP tool) are
+now driven through ONE dispatcher tool, `xcitepi_configure(session_id, operations)`,
+where `operations` is a list of `{"op": "<short-name>", **kwargs}` dicts (`short-name` =
+the function name with the `xcitepi_` prefix stripped, e.g. `{"op": "open_layout",
+"layout_file": ...}` calls `xcitepi_open_layout`). This cuts a full XcitePI flow from
+~7 MCP round trips (one per compose call) to 3: `start_xcitepi_session` ->
+`xcitepi_configure([...])` -> `xcitepi_run_session`. Every operation's underlying
+validation/Tcl-quoting is UNCHANGED — this only changes how many separate tool calls an
+agent needs, not what each operation does or how safely it's built. See
+`xcitepi_configure`'s own docstring for the full op list.
+
 Confirmed real batch invocation (via Cadence's own `postInstallCheck.pl` script, not the
 user guide): `XcitePI.exe -b -tcl <script.tcl>`. Unlike PowerSI/PowerDC/OptimizePI,
 XcitePI's Tcl commands use FLAT function names rather than a `sigrity::` namespace
@@ -39,7 +54,6 @@ Call load_skill('sigrity-pi') for the full verified playbook, pitfalls, and a li
     return {"session_id": session.session_id, "feature": feature, "tech_file": tech_file}
 
 
-@mcp.tool
 async def xcitepi_open_layout(session_id: str, layout_file: str, map_file: Optional[str] = None) -> dict:
     """Open a layout (e.g. a GDS file) into the current XcitePI session, optionally with a companion pin/net map file.
 Call load_skill('sigrity-pi') for the full verified playbook, pitfalls, and a live example."""
@@ -50,7 +64,6 @@ Call load_skill('sigrity-pi') for the full verified playbook, pitfalls, and a li
     return {"session_id": session_id, "layout_file": layout_file, "map_file": map_file}
 
 
-@mcp.tool
 async def xcitepi_save_design(session_id: str, xpi_file: str) -> dict:
     """Save the current XcitePI design to a `.xpi` project file.
 Call load_skill('sigrity-pi') for the full verified playbook, pitfalls, and a live example."""
@@ -58,7 +71,6 @@ Call load_skill('sigrity-pi') for the full verified playbook, pitfalls, and a li
     return {"session_id": session_id, "xpi_file": xpi_file}
 
 
-@mcp.tool
 async def xcitepi_set_spice_output(
     session_id: str,
     output_file: str,
@@ -72,7 +84,6 @@ Call load_skill('sigrity-pi') for the full verified playbook, pitfalls, and a li
     return {"session_id": session_id, "output_file": output_file, "style": style, "extraction": extraction}
 
 
-@mcp.tool
 async def xcitepi_generate_report(session_id: str, output_file: str, scope: _REPORT_SCOPE = "all") -> dict:
     """Queue a decap/circuit report once the extraction has run.
 Call load_skill('sigrity-pi') for the full verified playbook, pitfalls, and a live example."""
@@ -80,12 +91,56 @@ Call load_skill('sigrity-pi') for the full verified playbook, pitfalls, and a li
     return {"session_id": session_id, "output_file": output_file, "scope": scope}
 
 
-@mcp.tool
 async def xcitepi_save_iome_result(session_id: str, result_file: str) -> dict:
     """Queue saving the IO-model-extraction (IOME) result to a file, matching the confirmed sample's `xpi_save_iome_result {demo_decap}` step.
 Call load_skill('sigrity-pi') for the full verified playbook, pitfalls, and a live example."""
     tcl_sessions.add_line(session_id, f"xpi_save_iome_result {tcl_path(result_file)}")
     return {"session_id": session_id, "result_file": result_file}
+
+
+_CONFIGURE_OPS = {
+    "open_layout": xcitepi_open_layout,
+    "save_design": xcitepi_save_design,
+    "set_spice_output": xcitepi_set_spice_output,
+    "generate_report": xcitepi_generate_report,
+    "save_iome_result": xcitepi_save_iome_result,
+}
+
+
+@mcp.tool
+async def xcitepi_configure(session_id: str, operations: list[dict]) -> dict:
+    """Apply a list of XcitePI session-configuration operations in one call (replaces calling the 5 individual compose tools one at a time).
+
+    Each item in `operations` is `{"op": "<name>", **kwargs}` where `<name>` is one of:
+    `open_layout, save_design, set_spice_output, generate_report,
+    save_iome_result` and `kwargs` are that operation's own parameters (everything
+    except `session_id`, which is threaded through automatically) — see each
+    corresponding `xcitepi_*` function's own docstring (still present in this module,
+    just no longer individually exposed as a top-level tool) for its exact kwargs and
+    caveats. Operations are applied in list order, since later ones (e.g. a report) can
+    depend on earlier ones (e.g. the layout being open). Raises `ValueError` naming the
+    exact index and op on an unknown `op` or a bad/missing kwarg, rather than silently
+    skipping it.
+
+    Example: `operations=[{"op": "open_layout", "layout_file": "design.gds"},
+    {"op": "set_spice_output", "output_file": "out.sp", "style": "pin",
+    "extraction": "rc"}]`.
+Call load_skill('sigrity-pi') for the full verified playbook, pitfalls, and a live example."""
+    results = []
+    for i, raw_op in enumerate(operations):
+        op = dict(raw_op)
+        name = op.pop("op", None)
+        fn = _CONFIGURE_OPS.get(name)
+        if fn is None:
+            raise ValueError(
+                f"operations[{i}]: unknown op {name!r}. Valid ops: {sorted(_CONFIGURE_OPS)}"
+            )
+        try:
+            result = await fn(session_id, **op)
+        except TypeError as e:
+            raise ValueError(f"operations[{i}] (op={name!r}): {e}") from e
+        results.append({"op": name, **result})
+    return {"session_id": session_id, "operations_applied": len(results), "results": results}
 
 
 @mcp.tool

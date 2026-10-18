@@ -1,6 +1,6 @@
 ﻿---
 name: sigrity
-description: Drive the local Cadence Sigrity 2024.0 + Allegro/OrCAD SPB 22.1 install through its 181-tool MCP suite. Use for any Sigrity/Allegro/Cadence EDA task — board analysis, SI/PI/thermal simulation, extraction, DRC, placement, routing, manufacturing export, project creation, or job/license introspection. Always start here to learn which tool to call, the minimal call sequence, and which sample file to use.
+description: Drive the local Cadence Sigrity 2024.0 + Allegro/OrCAD SPB 22.1 install through its 148-tool MCP suite. Use for any Sigrity/Allegro/Cadence EDA task — board analysis, SI/PI/thermal simulation, extraction, DRC, placement, routing, manufacturing export, project creation, or job/license introspection. Always start here to learn which tool to call, the minimal call sequence, and which sample file to use.
 ---
 
 # Sigrity MCP — Foundation
@@ -76,13 +76,20 @@ run_tool_pipeline(
   stop_on_error=True,
   steps=[
     {"tool":"start_powersi_session","args":{"spd_file":"<PATH>"}}" ,"save_as":"s"},
-    {"tool":"powersi_save_document","args":{"session_id":"${s.session_id}","spd_file":"<OUT.spd>"}},
-    {"tool":"powersi_set_frequency_sweep","args":{"session_id":"${s.session_id}","start":"1e6","end":"1e9"}},
-    {"tool":"powersi_add_ports_auto","args":{"session_id":"${s.session_id}"}},
+    {"tool":"powersi_configure","args":{"session_id":"${s.session_id}","operations":[
+        {"op":"save_document","spd_file":"<OUT.spd>"},
+        {"op":"set_frequency_sweep","start":"1e6","end":"1e9"},
+        {"op":"add_ports_auto"}
+    ]}},
     {"tool":"powersi_run_session","args":{"session_id":"${s.session_id}"},"save_as":"run"},
     {"tool":"wait_for_job","args":{"job_id":"${run.job_id}","timeout_seconds":180}},
   ])
 ```
+
+(PowerSI's individual per-operation tools — `powersi_save_document`, `powersi_set_frequency_sweep`,
+`powersi_add_ports_auto`, etc. — were consolidated into the single `powersi_configure(session_id,
+operations=[...])` dispatcher; see `sigrity-si`'s SKILL.md for the full op list and the
+`save_document`-must-be-first ordering caveat.)
 
 Rules: `save_as` stores a step's result so later steps read `${name.field}` (typed) or embed it in
 a bigger string. Max 50 steps; no nesting. **Step-result keys: a step whose tool call RAISED
@@ -137,8 +144,8 @@ This suite is a generic end-to-end EDA engine. For ANY task — build a board fr
 |---|---|---|
 | **0. Intake** | `run_capture_session` (OrCAD schematic) or `dxf2a` / `ipc2581_in` / `brd2dml` / `spif_specctra` / `allegro_new_blank_board` / open an existing `.brd` | Know the design intent (requirements doc / netlist / existing board). No netlist + no existing `.brd` → ask for a schematic file or netlist. |
 | **1. Parts / libraries** | `create_sym` / `ipc2581_in` / `dxf2a` to import footprints; `diacheck`/`ibischk*` to validate models | **Every refdes in the netlist has an Allegro footprint (`.pdra`/`.d`) + OrCAD symbol (`.olb`).** If any refdes has no footprint → **STOP and list exactly which refdes/footprints are missing** (see "Part resolution" below). |
-| **2. Schematic → board** | `capture` → netlist → `allegro` (create `.brd`), `allegro_create_net`, stackup via `generate_multilayer_stackup`, constraints/presets (`get_high_speed_constraint_preset`, `allegro_create_ecset`, `allegro_set_physical_constraint`) | Board exists with nets, stackup, and the interface constraint sets. A **nets-only board is NOT placeable** — nets are logical names with 0 pins (you cannot place/route/DRC/extract a net). |
-| **3. Placement** | `placement.exe` (or manual `allegro_create_copper_shape` for pour/geometry) | Footprints present (Phase 1 gate) AND a board outline/mechanical constraint. No outline → ask or import a DXF. |
+| **2. Schematic → board** | `capture` → netlist → `allegro` (create `.brd`), `allegro_configure` (op: `create_net`), stackup via `generate_multilayer_stackup`, constraints/presets (`get_high_speed_constraint_preset`, `allegro_configure` ops: `create_ecset`, `set_physical_constraint`) | Board exists with nets, stackup, and the interface constraint sets. A **nets-only board is NOT placeable** — nets are logical names with 0 pins (you cannot place/route/DRC/extract a net). |
+| **3. Placement** | `placement.exe` (or manual `allegro_configure` op `create_copper_shape` for pour/geometry) | Footprints present (Phase 1 gate) AND a board outline/mechanical constraint. No outline → ask or import a DXF. |
 | **4. Route + DRC** | SPECCTRA auto-route (`spif_batch` export → `specctra` route → `run_allegro_specctra_import`) + `run_allegro_batch_drc` / `checkplus` / `run_allegro_report(report_code="drc")` | Placed parts (Phase 3). Judge success by `final.sts` `Completion` + `batch_drc.log` error count, never the raw `state`. |
 | **5. Analysis** | translate to `.spd` (PowerSI BRD-bridge / `xtractim`) → `powerdc` (IR-drop/E-T), `optimizepi`, `powersi` (S-params/crosstalk), `xtractim`/`clarity3d` (3D EM), `psp_cmd` (SPICE/behavioral), `celsius*` (thermal), `aurora` (EMC pre-screen) | A `.spd` with placed+routed copper for the nets under study. No copper → **STOP: analysis is pending placement/routing** (not pending license, not a tool defect). Verify the `.spd` path you passed is YOUR staged file, not a sample. |
 | **6. Fabrication / sign-off** | `run_allegro_generate_artwork` (Gerber), `run_allegro_ipc356_out` / `run_allegro_ipc2581_out` (manufacturing), `run_allegro_step_out` (3D), `run_allegro_pdf_out`, full DRC readback | DRC-clean (Phase 4). For formal EMC/ESD/surge PASS/FAIL (IEC 61000-4-x) that is a **lab/chamber** item — design-side pre-screen (AURORA/PSpice) is the automatable slice; say so rather than claiming a cert. |
@@ -224,7 +231,13 @@ their job dir; never overwrite a shipped sample in place). `copy_file(src,dst,ov
 - `run_t2b_conversion` — needs an external HSpice (not installed).
 - `run_allegro_zrouter` — refuses (GUI-only, Qt, no headless path).
 - `run_touchstone_deembed` (abcd) — segfaults on 4-port MA/dB files, silently no-ops on everything else; verify output exists.
-- `capture_*` / `start_capture_session` — Capture batch Open hangs (install defect); `capture_handle_custom_launch_dialog` only clears the recovery dialog, not the Open hang.
+- `capture_*` / `start_capture_session` (all 12 tools) — **RETIRED, no longer in the tool list at all.** The
+  underlying Capture batch Open hang this family hit IS root-caused and fixed (`ENABLE_CAPTURE_AUTOMATION=TRUE`,
+  automatic) — but these tools were retired anyway because the separate script-execution mechanism they
+  relied on is still broken, unrelated to the hang. For reading a netlist from an existing schematic or
+  authoring a new one, use `extract_capture_netlist_headless` / `author_capture_schematic_headless` instead
+  (CAD domain — see `sigrity-cad`'s SKILL.md) — these work fully headlessly via `tclsh.exe` + Capture's own
+  database DLL, no Capture.exe GUI involved at all.
 
 ## Reporting back (when asked to report findings/learning)
 

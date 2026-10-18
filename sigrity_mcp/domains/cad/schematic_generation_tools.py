@@ -15,34 +15,27 @@ through correctly. `generate_schematic_from_spec` collapses that into one call: 
 part list, wire list, and pin list, get back one job_id for the whole authored-and-saved
 schematic.
 
-HONEST LIMITATION, read before relying on this end-to-end: this composes
-`capture_tools.py`'s existing primitives, and that module's own docstring documents
-OrCAD Capture's batch invocation as `known_blocked` — genuinely non-deterministic on
-this machine even after the stale-lock root-cause fix (one clean 3.2s run, then the next
-attempt hanging the full timeout with an empty log, repeatedly, per
-`core/tool_status.py`'s `capture` note). Composing more capture_* calls into one script
-does not fix that underlying reliability issue — it only removes the *sequencing*
-burden from the caller. Treat a `succeeded` result from this tool the same way
-`capture_run_session` itself warns to: check the job's actual log content (via
-`tail_job_log`/`list_job_files`), not just the returncode, before trusting that the
-parts/wires described below actually landed in the saved design.
+RETIRED FROM THE PUBLIC MCP TOOL SURFACE (compact-tool-surface pass), for the same
+reason as the `capture_tools.py` primitives it composes: it builds on
+`capture_run_session`'s batch invocation of `Capture.exe`, which is provably broken for
+unattended use (a supplied Tcl script never actually gets sourced — see
+`core.tool_status.TOOL_STATUS_NOTES["capture"]`). Composing more `capture_*` calls into
+one script never fixed that underlying problem — it only removed the *sequencing*
+burden from the caller — so this tool never actually authored anything reliably either,
+and keeping it in the tool list alongside a tool that DOES work
+(`author_capture_schematic_headless`) was exactly the kind of ambiguous, trap-laying
+duplication this consolidation pass exists to remove.
 
-UPDATE: this module's underlying reliability problem is now SOLVED by a different
-mechanism, not yet wired into this specific tool — see
-`capture_headless_tools.author_capture_schematic_headless`, which creates a design,
-places real parts from a real library, draws real wires, and saves a valid `.dsn`
-via `tclsh.exe` loading Capture's own database DLL directly (NO Capture.exe process,
-no GUI, no non-determinism), independently re-verified by reopening the result. It is
-the recommended path for new schematic authoring going forward; this `capture_tools.py`
--composing tool is kept for the cases that genuinely need Capture.exe itself (e.g. an
-interactive-session-only property or menu action), with its known unreliability
-unchanged. Per-part property
-assignment (e.g. setting a specific REFDES on a specific placed part) is deliberately
-NOT attempted here: Capture's own `SetProperty` Tcl command operates on "the currently
-selected object(s)", and there is no confirmed way to select a specific just-placed part
-by name from a batch script — attempting to fake that would silently set the wrong
-part's property. Use `capture_annotate` (auto-reference-designation, already queued
-below) instead of hand-assigned REFDES for this pass.
+Use `capture_headless_tools.author_capture_schematic_headless` instead for new
+schematic authoring: it creates a design, places real parts from a real library, draws
+real wires, and saves a valid `.dsn` via `tclsh.exe` loading Capture's own database DLL
+directly (NO Capture.exe process, no GUI, no non-determinism), independently
+re-verified by reopening the result. It does not (yet) replicate this tool's
+`.opj`-project-file-aware page/design auto-detection (`_find_project_schematic_design`
+below) or its `annotate`/`create_netlist` steps (Capture menu commands with no
+confirmed headless equivalent) — a caller needing those specifically still has this
+function available as a plain Python import, with its original, unresolved reliability
+caveat unchanged.
 """
 
 from __future__ import annotations
@@ -63,7 +56,6 @@ from sigrity_mcp.domains.cad.capture_tools import (
     capture_select_page,
     start_capture_session,
 )
-from sigrity_mcp.mcp_app import mcp
 
 # Matches `(File "<path>"` entries in an .opj project file's project model (S-expr).
 _PROJECT_FILE_ENTRY = re.compile(r'\(File\s+"([^"]+)"')
@@ -104,7 +96,6 @@ def _find_project_schematic_design(project_file: str) -> Optional[tuple[str, str
     return None
 
 
-@mcp.tool
 async def generate_schematic_from_spec(
     project_file: str,
     parts: list[dict],

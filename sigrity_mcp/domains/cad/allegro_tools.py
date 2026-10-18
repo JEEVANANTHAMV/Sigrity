@@ -31,6 +31,25 @@ Usage pattern: start_allegro_session -> compose tools -> allegro_run_session(ses
 board_file). Note `board_file` is supplied at RUN time, not composition time — Allegro
 takes it as `allegro.exe`'s own positional argument (which loads the design before the
 script runs), unlike Sigrity's `sigrity::open document` Tcl command.
+
+CONSOLIDATED (compact-tool-surface pass): this file, allegro_geometry_tools.py, and
+allegro_constraint_tools.py all compose into the SAME Allegro SKILL session (one
+`start_allegro_session` -> many compose calls across all three files -> one
+`allegro_run_session`), so their 22 individual "compose" functions are now driven through
+ONE cross-file dispatcher tool, `allegro_configure(session_id, operations)`, defined here
+(each item is `{"op": "<short-name>", **kwargs}`, `short-name` = the function name with
+the `allegro_` prefix stripped). Grouped by what they do: net/component/board-level ops
+(`create_net, create_nets, create_component, create_board_outline, create_stackup,
+set_variable, run_drc, save_design` — from this file), geometry ops (`create_trace,
+create_via, create_simple_padstack, place_module_instance, assign_net, delete_connect,
+create_copper_shape, create_film, get_module_instance_location, get_net_length` — from
+allegro_geometry_tools.py), and constraint ops (`set_spacing_constraint,
+set_physical_constraint, create_ecset, get_net_constraint` — from
+allegro_constraint_tools.py). Every operation's underlying validation/SKILL-quoting is
+UNCHANGED — this only changes how many separate tool calls an agent needs, not what each
+operation does or how safely it's built. `start_allegro_session` and `allegro_run_session`
+are unaffected and remain individually exposed. See `allegro_configure`'s own docstring
+for the full op list.
 """
 
 from __future__ import annotations
@@ -40,7 +59,25 @@ from typing import Any, Literal, Optional, Union
 from sigrity_mcp.core.skillscript import skill_path, skill_str
 from sigrity_mcp.core.tclsession import clear_stale_design_lock, run_session, tcl_sessions
 from sigrity_mcp.mcp_app import mcp
-from sigrity_mcp.domains.cad.allegro_geometry_tools import closed_outline_path_expr
+from sigrity_mcp.domains.cad.allegro_geometry_tools import (
+    closed_outline_path_expr,
+    allegro_assign_net,
+    allegro_create_copper_shape,
+    allegro_create_film,
+    allegro_create_simple_padstack,
+    allegro_create_trace,
+    allegro_create_via,
+    allegro_delete_connect,
+    allegro_get_module_instance_location,
+    allegro_get_net_length,
+    allegro_place_module_instance,
+)
+from sigrity_mcp.domains.cad.allegro_constraint_tools import (
+    allegro_create_ecset,
+    allegro_get_net_constraint,
+    allegro_set_physical_constraint,
+    allegro_set_spacing_constraint,
+)
 
 _NET_TYPES = Literal["Signal", "Power", "Ground"]
 
@@ -97,7 +134,6 @@ Call load_skill('sigrity-cad') for the full verified playbook, pitfalls, and a l
     return {"session_id": session.session_id}
 
 
-@mcp.tool
 async def allegro_create_net(session_id: str, net_name: str, net_type: Optional[_NET_TYPES] = None) -> dict:
     """Create a net in the open Allegro board (CONFIRMED LIVE — see module docstring).
 
@@ -110,7 +146,6 @@ async def allegro_create_net(session_id: str, net_name: str, net_type: Optional[
     return {"session_id": session_id, "net_name": net_name, "net_type": net_type, "idempotent": True}
 
 
-@mcp.tool
 async def allegro_create_nets(
     session_id: str,
     net_names: list[str],
@@ -130,7 +165,6 @@ async def allegro_create_nets(
     return {"session_id": session_id, "created": len(net_names), "net_names": list(net_names), "net_type": net_type}
 
 
-@mcp.tool
 async def allegro_create_component(
     session_id: str,
     ref_des: str,
@@ -171,7 +205,6 @@ async def allegro_create_component(
     }
 
 
-@mcp.tool
 async def allegro_create_board_outline(session_id: str, points: list[list[float]]) -> dict:
     """Create the board outline shape from a closed polygon of [x, y] points.
 
@@ -204,7 +237,6 @@ async def allegro_create_board_outline(session_id: str, points: list[list[float]
     return {"session_id": session_id, "point_count": len(points)}
 
 
-@mcp.tool
 async def allegro_create_stackup(
     session_id: str,
     position: Union[Literal["top", "bottom", "afterBottom"], str, int] = "bottom",
@@ -250,7 +282,6 @@ Call load_skill('sigrity-cad') for the full verified playbook, pitfalls, and a l
     }
 
 
-@mcp.tool
 async def allegro_set_variable(session_id: str, name: str, value: str) -> dict:
     """Queue a session-scope Allegro variable set (`axlSetVariable`) before `axlDBCreateComponent` runs in the same session.
 
@@ -277,7 +308,6 @@ async def allegro_set_variable(session_id: str, name: str, value: str) -> dict:
     return {"session_id": session_id, "name": name, "value": value}
 
 
-@mcp.tool
 async def allegro_run_drc(session_id: str, batch_mode: bool = False) -> dict:
     """Queue a design-rule-check update (UNVERIFIED live — see module docstring).
 Call load_skill('sigrity-cad') for the full verified playbook, pitfalls, and a live example."""
@@ -285,7 +315,6 @@ Call load_skill('sigrity-cad') for the full verified playbook, pitfalls, and a l
     return {"session_id": session_id, "batch_mode": batch_mode}
 
 
-@mcp.tool
 async def allegro_save_design(session_id: str, output_file: Optional[str] = None) -> dict:
     """Queue saving the current Allegro board (CONFIRMED LIVE — see module docstring).
 
@@ -308,6 +337,87 @@ async def allegro_save_design(session_id: str, output_file: Optional[str] = None
             "board's byte size increased after the run."
         )
     return note
+
+
+_CONFIGURE_OPS = {
+    # net / component / board-level ops (this file)
+    "create_net": allegro_create_net,
+    "create_nets": allegro_create_nets,
+    "create_component": allegro_create_component,
+    "create_board_outline": allegro_create_board_outline,
+    "create_stackup": allegro_create_stackup,
+    "set_variable": allegro_set_variable,
+    "run_drc": allegro_run_drc,
+    "save_design": allegro_save_design,
+    # geometry ops (allegro_geometry_tools.py)
+    "create_trace": allegro_create_trace,
+    "create_via": allegro_create_via,
+    "create_simple_padstack": allegro_create_simple_padstack,
+    "place_module_instance": allegro_place_module_instance,
+    "assign_net": allegro_assign_net,
+    "delete_connect": allegro_delete_connect,
+    "create_copper_shape": allegro_create_copper_shape,
+    "create_film": allegro_create_film,
+    "get_module_instance_location": allegro_get_module_instance_location,
+    "get_net_length": allegro_get_net_length,
+    # constraint ops (allegro_constraint_tools.py)
+    "set_spacing_constraint": allegro_set_spacing_constraint,
+    "set_physical_constraint": allegro_set_physical_constraint,
+    "create_ecset": allegro_create_ecset,
+    "get_net_constraint": allegro_get_net_constraint,
+}
+
+
+@mcp.tool
+async def allegro_configure(session_id: str, operations: list[dict]) -> dict:
+    """Apply a list of Allegro session-configuration operations in one call (replaces
+    calling the 22 individual compose tools spread across allegro_tools.py,
+    allegro_geometry_tools.py, and allegro_constraint_tools.py one at a time).
+
+    All three modules compose into the SAME Allegro SKILL session (one
+    `start_allegro_session` -> many `allegro_configure` calls -> one `allegro_run_session`),
+    so this single dispatcher spans all three files rather than each file getting its own.
+
+    Each item in `operations` is `{"op": "<name>", **kwargs}` where `<name>` is one of:
+    - net/component/board-level (allegro_tools.py): `create_net, create_nets,
+      create_component, create_board_outline, create_stackup, set_variable, run_drc,
+      save_design`
+    - geometry (allegro_geometry_tools.py): `create_trace, create_via,
+      create_simple_padstack, place_module_instance, assign_net, delete_connect,
+      create_copper_shape, create_film, get_module_instance_location, get_net_length`
+    - constraint (allegro_constraint_tools.py): `set_spacing_constraint,
+      set_physical_constraint, create_ecset, get_net_constraint`
+
+    `kwargs` are that operation's own parameters (everything except `session_id`, which is
+    threaded through automatically) — see each corresponding `allegro_*` function's own
+    docstring (still present in its original module, just no longer individually exposed
+    as a top-level tool) for its exact kwargs and caveats (e.g. `delete_connect`'s
+    destructive-NET warning, `save_design`'s "axlSaveDesign takes no path argument" note,
+    `create_trace`'s required-width/self-overlap-check behavior). Operations are applied
+    in list order, since later ones (e.g. assigning a net to a pin just created) can
+    depend on earlier ones. Raises `ValueError` naming the exact index and op on an
+    unknown `op` or a bad/missing kwarg, rather than silently skipping it.
+
+    Example: `operations=[{"op": "create_net", "net_name": "GND"},
+    {"op": "create_trace", "points": [[0, 0], [100, 0]], "layer": "TOP",
+    "net_name": "GND", "width": 5.0},
+    {"op": "set_spacing_constraint", "constraint": "LINE_TO_LINE", "value": 5.0}]`.
+    Call load_skill('sigrity-cad') for the full verified playbook, pitfalls, and a live example."""
+    results = []
+    for i, raw_op in enumerate(operations):
+        op = dict(raw_op)
+        name = op.pop("op", None)
+        fn = _CONFIGURE_OPS.get(name)
+        if fn is None:
+            raise ValueError(
+                f"operations[{i}]: unknown op {name!r}. Valid ops: {sorted(_CONFIGURE_OPS)}"
+            )
+        try:
+            result = await fn(session_id, **op)
+        except TypeError as e:
+            raise ValueError(f"operations[{i}] (op={name!r}): {e}") from e
+        results.append({"op": name, **result})
+    return {"session_id": session_id, "operations_applied": len(results), "results": results}
 
 
 @mcp.tool

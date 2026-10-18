@@ -93,6 +93,12 @@ by using class `BOUNDARY` instead of `ETCH` in the layer string (`"BOUNDARY/<lay
 `share/pcb/examples/skill/dbcreate/axldbctshp.il` (`dbc_shp_t2`: a solid-filled
 `"ETCH/TOP"` shape assigned to net `"GND"`). See `allegro_create_copper_shape`'s own
 docstring for the live before/after PowerDC test and its result.
+
+CONSOLIDATED: this module's compose functions are no longer individually-exposed MCP
+tools — they're driven via `allegro_tools.allegro_configure(session_id, operations=[...])`
+alongside the compose tools from allegro_tools.py and allegro_constraint_tools.py (all
+three compose into the same Allegro SKILL session). The functions themselves are
+unchanged and still importable directly by name for tests/scripts.
 """
 
 from __future__ import annotations
@@ -137,7 +143,6 @@ def _etch_layer_arg(layer: str) -> str:
     return layer if "/" in layer else f"ETCH/{layer}"
 
 
-@mcp.tool
 def _check_self_overlap(points: list[list[float]]) -> None:
     """Raise ValueError if any two collinear (both-horizontal or both-vertical)
     segments of this path overlap in extent. A self-overlapping path (e.g. a meander
@@ -229,7 +234,6 @@ Call load_skill('sigrity-cad') for the full verified playbook, pitfalls, and a l
     }
 
 
-@mcp.tool
 async def allegro_create_via(
     session_id: str,
     padstack_name: str,
@@ -248,7 +252,6 @@ Call load_skill('sigrity-cad') for the full verified playbook, pitfalls, and a l
     return {"session_id": session_id, "padstack_name": padstack_name, "x": x, "y": y, "net_name": net_name}
 
 
-@mcp.tool
 async def allegro_create_simple_padstack(
     session_id: str,
     name: str,
@@ -273,7 +276,6 @@ Call load_skill('sigrity-cad') for the full verified playbook, pitfalls, and a l
     return {"session_id": session_id, "name": name, "pad_layer": pad_layer, "drill_diameter": drill_diameter}
 
 
-@mcp.tool
 async def allegro_place_module_instance(
     session_id: str,
     instance_name: str,
@@ -303,7 +305,6 @@ Call load_skill('sigrity-cad') for the full verified playbook, pitfalls, and a l
     }
 
 
-@mcp.tool
 async def allegro_assign_net(
     session_id: str,
     object_type: str,
@@ -328,7 +329,6 @@ Call load_skill('sigrity-cad') for the full verified playbook, pitfalls, and a l
     }
 
 
-@mcp.tool
 async def allegro_delete_connect(
     session_id: str,
     object_type: str,
@@ -418,7 +418,6 @@ def _closed_path_expr(points: list[list[float]]) -> str:
     return f"(axlPathStart {_point_list(pts)})"
 
 
-@mcp.tool
 async def allegro_create_copper_shape(
     session_id: str,
     layer: str,
@@ -515,7 +514,6 @@ Call load_skill('sigrity-cad') for the full verified playbook, pitfalls, and a l
     }
 
 
-@mcp.tool
 async def allegro_create_film(
     session_id: str,
     film_name: str,
@@ -536,7 +534,6 @@ Call load_skill('sigrity-cad') for the full verified playbook, pitfalls, and a l
     return {"session_id": session_id, "film_name": film_name, "layers": layers}
 
 
-@mcp.tool
 async def allegro_get_module_instance_location(session_id: str, instance_name: str) -> dict:
     """Queue a read-only query of a placed module instance's current location/rotation, within the current Allegro SKILL session.
 Call load_skill('sigrity-cad') for the full verified playbook, pitfalls, and a live example."""
@@ -545,7 +542,6 @@ Call load_skill('sigrity-cad') for the full verified playbook, pitfalls, and a l
     return {"session_id": session_id, "instance_name": instance_name}
 
 
-@mcp.tool
 async def allegro_get_net_length(session_id: str, net_name: str) -> dict:
     """Queue a read-only query of a net's real measured routed etch length (`axlDBGetLength`), within the current Allegro SKILL session.
 

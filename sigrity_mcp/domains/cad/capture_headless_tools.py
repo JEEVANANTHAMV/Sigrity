@@ -62,15 +62,24 @@ product) has no batch/headless launch mode either (`-tclfile`/`-nograph` both st
 its GUI product-chooser dialog; no documented script-at-launch flag exists for it). The
 DB-write path here needs neither.
 
-Known, honest limitation of `author_capture_schematic_headless`: placed instances come
-back with reference designators like `DN?`, not `R1`/`R2` as requested — refdes
-ANNOTATION is a separate step (`capBatchAnnotate`, a Command-Window/GUI-side operation,
-not confirmed scriptable from this headless DLL path) that was not solved this pass; the
-objects themselves are real and correctly placed/wired, just not yet renumbered. Net
-connectivity (`NewFlatNetsIter`) still does not populate for the same GUI-connectivity-
-engine reason documented above for the read path — wire-to-pin connectivity is implicit
-in page geometry (confirmed: the drawn wire IS present and counted on reopen) rather
-than computed into a named net.
+Reference designators: `NewPlacedInst`'s Name arg does NOT land the refdes (instances
+come back with the placeholder `DN?`); a follow-up `DboPartInst_SetReference <inst>
+<CString>` calls successfully updates the in-session object's reference (confirmed live:
+`sGetReference` reports the new value in the same Tcl process), but the persisted
+"reference designator" that a fresh `GetDesignAndSchematics` reopen reports is a separate
+design-level ANNOTATE step (`capBatchAnnotate` — a GUI Command-Window operation) that has
+no confirmed headless equivalent in this DLL build (probed 2026-05: `DboRefDesMgr`/
+`DboRefDesManager`/`DboRefDesAnnotation` family and `DboSchematic_Annotate` overloads all
+reject every arg-count tried from Tcl). This tool therefore emits `SetReference`
+after each placement for the best in-session display, but a fresh reopen of the saved
+`.dsn` will still report sequential `INS1/INS2/...` (the auto-name) until the design is
+annotated in the GUI. The `ref` field is still accepted and forwarded (both as
+`NewPlacedInst`'s Name slot and to `SetReference`), so the value is recorded on the
+object; it just does not survive an annotation-free round-trip. Net connectivity
+(`NewFlatNetsIter`) still does not populate for the same GUI-connectivity-engine reason
+documented above for the read path — wire-to-pin connectivity is implicit in page
+geometry (confirmed: the drawn wire IS present and counted on reopen) rather than
+computed into a named net.
 """
 
 from __future__ import annotations
@@ -332,6 +341,16 @@ def _build_author_script(
             "} elseif {[isnull $lInst]} {\n"
             '  puts "AUTHOR_WARN: placement of ' + ref + ' returned NULL"\n'
             "} else {\n"
+            # NewPlacedInst's Name arg does NOT land the reference designator (it comes
+            # back as the placeholder DN?): the 7-arg overload binds Name to an internal
+            # name, not the user-visible refdes. DboPartInst_SetReference DOES update
+            # the in-session object but the persisted field on SaveDesignAs is the
+            # design-level ANNOTATE step (capBatchAnnotate) -- a GUI Command-Window
+            # operation with no confirmed headless equivalent. So `ref` is accepted
+            # and best-effort (it is forwarded to NewPlacedInst's Name slot and to
+            # SetReference after placement), but a fresh reopen will still report
+            # sequential INS1/INS2/... until the design is annotated in the GUI.
+            "  catch {DboPartInst_SetReference $lInst $csRef}\n"
             "  incr placed_count\n"
             "}"
         )
@@ -523,13 +542,19 @@ async def author_capture_schematic_headless(
     as `components`' `x`/`y` — both get multiplied by the page's own
     `GetPhysicalGranularity` at runtime). Defaults to no wires if omitted.
 
-    KNOWN, HONEST LIMITATION (not fixed by this tool): placed instances keep a
-    placeholder reference designator (`DN?`) rather than the `ref` you requested —
-    refdes ANNOTATION is a separate, not-yet-confirmed-scriptable step
-    (`capBatchAnnotate`). The objects are genuinely placed/wired; they are just not
-    renumbered. Net connectivity also does not populate (same GUI-connectivity-engine
-    limitation as the read path) — verify success via `placed`/`wires` counts and by
-    reopening the file, not by net content.
+    Reference designators: `NewPlacedInst`'s Name arg does NOT land the refdes (you'd
+    otherwise get `DN?`); this tool follows each successful placement with a
+    `DboPartInst_SetReference` call that updates the in-session object (sGetReference
+    reports the requested value in the same Tcl process). HOWEVER the persisted
+    reference designator that a fresh reopen via `GetDesignAndSchematics` reports is a
+    separate design-level ANNOTATE step (`capBatchAnnotate`, GUI Command-Window) that
+    has no confirmed headless equivalent in this DLL build — so a fresh reopen of the
+    saved `.dsn` still shows sequential `INS1/INS2/...` until the design is annotated
+    in the GUI. Pass unique `ref` values (the value is recorded in-session; it just
+    does not survive an un-annotated round-trip). Net connectivity also does not
+    populate (same GUI-connectivity-engine limitation as the read path) — verify
+    success via `placed`/`wires` counts and by reopening the file, not by net content
+    or refdes.
     """
     output_abs = _resolve(output_dsn)
     library_abs = _resolve(library_file)

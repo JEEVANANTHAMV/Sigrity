@@ -1,6 +1,6 @@
 ---
 name: sigrity-cad
-description: Allegro/OrCAD CAD domain (SPB 22.1) — report/DRC/dbdoctor, SPECCTRA autoroute, Gerber (artwork) export, SKILL PCB authoring (including real multi-layer/rigid-flex stackup authoring via generate_multilayer_stackup, verified live, and real copper shape/plane-pour authoring via allegro_create_copper_shape, verified live), and run_tool_pipeline, all verified live. Use for board analysis, DRC, SPECCTRA routing, Gerber/manufacturing export, SKILL geometry/padstack/film/stackup/copper-shape authoring, and multi-step job pipelines.
+description: Allegro/OrCAD CAD domain (SPB 22.1) — report/DRC/dbdoctor, SPECCTRA autoroute, Gerber (artwork) export, SKILL PCB authoring (including real multi-layer/rigid-flex stackup authoring via generate_multilayer_stackup, verified live, and real copper shape/plane-pour authoring via allegro_configure's create_copper_shape op, verified live), and run_tool_pipeline, all verified live. Use for board analysis, DRC, SPECCTRA routing, Gerber/manufacturing export, SKILL geometry/padstack/film/stackup/copper-shape authoring, and multi-step job pipelines.
 ---
 
 # Sigrity CAD domain — Allegro PCB (report/DRC/DRC, SPECCTRA, Gerber, SKILL, pipeline)
@@ -127,9 +127,11 @@ then a standalone artwork job renders. `output_file` on `allegro_save_design` le
 to the already-loaded board path.
 ```
 start_allegro_session()                                              -> {session_id}
-allegro_create_film(session_id, film_name="TOP",    layers=["ETCH/TOP"])
-allegro_create_film(session_id, film_name="BOTTOM", layers=["ETCH/BOTTOM"])
-allegro_save_design(session_id)                                      # no output_file -> saves loaded board
+allegro_configure(session_id, operations=[
+  {"op":"create_film", "film_name":"TOP",    "layers":["ETCH/TOP"]},
+  {"op":"create_film", "film_name":"BOTTOM", "layers":["ETCH/BOTTOM"]},
+  {"op":"save_design"},                                              # no output_file -> saves loaded board
+])
 allegro_run_session(session_id, board_file="…\\t4_gerber\\fd.brd")   # board_file REQUIRED here; appends bare `quit`
 wait_for_job(job_id, 240) -> state:"succeeded", rc 0   (~17 s; allegro.exe loads board 15-20 s)
 tail_job_log(job_id)   # only the Allegro banner — film/save results are NOT in the log
@@ -200,7 +202,7 @@ generate_multilayer_stackup(session_id, layers=[
     {"name":"L2_GND",  "layer_type":"PLANE",     "material":"COPPER",    "thickness_mil":1.4},
     {"name":"L3_SIG1", "layer_type":"CONDUCTOR", "material":"COPPER",    "thickness_mil":0.7},
     ... ])                                                        # queues len(layers) SKILL lines
-allegro_save_design(session_id)                                   # REQUIRED -- nothing persists without this
+allegro_configure(session_id, operations=[{"op":"save_design"}])  # REQUIRED -- nothing persists without this
 allegro_run_session(session_id, board_file="…\\t6_stackup\\fd.brd")
 wait_for_job(job_id, 120) -> state:"succeeded", rc 0   # SEE GOTCHA below re: a modal dialog
 run_allegro_report(board_file="…\\t6_stackup\\fd.brd", report_code="x-section",
@@ -300,12 +302,14 @@ allegro_get_board_extent_points(board_file="…\\fd.brd", margin=500.0)
 start_allegro_session()                                           -> {session_id}
 generate_multilayer_stackup(session_id, layers=[... incl. {"name":"L2_GND","layer_type":"PLANE",
     "material":"COPPER","thickness_mil":1.4}, ...])                # Task 6
-allegro_create_copper_shape(session_id, layer="L2_GND", net_name="GND",
-    points=[[7500,13900],[14700,13900],[14700,19200],[7500,19200]], dynamic=True) # from the
+allegro_configure(session_id, operations=[
+  {"op":"create_copper_shape", "layer":"L2_GND", "net_name":"GND",
+   "points":[[7500,13900],[14700,13900],[14700,19200],[7500,19200]], "dynamic":True}, # from the
                                                                      # extent-points call above,
                                                                      # NOT report_code="sum"'s
                                                                      # "Drawing Extents" (see below)
-allegro_save_design(session_id)
+  {"op":"save_design"},
+])
 allegro_run_session(session_id, board_file="…\\fd.brd")
 wait_for_job(job_id, 120) -> state:"succeeded", rc 0
 ```
@@ -480,9 +484,12 @@ tests, and independently re-verified live:
 
 ```
 start_allegro_session()
-allegro_assign_net(session_id, "PIN", "<a pin on the bad net>", "<that net's own name>", ripup=True)
-allegro_create_trace(session_id, points=[...corrected path...], layer="TOP", net_name="<net>", width=5.0)
-allegro_save_design(session_id)
+allegro_configure(session_id, operations=[
+  {"op":"assign_net", "object_type":"PIN", "object_name":"<a pin on the bad net>",
+   "net_name":"<that pin's own current net>", "ripup":True},
+  {"op":"create_trace", "points":[...corrected path...], "layer":"TOP", "net_name":"<net>", "width":5.0},
+  {"op":"save_design"},
+])
 allegro_run_session(session_id, board_file=...)
 wait_for_job(...)
 run_allegro_batch_drc(board_file=...) ; wait_for_job(..., timeout_seconds=15)   # read batch_drc.log, don't trust state

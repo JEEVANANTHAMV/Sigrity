@@ -33,8 +33,10 @@ Verified sequence (job `powersi-dd8bbf5d18`, 33 s, rc 0):
 copy_file(source_file="C:\\Cadence\\Sigrity2024.0\\share\\PostInstallationCheck\\powersi\\psi_brd_demoshort.spd",
           destination_file="C:\\Users\\aicoe\\Desktop\\Sigrity\\runs\\task2_demoshort.spd", overwrite=true)
 start_powersi_session(spd_file="C:/Users/aicoe/Desktop/Sigrity/runs/task2_demoshort.spd") -> session_id
-powersi_set_frequency_sweep(session_id, start="1e6", end="1e9")   # PLAIN Hz strings, NOT "1MHz"/"1GHz"
-powersi_add_ports_auto(session_id, signal_ref_impedance=50.0)
+powersi_configure(session_id, operations=[
+    {"op": "set_frequency_sweep", "start": "1e6", "end": "1e9"},   # PLAIN Hz strings, NOT "1MHz"/"1GHz"
+    {"op": "add_ports_auto", "signal_ref_impedance": 50.0},
+])
 preview_tcl_session(session_id)   # optional sanity gate before a long run
 powersi_run_session(session_id, output_format="touchstone") -> job_id (args: -b -ft -tcl <macro.tcl>)
 wait_for_job(job_id, timeout_seconds=180) -> state:"succeeded", rc 0
@@ -67,9 +69,11 @@ Verified sequence (job `powersi-9b924d080e`, 74 s, rc 0):
 copy_file(source_file="C:\\Cadence\\SPB_22.1\\tools\\capture\\samples\\PCB-Layout\\Fault-Detector\\allegro\\fault-detector_allegro_routed.brd",
           destination_file="C:\\Users\\aicoe\\Desktop\\Sigrity\\runs\\task3_board.brd", overwrite=true)
 start_powersi_session(spd_file="C:/Users/aicoe/Desktop/Sigrity/runs/task3_board.brd") -> session_id
-powersi_save_document(session_id, spd_file="C:/Users/aicoe/Desktop/Sigrity/runs/task3_board.spd")
-powersi_set_frequency_sweep(session_id, start="1e6", end="1e9")
-powersi_add_ports_auto(session_id)
+powersi_configure(session_id, operations=[
+    {"op": "save_document", "spd_file": "C:/Users/aicoe/Desktop/Sigrity/runs/task3_board.spd"},  # MUST be first op, first call
+    {"op": "set_frequency_sweep", "start": "1e6", "end": "1e9"},
+    {"op": "add_ports_auto"},
+])
 preview_tcl_session(session_id)   # confirm `sigrity::save {...}` is line 2, BEFORE freq
 powersi_run_session(session_id, output_format="touchstone") -> job_id
 wait_for_job(job_id, timeout_seconds=240) -> state:"succeeded", rc 0
@@ -84,16 +88,17 @@ wait_for_job(job_id, timeout_seconds=240) -> state:"succeeded", rc 0
     `task3_board_<timestamp>_S.ckt` (SPICE netlist, 9 KB) and
     `task3_board_Options.xml` (27 KB of sweep/export settings).
 - **Error hit**: none on the happy path. The *omitted negative test* (calling `powersi_run_session`
-  on an opened `.brd` WITHOUT `powersi_save_document`) does NOT return a tool error — the process
+  on an opened `.brd` WITHOUT a `save_document` op) does NOT return a tool error — the process
   still exits rc 0 but silently writes only an empty `task3_board_Options.xml` and
   `task3_board_PowerSI.err` with no `.spd` and no `.sNp`. That empty-options-only signature is the
-  fingerprint of the missing save; fix = re-run with `powersi_save_document` right after
-  `start_powersi_session`.
-- **#1 mistake**: skipping `powersi_save_document` after opening a non-`.spd` design. It must be the
-  *first* composed step (line 2 of the macro, immediately after `sigrity::open document`) — calling
-  it after `set_frequency_sweep`/`add_ports_auto` is the order that silently produces no output.
+  fingerprint of the missing save; fix = re-run with `{"op": "save_document", ...}` as the first
+  operation of the first `powersi_configure` call made right after `start_powersi_session`.
+- **#1 mistake**: skipping the `save_document` op after opening a non-`.spd` design. It must be the
+  *first* composed step (line 2 of the macro, immediately after `sigrity::open document`) — putting
+  it after `set_frequency_sweep`/`add_ports_auto` in the `operations` list is the order that silently
+  produces no output.
 - **Artifact naming**: PowerSI names outputs `<design_basename>_<yyyymmdd>_<hhmmss>_<pid>_S.<N>p`.
-  The design basename is the .spd name (from `powersi_save_document`), NOT the .brd. To recover the
+  The design basename is the .spd name (from the `save_document` op), NOT the .brd. To recover the
   exact filename: `list_job_files(job_id)` won't show it (it's in `runs/`, not the job dir) — instead
   glob `C:\Users\aicoe\Desktop\Sigrity\runs\<basename>_S.*p` after the job ends.
 
@@ -179,11 +184,12 @@ wait_for_job(job_id, timeout_seconds=180) -> state:"succeeded", rc 0
    starting frequency." Also the Tcl line is `sigrity::update freq -start {1e6} -end {1e9} -AFS {!}` —
    the space between each flag and its brace-quoted value is required; `-start{1e6}` (no space) is
    rejected as one unrecognized token.
-2. **Non-`.spd` input (e.g. a `.brd`) REQUIRES `powersi_save_document` first.** PowerSI opens the
+2. **Non-`.spd` input (e.g. a `.brd`) REQUIRES a `save_document` op first.** PowerSI opens the
    foreign format via its built-in translator (BRDExtractor for `.brd`; DXF/Altium/ODB2/IPC-2581 are
    also handled by `sigrity::open document`), but will not simulate a design not yet saved to native
-   SPD. Call it **immediately after `start_powersi_session`** and **before any other step**. Omit
-   it on a design that is already `.spd`.
+   SPD. Put `{"op": "save_document", "spd_file": ...}` as the **first operation** in the **first
+   `powersi_configure` call made immediately after `start_powersi_session`**, before any other op.
+   Omit it on a design that is already `.spd`.
 3. **`sigrity::begin simulation {!}` is appended by `powersi_run_session` itself** — you do NOT add it
    manually. If you compose a raw macro some other way, a missing `begin simulation` line is the
    cause of a run that opens the design, applies every setting, exits rc 0, and produces zero output.

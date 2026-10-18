@@ -20,6 +20,12 @@ doc pages (exact signatures below), but not yet independently exercised live aga
 real board on this machine — treat flag/value spellings as a faithful transcription,
 not guaranteed correct, the same caution this project applies to every other
 newly-added, doc-sourced tool.
+
+CONSOLIDATED: this module's compose functions are no longer individually-exposed MCP
+tools — they're driven via `allegro_tools.allegro_configure(session_id, operations=[...])`
+alongside the compose tools from allegro_tools.py and allegro_geometry_tools.py (all
+three compose into the same Allegro SKILL session). The functions themselves are
+unchanged and still importable directly by name for tests/scripts.
 """
 
 from __future__ import annotations
@@ -55,7 +61,6 @@ def _value_arg(value: Union[str, float, int, bool]) -> str:
     return skill_str(value)
 
 
-@mcp.tool
 async def allegro_set_spacing_constraint(
     session_id: str,
     constraint: str,
@@ -70,7 +75,6 @@ Call load_skill('sigrity-cad') for the full verified playbook, pitfalls, and a l
     return {"session_id": session_id, "constraint": constraint, "value": value, "cset": cset, "layer": layer}
 
 
-@mcp.tool
 async def allegro_set_physical_constraint(
     session_id: str,
     constraint: str,
@@ -85,7 +89,6 @@ Call load_skill('sigrity-cad') for the full verified playbook, pitfalls, and a l
     return {"session_id": session_id, "constraint": constraint, "value": value, "cset": cset, "layer": layer}
 
 
-@mcp.tool
 async def allegro_create_ecset(session_id: str, name: str, copy_from: Optional[str] = None) -> dict:
     """Create a new electrical constraint set (ecset) — e.g. for impedance/length-matching rules on a net group.
 Call load_skill('sigrity-cad') for the full verified playbook, pitfalls, and a live example."""
@@ -94,7 +97,6 @@ Call load_skill('sigrity-cad') for the full verified playbook, pitfalls, and a l
     return {"session_id": session_id, "name": name, "copy_from": copy_from}
 
 
-@mcp.tool
 async def allegro_get_net_constraint(session_id: str, net_name: str, constraint_name: str) -> dict:
     """Queue a read-only query of an electrical constraint value flattened onto a net (e.g. impedance, propagation delay), within the current Allegro SKILL session.
 Call load_skill('sigrity-cad') for the full verified playbook, pitfalls, and a live example."""
