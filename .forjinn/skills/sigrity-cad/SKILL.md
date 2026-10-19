@@ -582,6 +582,86 @@ neighborhood, wherever on the board it is) — but the length objective itself l
 exactly. See `runs/routing_capability_investigation/t3_length_matching/` for the full
 before/after evidence of all of the above.
 
+## Task 10 — COMPLEX: full headless Capture pipeline (author → persistent refdes → PCB netlist), closing the historic "Capture GUI needed" gap
+
+This closes the gap previously documented in `FAILED_TOOLS.md` as needing manual Capture
+GUI steps: placing parts with a REAL, SAVE-PERSISTENT reference designator, and generating
+the PCB netlist (`pstchip.dat`/`pstxprt.dat`/`pstxnet.dat`) Allegro import needs — all with
+zero Capture.exe GUI interaction. All three tools live in
+`sigrity_mcp/domains/cad/capture_headless_tools.py` and run via `tclsh.exe` loading
+Capture's own `orDb_Dll_Tcl64.dll` (DboTcl) — not via `capture_tools.py`, which is fully
+retired (its `@mcp.tool` decorators were removed; see that file's own docstring).
+
+**Root cause this solves**: placing a part via `DboPartInst_SetReference` only sets the
+in-session cosmetic refdes — it does NOT persist across a save+reopen. The real,
+persistent refdes lives on the OCCURRENCE object (`DboInstOccurrence`), reached via
+`DboDesign_GetRootOccurrence` → `DboInstOccurrence_GetInstOccurrence`. But that occurrence
+tree is NULL for any part instance created in the SAME, not-yet-saved `tclsh` session — it
+only resolves for a design freshly loaded from disk. So `author_capture_schematic_headless`
+is a genuine TWO-PASS tool, each pass its own separate `tclsh.exe` job:
+
+1. **Pass 1 (unchanged `_build_author_script`)**: creates the design, places each part,
+   sets the cosmetic `DboPartInst_SetReference`, saves to `output_dsn`.
+2. **Pass 2 (new `_build_annotate_script`, auto-run only if `placed > 0`)**: a SEPARATE
+   `tclsh.exe` job reopens the just-saved `.dsn` fresh, resolves the root occurrence tree,
+   matches parts to the requested refs **by iteration order** (`DboPage_NewPartInstsIter`
+   — an assumption, true for designs authored by this same tool in placement order), and
+   calls the 2-ARG forms `DboInstOccurrence_SetReference $occ $ref` /
+   `DboInstOccurrence_SetDesignator $occ $prefix` (the 3-arg form with a status object
+   raises `Wrong # args` — confirmed live, regression-guarded by
+   `test_annotate_script_uses_two_arg_occurrence_setters`), then saves again.
+
+Call it exactly like before — the second pass is automatic and transparent:
+```
+result = author_capture_schematic_headless(
+    output_dsn=".../runs/<task>/out.dsn",
+    library_file=".../some_lib.olb",
+    components=[{"ref": "R1", "x": 100, "y": 100}, {"ref": "R2", "x": 300, "y": 100}],
+)
+```
+`result` now carries, in addition to the original `placed`/`wires`/`output_size` keys:
+`annotate_job_id`, `annotate_state`, `annotate_annotated`, `annotate_requested`, and
+(on failure) `annotate_error`/`annotate_log_tail`. If `placed == 0`, no second job is
+submitted at all and none of the `annotate_*` keys are present — don't expect them
+unconditionally.
+
+**New tool: `generate_capture_pcb_netlist(dsn_file, output_dir, config_file=None,
+max_versions=3, max_name_length=255, wait_seconds=60.0)`** wraps the standalone
+`pstswp.exe -pst -d <dsn> -n <output_dir> [-c <config_file>] -v <max_versions>
+-l <max_name_length>` — the documented, GUI-free replacement for Capture's
+Tools → Create Netlist menu command. Checks that all three of `pstchip.dat`/
+`pstxprt.dat`/`pstxnet.dat` exist AND are non-empty in `output_dir`; sets
+`result["complete"]` accordingly, plus `result["pst_files"]` (list of the ones found) and
+`result["error"]`/`result["netlist_log_tail"]` on incompleteness.
+
+### Full pipeline, 4-way independently verified end-to-end
+
+```
+author_capture_schematic_headless(output_dsn=..., library_file=..., components=[...])
+  → wait: placed=2, annotate_annotated=2, annotate_requested=2            # pass 1 + pass 2
+generate_capture_pcb_netlist(dsn_file=<the output_dsn above>, output_dir=...)
+  → complete=True, pst_files=["pstchip.dat","pstxprt.dat","pstxnet.dat"]
+run_netrev_import(..., netlist files from the output_dir above, board_file=<blank .brd>)
+  → wait_for_job(...) ; "No error detected" in the import log
+run_allegro_report(..., report_code="bom")
+  → read output_file: REFDES=R1, REFDES=R2 present
+```
+Each step was independently confirmed on a real 2-part design: (1) the annotate pass's own
+`ANNOTATE_SUMMARY annotated=2 requested=2`; (2) `pstxprt.dat`'s own `PART_NAME R1`/`R2`
+lines; (3) `netrev.exe`'s clean import with no connectivity errors; (4) the final Allegro
+board's own BOM report showing the real refdes. Treat any ONE of these in isolation as
+insufficient — the same "clean exit code, wrong on disk" trap documented throughout this
+skill applies here too (e.g. a `placed=2` with `annotate_annotated=0` means pass 2 silently
+found no occurrences — check `annotate_log_tail` for `GetInstOccurrence ... returned NULL`
+before trusting the refdes).
+
+**Known limitation, not yet re-tested at scale**: the iteration-order match between
+`components` (as given to pass 1) and `DboPage_NewPartInstsIter`'s traversal order (used by
+pass 2) is an assumption that holds for designs built entirely by this tool in one call,
+placed in the order given. It has NOT been verified against a design with parts added in a
+different order, multiple pages, or parts pre-existing in the `.dsn` before this tool ran —
+treat those as unverified until re-tested.
+
 ## Cross-cutting notes (domain-specific, verified live)
 
 - **Three different non-terminal state lies, three different completions**:

@@ -141,20 +141,39 @@ loads Capture's own schematic-database DLL directly into the standalone `tclsh.e
 `.brd` — independently re-verified with `report.exe`/`dbdoctor.exe` to match a sample
 design's known-good component/net/pin counts exactly.
 
-**UPDATE — schematic AUTHORING is also solved, by the same mechanism**:
-`capture_headless_tools.author_capture_schematic_headless` creates a brand-new design
-from nothing (`CreateDesign` -> `NewSchematic` -> `NewPage`), places real part instances
-resolved from a real `.olb` library, draws real wires, and saves a valid `.dsn` — all via
-the same DLL-in-`tclsh` mechanism, CONFIRMED LIVE and independently re-verified by
-reopening the result with the read-side tool (2 placed parts / 6 pins / 1 wire, all
-genuinely present). The `Capture.Application` COM interface mentioned above as a
-"promising lead" was investigated and ruled OUT for authoring specifically (a safe
-`GetIDsOfNames` existence probe found no `CreateDesign`/page/property surface on it at
-all — just a thin 7-method file-lifecycle wrapper), as was `syscap.exe` (Allegro System
-Capture — confirmed to have no batch/headless launch mode either). See
-`core.tool_status.TOOL_STATUS_NOTES["tclsh"]` for the full evidence trail. Remaining
-honest gap: placed instances keep a placeholder refdes (`DN?`) rather than the requested
-one — annotation (`capBatchAnnotate`) was not confirmed scriptable from this path.
+**UPDATE — schematic AUTHORING is also solved, by the same mechanism, and the gap below
+is now CLOSED**: `capture_headless_tools.author_capture_schematic_headless` creates a
+brand-new design from nothing (`CreateDesign` -> `NewSchematic` -> `NewPage`), places
+real part instances resolved from a real `.olb` library, draws real wires, and saves a
+valid `.dsn` — all via the same DLL-in-`tclsh` mechanism, CONFIRMED LIVE and
+independently re-verified by reopening the result with the read-side tool. The
+`Capture.Application` COM interface mentioned above as a "promising lead" was
+investigated and ruled OUT for authoring specifically (a safe `GetIDsOfNames` existence
+probe found no `CreateDesign`/page/property surface on it at all — just a thin 7-method
+file-lifecycle wrapper), as was `syscap.exe` (Allegro System Capture — confirmed to have
+no batch/headless launch mode either). See `core.tool_status.TOOL_STATUS_NOTES
+["tclsh"]` for the full evidence trail.
+
+**UPDATE (2026-10-18) — the "placeholder refdes" gap is CLOSED, and so is PCB netlist
+generation.** Placed instances now get a REAL, PERSISTENT reference designator via a
+second, separate pass (`DboDesign_GetRootOccurrence` -> `DboInstOccurrence_
+GetInstOccurrence` -> `DboInstOccurrence_SetReference`/`SetDesignator`, a different API
+from the part-instance-level setter that doesn't persist) — the catch found along the
+way: that occurrence API only resolves against an instance that's already been saved and
+reopened, so `author_capture_schematic_headless` now runs two `tclsh` jobs internally
+(create+place+save, then reopen+annotate+resave), not one. SEPARATELY, a new tool,
+`generate_capture_pcb_netlist`, wraps `pstswp.exe` — a real, standalone, GUI-free
+executable that generates a PCB netlist (`pstchip`/`pstxprt`/`pstxnet.dat`) directly
+from a `.dsn`, closing the "Capture's own Create-Netlist menu command is GUI-only" gap
+with no Capture.exe involvement at all. CONFIRMED LIVE, 4 independent ways, on one
+authored-from-nothing test design: a fresh reopen read back the real refdes; the
+generated netlist's `PART_NAME` showed the real refdes, not an auto-name; feeding that
+netlist into `run_netrev_import` produced a real Allegro `.brd`; and `report.exe`'s own
+BOM report (a fully independent code path) confirmed the correct `REFDES` on the final
+board. The full Capture-schematic-to-Allegro-board pipeline — author, annotate,
+netlist, import, independently verify — is now closed end to end with zero Capture.exe
+GUI involvement at any step. See `core.tool_status.TOOL_STATUS_NOTES["tclsh"]`/
+`["pstswp"]` for the complete evidence trail.
 
 **RESOLVED — the `syscap.exe` lead below was investigated and RULED OUT; schematic
 authoring is solved a different way.** `syscap.exe` (`Allegro System Capture`) has a

@@ -1,21 +1,29 @@
 # CAD Domain — Failed / Known-Blocked Tools: Full Reference
 
-> **UPDATE (2026-10-17, later pass) — Section 1 (OrCAD Capture, 12 tools) below is
-> PARTIALLY SUPERSEDED.** The stated root cause ("Machine-level defect in Capture's
-> `Open <project>` path") was incomplete: the real cause of the hang is an embedded
-> Start Page widget making a blocking network call through the system proxy at
-> startup, fixed via `ENABLE_CAPTURE_AUTOMATION=TRUE` (now applied automatically to
-> every Capture launch). More importantly, the two things these 12 tools exist to do —
-> read a schematic's netlist and author a new one — are now both solved by a
-> completely different, Capture.exe-free mechanism: `tclsh.exe` loading Capture's own
-> database DLL directly (`sigrity_mcp/domains/cad/capture_headless_tools.py`
-> — `extract_capture_netlist_headless`/`author_capture_schematic_headless`). The 12
-> tools catalogued below still genuinely fail exactly as described (their underlying
-> mechanism — Capture.exe's own interactive Tcl session — was not fixed, only
-> superseded), so this section remains an accurate technical reference for *why that
-> specific path* is blocked. See `core.tool_status.TOOL_STATUS_NOTES["tclsh"]`/
-> `["capture"]` for the complete current evidence, including why `Capture.Application`
-> COM and `syscap.exe` were both investigated and ruled out as alternatives too.
+> **UPDATE (2026-10-18) — Section 1 (OrCAD Capture, 12 tools) below is now FULLY
+> SUPERSEDED for everything those tools actually exist to accomplish.** The stated root
+> cause ("Machine-level defect in Capture's `Open <project>` path") was incomplete: the
+> real cause of the hang is an embedded Start Page widget making a blocking network call
+> through the system proxy at startup, fixed via `ENABLE_CAPTURE_AUTOMATION=TRUE` (now
+> applied automatically to every Capture launch). More importantly, the complete
+> read-author-netlist-import pipeline these 12 tools were meant to cover is now solved
+> end to end by a different, Capture.exe-free mechanism — `tclsh.exe` loading Capture's
+> own database DLL directly (`sigrity_mcp/domains/cad/capture_headless_tools.py`):
+> `extract_capture_netlist_headless` (read an existing `.dsn`), `author_capture_
+> schematic_headless` (create a new design, place real parts, draw wires, AND assign
+> real, persistent reference designators via a second occurrence-level pass), and
+> `generate_capture_pcb_netlist` (wraps `pstswp.exe`, a separate real executable, to
+> produce a PCB netlist directly from the `.dsn` — closing the last gap, Capture's own
+> GUI-only "Create Netlist" menu command). CONFIRMED LIVE end to end: an authored-from-
+> nothing design's netlist was fed into `run_netrev_import` and the resulting Allegro
+> `.brd` independently verified via `report.exe`'s BOM report showing the correct
+> `REFDES`. The 12 tools catalogued below still genuinely fail exactly as described
+> (their underlying mechanism — Capture.exe's own interactive Tcl session — was not
+> fixed, only superseded), so this section remains an accurate technical reference for
+> *why that specific path* is blocked, not for what's actually achievable today. See
+> `core.tool_status.TOOL_STATUS_NOTES["tclsh"]`/`["pstswp"]`/`["capture"]` for the
+> complete current evidence, including why `Capture.Application` COM and `syscap.exe`
+> were both investigated and ruled out as alternatives.
 
 **Scope:** the 18 MCP tools in `sigrity_mcp/domains/cad/` that **cannot complete** on this install (status `known_blocked`, plus 1 confirmed product-crash). For every tool: what it does, its exact input arguments, the **exact command / script it generates**, the **failure it faces**, and the root cause. Nothing here is paraphrased from memory — signatures and argv are traced verbatim from source, and each failure is quoted from the live test evidence in `sigrity_mcp/core/tool_status.py`.
 

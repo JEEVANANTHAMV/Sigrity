@@ -62,28 +62,54 @@ product) has no batch/headless launch mode either (`-tclfile`/`-nograph` both st
 its GUI product-chooser dialog; no documented script-at-launch flag exists for it). The
 DB-write path here needs neither.
 
-Reference designators: `NewPlacedInst`'s Name arg does NOT land the refdes (instances
-come back with the placeholder `DN?`); a follow-up `DboPartInst_SetReference <inst>
-<CString>` calls successfully updates the in-session object's reference (confirmed live:
-`sGetReference` reports the new value in the same Tcl process), but the persisted
-"reference designator" that a fresh `GetDesignAndSchematics` reopen reports is a separate
-design-level ANNOTATE step (`capBatchAnnotate` — a GUI Command-Window operation) that has
-no confirmed headless equivalent in this DLL build (probed 2026-05: `DboRefDesMgr`/
-`DboRefDesManager`/`DboRefDesAnnotation` family and `DboSchematic_Annotate` overloads all
-reject every arg-count tried from Tcl). This tool therefore emits `SetReference`
-after each placement for the best in-session display, but a fresh reopen of the saved
-`.dsn` will still report sequential `INS1/INS2/...` (the auto-name) until the design is
-annotated in the GUI. The `ref` field is still accepted and forwarded (both as
-`NewPlacedInst`'s Name slot and to `SetReference`), so the value is recorded on the
-object; it just does not survive an annotation-free round-trip. Net connectivity
-(`NewFlatNetsIter`) still does not populate for the same GUI-connectivity-engine reason
-documented above for the read path — wire-to-pin connectivity is implicit in page
-geometry (confirmed: the drawn wire IS present and counted on reopen) rather than
-computed into a named net.
+Reference designators: SOLVED (2026-10-18), superseding the earlier finding below —
+but it needs a SECOND pass, not a fix to the original single-pass call. `NewPlacedInst`'s
+Name arg does NOT land the refdes (instances come back with the placeholder `DN?`/
+auto-named `INS1`/`INS2`/...), and `DboPartInst_SetReference` (the part-INSTANCE-level
+setter) only updates the in-session object — it does NOT survive a reopen, exactly as
+originally found. The field that genuinely persists is a DIFFERENT, OCCURRENCE-level
+API: `DboDesign_GetRootOccurrence <design> <status>` ->
+`DboInstOccurrence_GetInstOccurrence <rootOcc> <partInst> <status>` ->
+`DboInstOccurrence_SetReference <occ> <CString>` + `DboInstOccurrence_SetDesignator
+<occ> <CString>` (CONFIRMED LIVE: these take exactly 2 args — `self reference`/`self
+designator`, NOT 3 with a status object; the 3-arg form raises "Wrong # args"). THE
+CATCH, also confirmed live: `GetInstOccurrence` returns NULL for a part instance that
+was JUST created and never saved — the occurrence tree isn't built for brand-new,
+uncommitted instances in the SAME session. So `author_capture_schematic_headless` runs
+TWO separate `tclsh` jobs, not one: pass 1 creates/places/wires/saves (unchanged, still
+only calls `DboPartInst_SetReference`, which is cosmetic/in-session-only); pass 2
+(`_build_annotate_script`) reopens the just-saved file FRESH (a real, genuinely
+different session, where the occurrence tree now resolves) and does the real
+occurrence-level assignment, then saves again. CONFIRMED LIVE end-to-end, 3 independent
+ways: (1) a THIRD, separate fresh reopen's `DboInstOccurrence_sGetReferenceDesignator`
+read back the exact value set (the old `DboPartInst`-level getter still reads the
+original auto-name even after pass 2 — the two are genuinely different fields, and
+that's fine, nothing reads refdes via the part-instance getter downstream); (2)
+`pstswp.exe -pst` (see `generate_capture_pcb_netlist` below) run against the
+twice-saved `.dsn` emitted the real refdes as `PART_NAME` in `pstxprt.dat`, not
+`INS1`/`INS2`; (3) the generated `.pst` files fed straight into `netrev -n`
+(`netlist_import_tools.py`) produced a real `.brd` with the correct refdes,
+independently confirmed via `report.exe`. The ANNOTATE-step concern from the original
+investigation (`capBatchAnnotate` being GUI-only) turned out to be moot — occurrence-
+level assignment is a different, standalone mechanism that doesn't need Annotate at
+all. Pass-2 matches `components` to parts by ITERATION ORDER
+(`DboPage_NewPartInstsIter`'s own order), not by name or position — a documented
+assumption (observed to hold for a simple, freshly-authored single-page design), not a
+guaranteed DLL contract; see `_build_annotate_script`'s own docstring.
+
+Net connectivity (`NewFlatNetsIter`) still does not populate for the same
+GUI-connectivity-engine reason documented above for the read path — wire-to-pin
+connectivity is implicit in page geometry (confirmed: the drawn wire IS present and
+counted on reopen) rather than computed into a named net by this DLL build. This does
+NOT block the netlist-generation pipeline below: `pstswp.exe` derives real net
+connectivity directly from the saved page geometry (confirmed — see
+`generate_capture_pcb_netlist`), independent of whether `NewFlatNetsIter` would ever
+populate.
 """
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Optional
 
@@ -325,7 +351,8 @@ def _build_author_script(
 
     script.raw("set placed_count 0")
     for comp in components:
-        ref = tcl_str(str(comp["ref"]))
+        ref_raw = str(comp["ref"])
+        ref = tcl_str(ref_raw)
         x = comp["x"]
         y = comp["y"]
         rotation = comp.get("rotation", 0)
@@ -342,14 +369,16 @@ def _build_author_script(
             '  puts "AUTHOR_WARN: placement of ' + ref + ' returned NULL"\n'
             "} else {\n"
             # NewPlacedInst's Name arg does NOT land the reference designator (it comes
-            # back as the placeholder DN?): the 7-arg overload binds Name to an internal
-            # name, not the user-visible refdes. DboPartInst_SetReference DOES update
-            # the in-session object but the persisted field on SaveDesignAs is the
-            # design-level ANNOTATE step (capBatchAnnotate) -- a GUI Command-Window
-            # operation with no confirmed headless equivalent. So `ref` is accepted
-            # and best-effort (it is forwarded to NewPlacedInst's Name slot and to
-            # SetReference after placement), but a fresh reopen will still report
-            # sequential INS1/INS2/... until the design is annotated in the GUI.
+            # back as the placeholder DN?/auto-named INS1/INS2). DboPartInst_SetReference
+            # updates the in-session object (kept here, harmless) but does NOT survive a
+            # reopen either way. CONFIRMED LIVE: DboInstOccurrence_GetInstOccurrence
+            # returns NULL for a brand-new, not-yet-saved instance in THIS SAME session
+            # (the occurrence tree isn't built/available until the design has been
+            # loaded from disk) -- so the real, persisting reference-designator
+            # assignment cannot happen here. It happens in a SEPARATE, second pass
+            # (`_build_annotate_script` below) against this file after it's been saved
+            # and reopened fresh. See this module's own docstring for the full
+            # evidence trail of both findings.
             "  catch {DboPartInst_SetReference $lInst $csRef}\n"
             "  incr placed_count\n"
             "}"
@@ -397,6 +426,110 @@ def _parse_author_summary(log_text: str) -> Optional[dict]:
             fields = dict(tok.split("=", 1) for tok in line.split()[1:] if "=" in tok)
             out: dict = {}
             for key in ("placed", "wires", "output_size"):
+                if key in fields:
+                    try:
+                        out[key] = int(fields[key])
+                    except ValueError:
+                        out[key] = fields[key]
+            return out
+    return None
+
+
+def _build_annotate_script(dsn_file: str, refs_in_order: list[str]) -> TclScript:
+    """Second-pass reference-designator assignment, run against an ALREADY-SAVED .dsn
+    in a fresh `GetDesignAndSchematics` open (a new process, via a separate submit_job
+    call — not reusing the authoring session).
+
+    CONFIRMED LIVE necessity: `DboInstOccurrence_GetInstOccurrence` returns NULL for a
+    part instance that was JUST created and not yet saved/reloaded in the SAME session
+    (the occurrence tree isn't built for brand-new, uncommitted instances) — this is why
+    `_build_author_script` can't do this itself. Once the design has been saved and
+    reopened fresh, the same call resolves a real occurrence, and
+    `DboInstOccurrence_SetReference`/`SetDesignator` (2-arg form — NOT 3 with a status
+    object) genuinely persist across a SECOND save + a THIRD, independent fresh reopen —
+    confirmed via `DboInstOccurrence_sGetReferenceDesignator` and via `pstswp.exe`'s
+    generated `pstxprt.dat` showing the real refdes, not an auto-name.
+
+    `refs_in_order` is matched to parts by ITERATION ORDER (`DboPage_NewPartInstsIter`'s
+    own order) against `refs_in_order`'s own list order — NOT by name or position. This
+    is a real, documented assumption (iteration order was observed to match placement
+    order for a simple, freshly-authored single-page design in live testing) rather than
+    a guaranteed contract of the DLL — a caller with position-sensitive requirements
+    should independently verify via `extract_capture_netlist_headless` after the fact.
+    """
+    dll_path = tcl_path(str((settings.cadence_spb_home / _DB_DLL_RELATIVE)))
+    script = TclScript()
+    script.comment(
+        "Headless Capture reference-designator annotation (2nd pass) -- generated by "
+        "capture_headless_tools.py. No Capture.exe process is involved."
+    )
+    _add_helper_procs(script)
+    script.raw(f"load {dll_path} DboTclWriteBasic")
+    script.raw("set lStatus  [DboState]")
+    script.raw("set lSession [DboTclHelper_sCreateSession]")
+    script.raw(f"set lPath    [DboTclHelper_sMakeCString {tcl_path(dsn_file)}]")
+    script.raw("set lDesign  [$lSession GetDesignAndSchematics $lPath $lStatus]")
+    script.raw(
+        'if {[$lStatus Failed]} { puts "ANNOTATE_ERROR: open failed: [$lStatus Message]"; exit 1 }'
+    )
+    script.raw("set rootSch [DboDesign_GetRootSchematic $lDesign $lStatus]")
+    script.raw("DboSchematic_ReadAllPages $rootSch")
+    script.raw("set rootOcc [DboDesign_GetRootOccurrence $lDesign $lStatus]")
+    script.raw(
+        'if {[isnull $rootOcc]} { puts "ANNOTATE_ERROR: no root occurrence"; exit 1 }'
+    )
+
+    refs_list = " ".join(tcl_str(r) for r in refs_in_order)
+    script.raw(f"set refList [list {refs_list}]")
+    script.raw("set annotated_count 0")
+    script.raw("set idx 0")
+    script.raw("set pageIter [DboSchematic_NewPagesIter $rootSch $lStatus]")
+    script.raw("while {1} {")
+    script.raw("  set page [DboSchematicPagesIter_NextPage $pageIter $lStatus]")
+    script.raw("  if {[isnull $page]} { break }")
+    script.raw("  set partIter [DboPage_NewPartInstsIter $page $lStatus]")
+    script.raw("  while {1} {")
+    script.raw("    set part [DboPagePartInstsIter_NextPartInst $partIter $lStatus]")
+    script.raw("    if {[isnull $part]} { break }")
+    script.raw("    if {$idx >= [llength $refList]} { incr idx; continue }")
+    script.raw("    set newRef [lindex $refList $idx]")
+    script.raw("    incr idx")
+    script.raw("    set prefix [regsub {[0-9].*$} $newRef {}]")
+    script.raw('    if {$prefix eq ""} { set prefix $newRef }')
+    script.raw("    set occ [DboInstOccurrence_GetInstOccurrence $rootOcc $part $lStatus]")
+    script.raw("    if {[isnull $occ]} {")
+    script.raw('      puts "ANNOTATE_WARN: occurrence NULL for index $idx ($newRef)"')
+    script.raw("      continue")
+    script.raw("    }")
+    script.raw("    set csRef [DboTclHelper_sMakeCString $newRef]")
+    script.raw("    set csDesignator [DboTclHelper_sMakeCString $prefix]")
+    script.raw("    if {[catch {DboInstOccurrence_SetReference $occ $csRef} eref]} {")
+    script.raw('      puts "ANNOTATE_WARN: SetReference failed for $newRef: $eref"')
+    script.raw("    } elseif {[catch {DboInstOccurrence_SetDesignator $occ $csDesignator} edes]} {")
+    script.raw('      puts "ANNOTATE_WARN: SetDesignator failed for $newRef: $edes"')
+    script.raw("    } else {")
+    script.raw("      incr annotated_count")
+    script.raw("    }")
+    script.raw("  }")
+    script.raw("}")
+
+    script.raw(
+        'if {[catch {$lSession SaveDesign $lDesign} esave]} '
+        '{ puts "ANNOTATE_ERROR: save failed: $esave"; exit 1 }'
+    )
+    script.raw('puts "ANNOTATE_SUMMARY annotated=$annotated_count requested=[llength $refList]"')
+    script.raw("catch {$lSession RemoveDesign $lDesign}")
+    script.raw("delete_DboSession $lSession")
+    script.raw("delete_DboState $lStatus")
+    return script
+
+
+def _parse_annotate_summary(log_text: str) -> Optional[dict]:
+    for line in log_text.splitlines():
+        if line.startswith("ANNOTATE_SUMMARY"):
+            fields = dict(tok.split("=", 1) for tok in line.split()[1:] if "=" in tok)
+            out: dict = {}
+            for key in ("annotated", "requested"):
                 if key in fields:
                     try:
                         out[key] = int(fields[key])
@@ -542,19 +675,21 @@ async def author_capture_schematic_headless(
     as `components`' `x`/`y` — both get multiplied by the page's own
     `GetPhysicalGranularity` at runtime). Defaults to no wires if omitted.
 
-    Reference designators: `NewPlacedInst`'s Name arg does NOT land the refdes (you'd
-    otherwise get `DN?`); this tool follows each successful placement with a
-    `DboPartInst_SetReference` call that updates the in-session object (sGetReference
-    reports the requested value in the same Tcl process). HOWEVER the persisted
-    reference designator that a fresh reopen via `GetDesignAndSchematics` reports is a
-    separate design-level ANNOTATE step (`capBatchAnnotate`, GUI Command-Window) that
-    has no confirmed headless equivalent in this DLL build — so a fresh reopen of the
-    saved `.dsn` still shows sequential `INS1/INS2/...` until the design is annotated
-    in the GUI. Pass unique `ref` values (the value is recorded in-session; it just
-    does not survive an un-annotated round-trip). Net connectivity also does not
-    populate (same GUI-connectivity-engine limitation as the read path) — verify
-    success via `placed`/`wires` counts and by reopening the file, not by net content
-    or refdes.
+    Reference designators: REAL and PERSISTENT (confirmed 2026-10-18). `NewPlacedInst`'s
+    Name arg alone does not land the refdes, so this tool additionally resolves each
+    placed instance's design OCCURRENCE (`DboDesign_GetRootOccurrence` ->
+    `DboInstOccurrence_GetInstOccurrence`) and calls `DboInstOccurrence_SetReference` +
+    `DboInstOccurrence_SetDesignator` on it (the designator is the leading alphabetic
+    run of `ref`, e.g. `"R"` from `"R1"`). CONFIRMED LIVE to survive a save + fresh
+    reopen in a brand-new process (verified via
+    `DboInstOccurrence_sGetReferenceDesignator`), AND to appear as the real `PART_NAME`
+    in `pstswp.exe`'s generated netlist (see `generate_capture_pcb_netlist`) rather than
+    an auto-generated `INS1`/`INS2`. Pass unique `ref` values. Net connectivity
+    (`NewFlatNetsIter`) still does not populate via this read API (same
+    GUI-connectivity-engine limitation as the read path) — this does not block
+    netlisting, since `pstswp.exe` derives connectivity from the saved page geometry
+    independently; verify success via `placed`/`wires` counts, by reopening the file,
+    and ultimately via `generate_capture_pcb_netlist`'s own output for real connectivity.
     """
     output_abs = _resolve(output_dsn)
     library_abs = _resolve(library_file)
@@ -627,4 +762,130 @@ async def author_capture_schematic_headless(
             "which failed and why."
         )
         result["log_tail"] = log_text[-4000:]
+        return result
+
+    # Second pass: real, persistent reference-designator assignment (CONFIRMED LIVE to
+    # require a fresh reopen of the just-saved file -- see _build_annotate_script's
+    # docstring). Only attempted if the first pass placed at least one component.
+    if result.get("placed", 0) > 0:
+        refs_in_order = [str(c["ref"]) for c in components]
+        annotate_script = _build_annotate_script(output_abs, refs_in_order)
+        annotate_record = await submit_job(
+            tool="tclsh",
+            tcl_script=annotate_script,
+            tcl_arg_flag=None,
+            script_filename="annotate_schematic.tcl",
+            extra_env={"CDS_INST_DIR": str(settings.cadence_spb_home)},
+        )
+        annotate_final = await job_manager.wait(annotate_record.job_id, timeout=wait_seconds)
+        result["annotate_job_id"] = annotate_record.job_id
+        result["annotate_state"] = annotate_final.state
+        annotate_log = ""
+        try:
+            annotate_log = Path(annotate_final.job_dir, "run.log").read_text(
+                encoding="utf-8", errors="replace"
+            )
+        except OSError:
+            pass
+        annotate_summary = _parse_annotate_summary(annotate_log)
+        if annotate_summary is None:
+            result["annotate_error"] = (
+                "No ANNOTATE_SUMMARY line — reference-designator assignment did not "
+                "complete normally; the .dsn was still saved by the first pass (parts/"
+                "wires are real) but refdes remain auto-named (INS1/INS2/...). Read "
+                "annotate_log_tail for the real error."
+            )
+            result["annotate_log_tail"] = annotate_log[-4000:]
+        else:
+            result.update({f"annotate_{k}": v for k, v in annotate_summary.items()})
+            if annotate_summary.get("annotated", 0) < len(refs_in_order):
+                result["annotate_log_tail"] = annotate_log[-4000:]
+    return result
+
+
+@mcp.tool
+async def generate_capture_pcb_netlist(
+    dsn_file: str,
+    output_dir: str,
+    config_file: Optional[str] = None,
+    max_versions: int = 3,
+    max_name_length: int = 255,
+    wait_seconds: float = 60.0,
+) -> dict:
+    """Generate a PCB netlist (pstchip/pstxprt/pstxnet.dat) directly from a .dsn — NO Capture.exe GUI process at all. Closes the pipeline for a schematic authored via `author_capture_schematic_headless`.
+
+    CONFIRMED LIVE: this is the real headless replacement for Capture's GUI-only
+    "Tools::Create Netlist" menu command (`capBatchNetlist`), which previously had no
+    confirmed headless equivalent — see this module's and `core.tool_status.
+    TOOL_STATUS_NOTES["capture"]`'s evidence trail. Runs `pstswp.exe -pst` (a real,
+    standalone Allegro/OrCAD tool, distinct from `Capture.exe`, with no GUI of its own)
+    directly against `dsn_file` on disk. Verified end-to-end against a schematic that
+    was ITSELF authored headlessly (never touched by Capture.exe at any point): the
+    generated `pstxprt.dat`'s `PART_NAME` lines showed the real reference designators
+    set via `author_capture_schematic_headless`'s `DboInstOccurrence_SetReference` (not
+    an auto-generated `INS1`/`INS2`), and real pin names (`A`/`B`/`WIPER` for a `POT`
+    part) appeared correctly in `pstxnet.dat`'s connectivity blocks.
+
+    `dsn_file` is the `.dsn` to netlist (the output of `author_capture_schematic_
+    headless`, or any existing Capture schematic). `output_dir` is where
+    `pstchip.dat`/`pstxprt.dat`/`pstxnet.dat`/`netlist.log` are written — created if it
+    doesn't exist. `config_file` defaults to the install's own
+    `tools/capture/allegro.cfg` (confirmed present and sufficient for this use); only
+    override it if you have a project-specific config. `max_versions`/`max_name_length`
+    map to `pstswp.exe`'s own `-v`/`-l` flags (version-retention count, max name length)
+    — the defaults (3, 255) match the community-documented invocation and worked
+    unmodified in live testing.
+
+    Feed the resulting `.pst` files straight into `run_netrev_import` (`netlist_import_
+    tools.py`, `pst_dir=output_dir`) to get a real Allegro `.brd` — the same `netrev -n`
+    path already confirmed live for existing-.pst designs, now provably reachable from
+    a schematic that was authored from nothing, entirely headlessly.
+    """
+    dsn_abs = _resolve(dsn_file)
+    out_abs = _resolve(output_dir)
+    Path(out_abs).mkdir(parents=True, exist_ok=True)
+    cfg_abs = _resolve(config_file) if config_file else str(
+        settings.cadence_spb_home / "tools" / "capture" / "allegro.cfg"
+    )
+
+    args = [
+        "-pst",
+        "-d", dsn_abs,
+        "-n", out_abs,
+        "-c", cfg_abs,
+        "-v", str(max_versions),
+        "-l", str(max_name_length),
+    ]
+    record = await submit_job(tool="pstswp", build_args=args)
+    result = {
+        "job_id": record.job_id,
+        "state": record.state,
+        "job_dir": record.job_dir,
+        "command": record.command,
+        "dsn_file": dsn_abs,
+        "output_dir": out_abs,
+    }
+
+    final = await job_manager.wait(record.job_id, timeout=wait_seconds)
+    result["state"] = final.state
+    if final.state == "running":
+        result["note"] = f"Still running after {wait_seconds}s — poll with wait_for_job({record.job_id!r})."
+        return result
+
+    pst_files = {
+        name: str(Path(out_abs, name))
+        for name in ("pstchip.dat", "pstxprt.dat", "pstxnet.dat")
+        if Path(out_abs, name).is_file() and Path(out_abs, name).stat().st_size > 0
+    }
+    result["pst_files"] = pst_files
+    result["complete"] = len(pst_files) == 3
+    netlist_log = Path(out_abs, "netlist.log")
+    if netlist_log.is_file():
+        result["netlist_log_tail"] = netlist_log.read_text(encoding="utf-8", errors="replace")[-2000:]
+    if not result["complete"]:
+        result["error"] = (
+            "Not all three .pst files were written (pstchip.dat/pstxprt.dat/"
+            "pstxnet.dat) — read netlist_log_tail for the real error. A common cause: "
+            "dsn_file has no placed parts, or config_file doesn't match this install."
+        )
     return result

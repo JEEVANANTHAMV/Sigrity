@@ -98,6 +98,12 @@ CAD_EXECUTABLES: dict[str, str] = {
     "tclsh": "tclsh.exe",
     "netrev": "netrev.exe",
     "netin": "netin.exe",
+    # pstswp.exe generates a PCB netlist (.pst: pstchip/pstxprt/pstxnet.dat) directly
+    # from a .dsn on disk -- confirmed live to work against a .dsn that was itself
+    # authored headlessly (capture_headless_tools.author_capture_schematic_headless),
+    # with NO Capture.exe GUI step anywhere, closing the last gap in the headless
+    # schematic-to-board pipeline. See generate_capture_pcb_netlist.
+    "pstswp": "pstswp.exe",
 }
 
 # logical name -> exe filename under SIGRITY_HOME/tools/bin
