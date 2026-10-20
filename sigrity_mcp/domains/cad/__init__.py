@@ -44,20 +44,43 @@ against real `-help`/doc text, never fabricate a flag" discipline as
 - `allegro_extraction_tools.py` — Allegro's own design/connectivity data extractor
   (`designextractor.exe`, distinct from Sigrity's EM extraction in Domain 3).
 - `interchange_tools.py` — schematic/netlist interchange translators (`con2xml`,
-  `cap2xml`, `dml2con`, `apd2con`) confirmed real but blocked on this machine by a
-  SPB Translators product/edition capability gate (fails with "No Product License
-  selected" before printing usage) — NOT a license problem on this no-license-required
-  install — see `core.tool_status` and the module's own docstring.
+  `cap2xml`, `dml2con`, `apd2con`). **WORK via the GUI** (product-chooser + "Translate"
+  dialog, user-confirmed 2026-10-18) — NOT a blocked/defective/missing-feature class and
+  NOT a license problem. Drive them with `launch_translator_gui("<tool>")`; the `run_*`
+  CLI helpers are a best-effort headless fallback (doc-verified contracts, all switch-based
+  + `-product pcb_librarian_expert`) that on this build stops at the `pcb_librarian_expert`
+  checkout when driven bare — a property of the headless path, not the tools. See
+  `core.tool_status` and the module's own docstring.
+
+**MAJOR CORRECTION (2026-10-18) — `apd_package_tools.py` is added, and the "APD/apd.exe
+GUI-only / no headless autorouting" claim below is now WRONG for APD + APR.** The earlier
+audit concluded `apr.exe`/`placeroute.exe`/`apd.exe` were GUI-only with no batch surface
+and were deliberately not wrapped. That was correct for `apr.exe`/`placeroute.exe`
+*bare* (they open a GUI with no CLI args), but it was wrong as a claim about Allegro
+Package Designer (APD) and the Advanced Package Router (APR) as *features*: `apd_package_
+tools.py` proves, **live and headless**, that (a) `apd -product <APD tier> -nograph -s
+<script> <design.mcm>` loads a package design and runs SKILL with no GUI (CONFIRMED:
+journal + saved design independently re-read), (b) Z-Router fanout routes real new vias
+headlessly via `allegro -nograph -s` + FORM replay (CONFIRMED: via diff 0->2 +
+Zrouter.log + valid re-read), and (c) the Advanced Package Router (APR) runs a complete
+headless auto-route via `apd -product <APD+> -option "Advanced Package Router" -nograph
+-s` + `pkg_router`/`FORM icp_pkg_router route` (CONFIRMED: 91.4% completion, 1718 real
+vias, independently re-read). So general board-level autorouting is in
+`spif_specctra_tools.py`, dense flip-chip package autorouting (APR) + Z-Router fanout +
+the APD batch base are in `apd_package_tools.py`. Only the BARE `apr.exe`/`placeroute.exe`
+launchers remain genuinely GUI-only.
 
 Confirmed GUI-only or with no documented/discoverable batch surface anywhere in the
 shipped doc tree (deliberately NOT wrapped, to avoid fabricating a capability that
-doesn't exist): `apr.exe`/`placeroute.exe` themselves (interactive autorouting UI —
-see `spif_specctra_tools.py` below for the real headless alternative), `padstack_editor.exe`,
-`symboleditor.exe`/`symbolcreator.exe` (library authoring GUIs — see
+doesn't exist): the BARE `apr.exe`/`placeroute.exe` launchers themselves (they open an
+interactive autorouting UI with no CLI args — the real headless autorouting alternatives
+are `spif_specctra_tools.py` for board-level SPECCTRA and `apd_package_tools.py` for
+APR/Z-Router; see the correction above), `padstack_editor.exe`,
+`symboreditor.exe`/`symbolcreator.exe` (library authoring GUIs — see
 `allegro_geometry_tools.py` for the real SKILL-scriptable alternative), `dfa_dlg.exe`,
-`pdnsim.exe`, `apd.exe` (the GUI half of the Package Designer bridge; `apd2con`'s
-headless variant is blocked on this build),
-`orcad.exe`/`orcadx.exe` (redundant GUI entry points into Capture).
+`pdnsim.exe`, `orcad.exe`/`orcadx.exe` (redundant GUI entry points into Capture).
+(`apd.exe` is no longer in this list — it is a confirmed-live headless batch runner, see
+`apd_package_tools.py`; `apd2con`'s standalone bridge exe remains blocked on this build.)
 
 **Three corrections from a follow-up research pass** — each of these was previously
 (wrongly) written off, until a broader/differently-worded search of the same local doc
@@ -213,6 +236,7 @@ mechanism is NOT confirmed [at the time this note was written] ..."
 
 from sigrity_mcp.domains.cad import (  # noqa: F401
     allegro_batch_tools,
+    apd_package_tools,
     allegro_constraint_tools,
     allegro_drc_tools,
     allegro_extraction_tools,

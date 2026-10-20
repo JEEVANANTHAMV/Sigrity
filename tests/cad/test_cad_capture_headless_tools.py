@@ -221,6 +221,135 @@ async def test_author_schematic_skips_annotate_pass_when_nothing_placed(tmp_path
     assert "annotate_job_id" not in result
 
 
+def test_group_components_by_pkg_groups_and_preserves_order():
+    from sigrity_mcp.domains.cad.capture_headless_tools import _group_components_by_pkg
+
+    lib_a = "A.olb"
+    lib_b = "B.olb"
+    comps = [
+        {"ref": "R1", "x": 1, "y": 1, "package": "POT", "library": lib_a},
+        {"ref": "R2", "x": 2, "y": 1, "package": "RES"},            # default lib -> tool-level
+        {"ref": "C1", "x": 3, "y": 1, "package": "POT", "library": lib_b},
+        {"ref": "C2", "x": 4, "y": 1, "package": "POT", "library": lib_a},  # dup of R1 key
+        {"ref": "U1", "x": 5, "y": 1, "package": "RES", "library": lib_b},
+    ]
+    groups = _group_components_by_pkg(comps)
+    keys = [c.get("package") + "@" + c.get("library", "") for c in (g[0] for g in groups)]
+    # Stable first-encountered order of distinct (library,package) keys.
+    assert keys == ["POT@" + lib_a, "RES@", "POT@" + lib_b, "RES@" + lib_b]
+    # The R1/C2 dup collapses into one group (2 members); the rest have 1 each.
+    assert [len(g) for g in groups] == [2, 1, 1, 1]
+
+
+@pytest.mark.asyncio
+async def test_author_generated_script_emits_one_group_per_distinct_package(tmp_path, monkeypatch):
+    """End-to-end guard: a 2-package BOM generates per-group handles (G0/G1) and each
+    component instantiates from its OWN group's package/part/device -- the core fix."""
+    import sigrity_mcp.core.jobs as jobs_module
+    import sigrity_mcp.domains.cad.capture_headless_tools as mod
+
+    author_job_dir = tmp_path / "author_job"
+    author_job_dir.mkdir()
+    (author_job_dir / "run.log").write_text(
+        "AUTHOR_SUMMARY placed=2 wires=0 output_size=10240\n", encoding="utf-8"
+    )
+    output_dsn = tmp_path / "out.dsn"
+    output_dsn.write_bytes(b"fake dsn bytes")
+    author_record = _FakeRecord(job_id="fake-author-g", job_dir=str(author_job_dir), command=["tclsh.exe"])
+
+    annotate_job_dir = tmp_path / "annotate_job"
+    annotate_job_dir.mkdir()
+    (annotate_job_dir / "run.log").write_text(
+        "ANNOTATE_SUMMARY annotated=2 requested=2\n", encoding="utf-8"
+    )
+    annotate_record = _FakeRecord(job_id="fake-annotate-g", job_dir=str(annotate_job_dir), command=["tclsh.exe"])
+
+    seen_scripts = []
+    calls = {"n": 0}
+
+    async def _fake_submit_job(*, tool, tcl_script, tcl_arg_flag, script_filename, extra_env, **kwargs):
+        calls["n"] += 1
+        seen_scripts.append(tcl_script.render())
+        return author_record if calls["n"] == 1 else annotate_record
+
+    monkeypatch.setattr(mod, "submit_job", _fake_submit_job)
+    monkeypatch.setattr(
+        jobs_module, "job_manager",
+        _FakeJobManagerMulti({"fake-author-g": author_record, "fake-annotate-g": annotate_record}),
+    )
+    monkeypatch.setattr(mod, "job_manager", jobs_module.job_manager)
+
+    # Two distinct packages -> two distinct (library,package) groups.
+    await author_capture_schematic_headless(
+        output_dsn=str(output_dsn),
+        library_file=str(tmp_path / "lib.olb"),
+        components=[
+            {"ref": "R1", "x": 1, "y": 1, "package": "POT"},
+            {"ref": "C1", "x": 2, "y": 1, "package": "CAP", "library": str(tmp_path / "other.olb")},
+        ],
+    )
+
+    author_script = seen_scripts[0]
+    # Both distinct packages were resolved (one group each).
+    assert "AUTHOR_PG0" in author_script
+    assert "AUTHOR_PG1" in author_script
+    # Group 0 -> POT, Group 1 -> CAP (by-name resolution requested).
+    assert "$csPkgNM" in author_script
+    # R1 (group 0) and C1 (group 1) instantiate from DIFFERENT group handles.
+    assert "NewPlacedInst $lStatus $csRef $csPkgNM0 $lPart0 $lDevice0" in author_script
+    assert "NewPlacedInst $lStatus $csRef $csPkgNM1 $lPart1 $lDevice1" in author_script
+    # sanity: both per-group packages and the per-component placement are present
+    assert "G0" in author_script and "G1" in author_script
+
+
+def test_author_generated_script_interleaves_getlib_remove_lib_per_group():
+    """Regression guard for the ORDBDLL-1021 "one open lib at a time" constraint
+    (this installed DLL build returns 1021 for a 2nd GetLib of a different path
+    while the first lib's handle is still open -- see
+    sigrity_mcp/domains/cad/capture_headless_tools.py's module +
+    _build_author_script docstrings, and runs/olb_union_fix_report.md). Two
+    distinct vendor .olbs, one part each (the typical SamacSys/UltraLibrarian
+    one-.olb-per-part shape): every group's $lSession RemoveLib MUST appear
+    BEFORE the next group's $lSession GetLib, and the FIRST group's GetLib MUST
+    precede NewSchematic/NewPage (a design page created before any GetLib has
+    ever run in the session poisons the lib-directory cache independently).
+    """
+    from sigrity_mcp.domains.cad.capture_headless_tools import _build_author_script
+
+    rendered = (
+        _build_author_script(
+            design_name="T",
+            library_file="C:/fake/a.olb",
+            components=[
+                {"ref": "U0", "x": 1, "y": 1, "library": "C:/fake/a.olb"},
+                {"ref": "U1", "x": 4, "y": 1, "library": "C:/fake/b.olb"},
+                {"ref": "U2", "x": 7, "y": 1, "library": "C:/fake/c.olb"},
+            ],
+            wires=[],
+            output_dsn="C:/fake/out.dsn",
+            package_name=None,
+        )
+        .render()
+    )
+    i_get0 = rendered.index("$lSession GetLib $csLib0")
+    i_get1 = rendered.index("$lSession GetLib $csLib1")
+    i_get2 = rendered.index("$lSession GetLib $csLib2")
+    i_rmv0 = rendered.index("RemoveLib $lLib0")
+    i_rmv1 = rendered.index("RemoveLib $lLib1")
+    i_rmv2 = rendered.index("RemoveLib $lLib2")
+    i_newpage = rendered.index("NewPage $lStatus $csPage")
+    # No two distinct libraries ever open simultaneously.
+    assert i_rmv0 < i_get1
+    assert i_rmv1 < i_get2
+    # The first GetLib happens before the page exists (not after it, not with the
+    # page's own DboSchematic/DboPage handle already created first).
+    assert i_get0 < i_newpage
+    # A dangling MarkAllLibForSave against an already-closed $lLib (the old,
+    # silently-broken line) must not reappear.
+    assert "MarkAllLibForSave" not in rendered
+
+
+
 def test_annotate_script_uses_two_arg_occurrence_setters():
     # Regression guard: DboInstOccurrence_SetReference/SetDesignator take exactly 2 args
     # (self, value) -- the 3-arg form with a status object raises "Wrong # args",

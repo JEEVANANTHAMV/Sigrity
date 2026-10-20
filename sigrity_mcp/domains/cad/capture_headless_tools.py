@@ -105,6 +105,34 @@ NOT block the netlist-generation pipeline below: `pstswp.exe` derives real net
 connectivity directly from the saved page geometry (confirmed — see
 `generate_capture_pcb_netlist`), independent of whether `NewFlatNetsIter` would ever
 populate.
+
+Heterogeneous BOM merge (2026-10-18, two fix passes that same day): `author_capture_
+schematic_headless` accepts a per-component `library`/`package` so a 30+-distinct-part
+BOM — the typical SamacSys/UltraLibrarian one-vendor-`.olb`-per-part export shape —
+merges into ONE `.dsn`. Fix pass 1 made each component able to name its own
+`.olb`/package (previously every component was forced onto one resolved package —
+the original "can't merge a heterogeneous BOM" shape). Fix pass 2 (this module's
+current state) corrected a real, initially-missed correctness bug in pass 1's
+generated script: it opened EVERY distinct vendor `.olb` up front and kept them all
+open for the whole placement pass, but the installed DLL build's `DboSession`
+tolerates at most ONE open `DboLib` handle at a time when the paths differ (a second
+`GetLib` of a different path returns `ERROR(ORDBDLL-1021): Object Not Found` until the
+first is `RemoveLib`'d — confirmed by exhaustive bisection, `runs/olb_union_fix_
+report.md`, `runs/getlib_min.tcl` vs `runs/getlib_seq3.tcl`); with 30+ distinct
+one-part `.olb`s every group after the first would fail. The generated script now
+interleaves `GetLib`/resolve/place/`RemoveLib` strictly per group, with the first
+group's `GetLib` necessarily preceding `NewSchematic`/`NewPage` (a design page
+created before any `GetLib` has ever run in the session independently poisons the
+lib-directory cache and makes the very first `GetLib` return 1021) — see
+`_build_author_script`'s docstring for the full ordering and the `runs/` scripts
+that pinned down each constraint. Live-confirmed end-to-end with three genuinely
+distinct single-part vendor `.olb`s placed into one `.dsn` in one call
+(`runs/mcp_generated_author.tcl` -> `placed=3`, independently re-verified by a
+separate fresh-reopen script, `runs/verify_3in1.tcl` -> `TOTAL_PARTS=3`), in addition
+to pass 1's earlier 35-distinct-package/two-library confirmation
+(`runs/bom_merge_report.md`). The DOWNSTREAM netlist step is still gated by TWO
+SEPARATE library-data issues (PCB-footprint-carrying packages; duplicate-pin-name
+devices) that are orthogonal to the merge itself.
 """
 
 from __future__ import annotations
@@ -238,6 +266,26 @@ def _build_extract_script(dsn_file: str, output_file: str) -> TclScript:
     return script
 
 
+def _component_pkg_key(comp: dict) -> str:
+    return f"{comp.get('library', '')}::{comp.get('package', '')}"
+
+
+def _group_components_by_pkg(components: list[dict]) -> list[list[dict]]:
+    """Group components by (library_file, package_name) so each group places from exactly
+    one package — the unit the single-package authoring engine requires. Order is
+    preserved (first-encountered group order), so iteration order (which pass-2 relies
+    on for refdes assignment) is stable."""
+    groups: dict[str, list[dict]] = {}
+    order: list[str] = []
+    for c in components:
+        k = _component_pkg_key(c)
+        if k not in groups:
+            groups[k] = []
+            order.append(k)
+        groups[k].append(c)
+    return [groups[k] for k in order]
+
+
 def _build_author_script(
     design_name: str,
     library_file: str,
@@ -246,29 +294,67 @@ def _build_author_script(
     output_dsn: str,
     package_name: Optional[str],
 ) -> TclScript:
-    """The confirmed-working headless authoring sequence (create design -> schematic ->
-    page -> resolve one package/part/device from `library_file` -> place N instances of
-    it -> draw N wires -> SaveDesignAs), generalized from the exact call forms an earlier
-    investigation confirmed live (see `AUTHORING_REPORT.md` under
-    `scripts/tools/capture_author/` for the full trial-and-error trail this was built
-    from — PDF-documented signatures for `NewSchematic`/`NewPlacedInst`/
-    `MarkAllLibForSave`/etc. do NOT all match this DLL build; only the forms used here
-    were confirmed to actually bind).
+    """The confirmed-working headless authoring sequence, generalized from the exact
+    call forms an earlier investigation confirmed live (see
+    `AUTHORING_REPORT.md` under `scripts/tools/capture_author/` for the full
+    trial-and-error trail this was built from — PDF-documented signatures for
+    `NewSchematic`/`NewPlacedInst`/`MarkAllLibForSave`/etc. do NOT all match this DLL
+    build; only the forms used here were confirmed to actually bind).
 
-    All components in one call share a single resolved package/part/device (confirmed
-    live for N=2 identical placements) — this is a real, deliberate scope limit, not an
-    oversight: call this once per distinct package/library combination for a
-    heterogeneous BOM. `package_name`, if given, is matched by walking
-    `NewPackageNamesIter`/`NewPackagesIter` in lockstep and taking the position where the
-    name matches — this specific by-name selection was NOT part of the original
-    live-confirmed trail (which only ever took the library's first package) and should be
-    treated as best-effort until independently verified; omit it to get the exact
-    proven "first package in the library" behavior.
+    **HETEROGENEOUS BOM MERGE — MULTI-LIBRARY, ONE DESIGN (2026-10-18, fix pass 2):**
+    `components` may each carry their own `library` (a .olb path; defaults to
+    `library_file`) and `package` (a package name; defaults to `package_name`, which
+    itself may be None => "first package in the library"). Components are grouped by
+    `(library, package)` and EVERY distinct combination is resolved + instantiated in
+    this ONE design, so a 30+-distinct-part heterogeneous BOM (e.g. one vendor .olb
+    per part, the typical SamacSys/UltraLibrarian export shape) merges into a single
+    .dsn with each part genuinely its own part.
 
-    `components`/`wires` coordinates are in page "user units", multiplied at runtime by
-    the page's own `GetPhysicalGranularity` (confirmed live to be 100.0 on a fresh page,
-    but read live rather than assumed, since a different page/template could differ) to
-    get real document coordinates — same convention the original trial script used.
+    **THE 1-OPEN-LIB CONSTRAINT (root cause of the original "can't union 30 .olbs"
+    bug, confirmed live 2026-10-18 by ~15 bisection scripts, see
+    `runs/olb_union_fix_report.md`):** this installed DLL build's `DboSession`
+    tolerates at most ONE open `DboLib` handle at a time when the paths differ — a
+    second `DboSession_GetLib` of a different path returns
+    `ERROR(ORDBDLL-1021): Object Not Found` (even for a valid existing file) until the
+    first handle is `DboSession_RemoveLib`'d. The FIRST, up-front "open every
+    distinct vendor library at once and keep them all open through the whole
+    placement pass" ordering the previous revision of this function generated is
+    therefore BROKEN for 2+ distinct libraries (groups 2..N all fail with 1021 —
+    this is exactly the user-reported "no way to union 30+ distinct vendor .olbs"
+    defect; it was masked in the earlier 2-library live test only because that test's
+    specific open/resolve ordering happened to keep just one handle effectively
+    live). A separate, independent constraint found while bisectioning: creating a
+    `DboSchematic`/`DboPage` (via `NewSchematic`/`NewPage` on the design) BEFORE any
+    `GetLib` has ever run in the session ALSO poisons the lib-directory cache, making
+    the very first `GetLib` return 1021 even with no other lib open.
+
+    The ordering below is the one pattern confirmed to work on this exact build
+    (`runs/getlib_first.tcl`, full 3-distinct-.olb run; `runs/getlib_seq3.tcl`,
+    GetLib/RemoveLib cycling; `runs/removedesign_test.tcl`, design+page with a
+    PREAMBLE GetLib of the first lib):
+      1. `CreateDesign`
+      2. For group 0 (the first distinct (library, package) combination, in
+         first-encountered components order): `GetLib(lib0)` — this MUST be the
+         session's first `GetLib`, before any `NewSchematic`/`NewPage` — resolve the
+         target package (by name if requested, else first), create the root
+         `DboSchematic` + first `DboPage`, then `NewPlacedInst` every group-0
+         component, then `RemoveLib(lib0)`.
+      3. for groups 1..N-1: `GetLib(lib_i)` -> resolve package -> `NewPlacedInst`
+         every group-i component -> `RemoveLib(lib_i)`. (The page/design already
+         exist by now; a `GetLib`/`RemoveLib` round-trip per group is safe once a
+         `GetLib` has happened at least once before `NewSchematic`/`NewPage`, which
+         step 2 guarantees.)
+      4. draw wires, `SaveDesignAs` Replace=1, `RemoveDesign`, tear down.
+
+    Group order is stable (first-encountered), and components are emitted in exactly
+    `components` order (each from its own group's resolved part/device/package
+    handles), so pass-2's iteration-order refdes assumption (`_build_annotate_script`)
+    still holds unchanged.
+
+    For a homogeneous BOM (all one `library`/`package`), a single group is used and
+    the generated script is functionally equivalent to the original confirmed-live
+    path (that path's `GetLib` also happened to precede any design mutation in the
+    one-lib case, which is why the original 1-lib behavior was never actually broken).
     """
     dll_path = tcl_path(str((settings.cadence_spb_home / _DB_DLL_RELATIVE)))
     script = TclScript()
@@ -281,11 +367,129 @@ def _build_author_script(
     script.raw("set lStatus  [DboState]")
     script.raw("set lSession [DboTclHelper_sCreateSession]")
 
+    groups = _group_components_by_pkg(components)
+
+    def _resolve_group_tcl(g: str, lib: str, pkg_req: Optional[str]) -> None:
+        """Open $g's .olb, resolve its target package/part/device into
+        csPkgNM$g/lPart$g/lDevice$g. Does NOT RemoveLib — the caller does that
+        once placement from this group is finished (the lib must stay open for
+        the NewPlacedInst calls that reference these resolved handles)."""
+        target = tcl_str(pkg_req if pkg_req else "")
+        # Tcl built from plain concatenated strings (NOT f-strings) so the literal Tcl
+        # braces never collide with Python's f-string brace rules.
+        script.raw("set csLib" + g + " [DboTclHelper_sMakeCString " + tcl_path(str(lib)) + "]")
+        script.raw("set lLib" + g + " [$lSession GetLib $csLib" + g + " $lStatus]")
+        script.raw(
+            'if {[$lStatus Failed] || [isnull $lLib' + g + ']} '
+            '{ puts "AUTHOR_ERROR: group ' + g + ' library open failed (' + str(lib) + ')"; exit 1 }'
+        )
+        script.raw("set targetPkgName" + g + " " + (target if pkg_req else '""'))
+        script.raw("set lPackage" + g + ' ""')
+        script.raw("set resolvedPkg" + g + ' ""')
+        script.raw("set nameIt" + g + " [$lLib" + g + " NewPackageNamesIter $lStatus]")
+        script.raw("set objIt" + g + " [$lLib" + g + " NewPackagesIter $lStatus]")
+        script.raw("while {1} {")
+        script.raw('  set csN' + g + ' [DboTclHelper_sMakeCString ""]')
+        script.raw("  catch {DboLibPackageNamesIter_NextName $nameIt" + g + " $csN" + g + "}")
+        script.raw("  set curN" + g + " [cstrval $csN" + g + "]")
+        script.raw("  set curO" + g + " [$objIt" + g + " NextPackage $lStatus]")
+        script.raw('  if {$curN' + g + ' eq "" && [isnull $curO' + g + ']} { break }')
+        script.raw('  if {$resolvedPkg' + g + ' eq "" && ![isnull $curO' + g + ']} {')
+        script.raw("    set lPackage" + g + " $curO" + g)
+        script.raw("    set resolvedPkg" + g + " $curN" + g)
+        script.raw("  }")
+        script.raw('  if {$targetPkgName' + g + ' ne "" && $curN' + g + ' eq $targetPkgName' + g + '} {')
+        script.raw("    set lPackage" + g + " $curO" + g)
+        script.raw("    set resolvedPkg" + g + " $curN" + g)
+        script.raw("    break")
+        script.raw("  }")
+        script.raw("  if {[isnull $curO" + g + "]} { break }")
+        script.raw("}")
+        script.raw(
+            'if {[isnull $lPackage' + g + ']} '
+            '{ puts "AUTHOR_ERROR: no package resolved in group ' + g + ' library (requested: '
+            + (pkg_req or "<first>") + ')"; exit 1 }'
+        )
+        script.raw('puts "AUTHOR_PG' + g + "=lib={" + str(lib) + "} pkg=$resolvedPkg" + g + '"')
+        script.raw("set csPkgNM" + g + " [DboTclHelper_sMakeCString $resolvedPkg" + g + "]")
+        script.raw("set partIt" + g + " [DboPackage_NewPartsIter $lPackage" + g + " $lStatus]")
+        script.raw("set lPart" + g + " [DboPackagePartsIter_NextPart $partIt" + g + " $lStatus]")
+        script.raw(
+            'if {[isnull $lPart' + g + ']} '
+            '{ puts "AUTHOR_ERROR: no part in group ' + g + ' package $resolvedPkg' + g + '"; exit 1 }'
+        )
+        script.raw("set devIt" + g + " [DboPackage_NewDevicesIter $lPackage" + g + " $lStatus]")
+        script.raw("set lDevice" + g + " [DboPackageDevicesIter_NextDevice $devIt" + g + " $lStatus]")
+        script.raw(
+            'if {[isnull $lDevice' + g + ']} '
+            '{ puts "AUTHOR_ERROR: no device in group ' + g + ' package $resolvedPkg' + g + '"; exit 1 }'
+        )
+
+    def _close_group_tcl(g: str) -> None:
+        script.raw("catch {delete_DboLibPackageNamesIter $nameIt" + g + "}")
+        script.raw("catch {delete_DboLibPackagesIter $objIt" + g + "}")
+        script.raw("catch {delete_DboPackagePartsIter $partIt" + g + "}")
+        script.raw("catch {delete_DboPackageDevicesIter $devIt" + g + "}")
+        script.raw("catch {$lSession RemoveLib $lLib" + g + "}")
+
+    def _place_components_from_group_tcl(g: str, comps: list[dict]) -> None:
+        for comp in comps:
+            ref_raw = str(comp["ref"])
+            ref = tcl_str(ref_raw)
+            x = comp["x"]
+            y = comp["y"]
+            rotation = comp.get("rotation", 0)
+            script.raw(f"set csRef [DboTclHelper_sMakeCString {ref}]")
+            script.raw(f"set xy [docxy $gran {x} {y}]")
+            script.raw("set cpt [DboTclHelper_sMakeCPoint [lindex $xy 0] [lindex $xy 1]]")
+            # Instantiation from THIS component's own group's resolved
+            # csPkgNM/lPart/lDevice handles — a heterogeneous BOM's 30 distinct
+            # vendor packages each place their own part, not N copies of one.
+            # Pure string concatenation -- the block's literal Tcl braces make
+            # f-strings unsafe.
+            npif = (
+                "if {[catch {set lInst [$lPage NewPlacedInst $lStatus $csRef "
+                "$csPkgNM" + g + " $lPart" + g + " $lDevice" + g + " $cpt "
+                + str(rotation) + "]} eplace]} {\n"
+                '  puts "AUTHOR_WARN: placement of ' + ref + ' failed: $eplace"\n'
+                "} elseif {[isnull $lInst]} {\n"
+                '  puts "AUTHOR_WARN: placement of ' + ref + ' returned NULL"\n'
+                "} else {\n"
+            )
+            script.raw(npif)
+            script.raw(
+                # NewPlacedInst's Name arg does NOT land the reference designator
+                # (it comes back as the placeholder DN?/auto-named INS1/INS2).
+                # DboPartInst_SetReference updates the in-session object (kept
+                # here, harmless) but does NOT survive a reopen either way.
+                # CONFIRMED LIVE: DboInstOccurrence_GetInstOccurrence returns
+                # NULL for a brand-new, not-yet-saved instance in THIS SAME
+                # session, so the real, persisting reference-designator
+                # assignment happens in a SEPARATE second pass
+                # (`_build_annotate_script`) against this file after it's been
+                # saved and reopened fresh. See this module's docstring.
+                "  catch {DboPartInst_SetReference $lInst $csRef}\n"
+                "  incr placed_count\n"
+                "}"
+            )
+
     script.raw(f"set csName [DboTclHelper_sMakeCString {tcl_str(design_name)}]")
     script.raw("set lDesign [$lSession CreateDesign $lStatus $csName $csName 0]")
     script.raw(
         'if {[$lStatus Failed] || [isnull $lDesign]} { puts "AUTHOR_ERROR: create design failed"; exit 1 }'
     )
+
+    # Group 0: GetLib MUST happen before NewSchematic/NewPage (see docstring — a
+    # design+page created before any GetLib poisons the lib-directory cache and
+    # makes the very first GetLib return ORDBDLL-1021). So the session's first
+    # GetLib, the package resolve for group 0, and the creation of the
+    # DboSchematic/DboPage all happen inside this one branch, in that order.
+    g0 = "0"
+    grp0 = groups[0]
+    comp0 = grp0[0]
+    lib0 = comp0.get("library") or library_file
+    pkg0 = comp0.get("package") or package_name
+    _resolve_group_tcl(g0, lib0, pkg0)
     script.raw("set lSchematic [$lDesign NewSchematic $csName $lStatus]")
     script.raw("set lSchematic [DboDesign_GetRootSchematic $lDesign $lStatus]")
     script.raw(
@@ -301,88 +505,21 @@ def _build_author_script(
         "proc docxy {gran xx yy} { return [list [expr {int(round($gran * $xx))}] "
         "[expr {int(round($gran * $yy))}]] }"
     )
-
-    script.raw(f"set csLib [DboTclHelper_sMakeCString {tcl_path(library_file)}]")
-    script.raw("set lLib [$lSession GetLib $csLib $lStatus]")
-    script.raw(
-        'if {[$lStatus Failed] || [isnull $lLib]} { puts "AUTHOR_ERROR: library open failed"; exit 1 }'
-    )
-
-    # Resolve the target package: walk names + objects in lockstep, matching by name if
-    # given (best-effort -- see docstring), else take the first package found (the
-    # exact, fully-proven behavior).
-    target_pkg = tcl_str(package_name) if package_name else '""'
-    script.raw(f"set targetPkgName {target_pkg}")
-    script.raw('set lPackage ""')
-    script.raw('set resolvedPkgName ""')
-    script.raw("set nameIt [$lLib NewPackageNamesIter $lStatus]")
-    script.raw("set objIt  [$lLib NewPackagesIter $lStatus]")
-    script.raw("while {1} {")
-    script.raw('  set csN [DboTclHelper_sMakeCString ""]')
-    script.raw("  catch {DboLibPackageNamesIter_NextName $nameIt $csN}")
-    script.raw("  set curName [cstrval $csN]")
-    script.raw("  set curObj [DboLibPackagesIter_NextPackage $objIt $lStatus]")
-    script.raw('  if {$curName eq "" && [isnull $curObj]} { break }')
-    script.raw('  if {$resolvedPkgName eq "" && ![isnull $curObj]} {')
-    script.raw("    set lPackage $curObj")
-    script.raw("    set resolvedPkgName $curName")
-    script.raw("  }")
-    script.raw('  if {$targetPkgName ne "" && $curName eq $targetPkgName} {')
-    script.raw("    set lPackage $curObj")
-    script.raw("    set resolvedPkgName $curName")
-    script.raw("    break")
-    script.raw("  }")
-    script.raw("  if {[isnull $curObj]} { break }")
-    script.raw("}")
-    script.raw(
-        'if {[isnull $lPackage]} { puts "AUTHOR_ERROR: no package resolved in library"; exit 1 }'
-    )
-    script.raw('puts "AUTHOR_PACKAGE=$resolvedPkgName"')
-    script.raw("set csPkgNM [DboTclHelper_sMakeCString $resolvedPkgName]")
-
-    script.raw("set partIt [DboPackage_NewPartsIter $lPackage $lStatus]")
-    script.raw("set lPart [DboPackagePartsIter_NextPart $partIt $lStatus]")
-    script.raw('if {[isnull $lPart]} { puts "AUTHOR_ERROR: no part in package"; exit 1 }')
-    script.raw("set devIt [DboPackage_NewDevicesIter $lPackage $lStatus]")
-    script.raw("set lDevice [DboPackageDevicesIter_NextDevice $devIt $lStatus]")
-    script.raw(
-        'if {[isnull $lDevice]} { puts "AUTHOR_ERROR: no device in package"; exit 1 }'
-    )
-
     script.raw("set placed_count 0")
-    for comp in components:
-        ref_raw = str(comp["ref"])
-        ref = tcl_str(ref_raw)
-        x = comp["x"]
-        y = comp["y"]
-        rotation = comp.get("rotation", 0)
-        script.raw(f"set csRef [DboTclHelper_sMakeCString {ref}]")
-        script.raw(f"set xy [docxy $gran {x} {y}]")
-        script.raw("set cpt [DboTclHelper_sMakeCPoint [lindex $xy 0] [lindex $xy 1]]")
-        # Plain concatenation (not an f-string) -- this block is full of literal Tcl
-        # braces, which an f-string would require doubling ({{/}}) for every single one.
-        script.raw(
-            "if {[catch {set lInst [$lPage NewPlacedInst $lStatus $csRef $csPkgNM "
-            "$lPart $lDevice $cpt " + str(rotation) + "]} eplace]} {\n"
-            '  puts "AUTHOR_WARN: placement of ' + ref + ' failed: $eplace"\n'
-            "} elseif {[isnull $lInst]} {\n"
-            '  puts "AUTHOR_WARN: placement of ' + ref + ' returned NULL"\n'
-            "} else {\n"
-            # NewPlacedInst's Name arg does NOT land the reference designator (it comes
-            # back as the placeholder DN?/auto-named INS1/INS2). DboPartInst_SetReference
-            # updates the in-session object (kept here, harmless) but does NOT survive a
-            # reopen either way. CONFIRMED LIVE: DboInstOccurrence_GetInstOccurrence
-            # returns NULL for a brand-new, not-yet-saved instance in THIS SAME session
-            # (the occurrence tree isn't built/available until the design has been
-            # loaded from disk) -- so the real, persisting reference-designator
-            # assignment cannot happen here. It happens in a SEPARATE, second pass
-            # (`_build_annotate_script` below) against this file after it's been saved
-            # and reopened fresh. See this module's own docstring for the full
-            # evidence trail of both findings.
-            "  catch {DboPartInst_SetReference $lInst $csRef}\n"
-            "  incr placed_count\n"
-            "}"
-        )
+    _place_components_from_group_tcl(g0, grp0)
+    _close_group_tcl(g0)
+
+    # Groups 1..N-1: the page already exists; interleave GetLib->place->RemoveLib
+    # per group so no two distinct libraries are ever open simultaneously
+    # (getlib_min.tcl vs getlib_seq3.tcl).
+    for gi, grp in enumerate(groups[1:], start=1):
+        g = str(gi)
+        comp = grp[0]
+        lib = comp.get("library") or library_file
+        pkg = comp.get("package") or package_name
+        _resolve_group_tcl(g, lib, pkg)
+        _place_components_from_group_tcl(g, grp)
+        _close_group_tcl(g)
 
     script.raw("set wire_count 0")
     for wire in wires:
@@ -401,9 +538,19 @@ def _build_author_script(
             "}"
         )
 
+    # All vendor libraries are already RemoveLib'd by per-group _close_group_tcl
+    # calls above — do NOT reintroduce the old dangling-handle
+    # `MarkAllLibForSave $lLib` (that variable no longer even exists in this
+    # script's scope; it silently no-op'd before, and would have been
+    # operating on a long-dead handle even when it did exist). The placed
+    # instances' part/package/cell definitions persist in the DESIGN's own
+    # embedded cache at SaveDesignAs time (confirmed: reopening a saved .dsn
+    # with every source .olb deleted still reads every placed part — see
+    # `runs/olb_union_fix_report.md` and the module docstring's design-cache
+    # note), so no library-side MarkAllLibForSave call is needed or attempted
+    # here for a pure design save.
     script.raw("catch {$lPage MarkModified}")
     script.raw("catch {$lSchematic MarkModified}")
-    script.raw("catch {$lSession MarkAllLibForSave $lLib}")
     script.raw(f"set csOut [DboTclHelper_sMakeCString {tcl_path(output_dsn)}]")
     script.raw(
         'if {[catch {$lSession SaveDesignAs $lDesign $csOut 1} esave]} '
@@ -663,13 +810,40 @@ async def author_capture_schematic_headless(
     placed parts/pins/wire are genuinely present. See this module's own docstring for
     the full evidence trail and honest limitations.
 
-    `components`: list of `{"ref": str, "x": number, "y": number, "rotation": int=0}`.
-    All components in this one call are placed as instances of the SAME package/part/
-    device, resolved once from `library_file` (first package found, or the one matching
-    `package_name` if given — see `_build_author_script`'s docstring for why by-name
-    selection is best-effort). For a heterogeneous BOM, call this once per distinct
-    package/library and union the results (not done automatically — a real scope limit,
-    not an oversight).
+    `components`: list of `{"ref": str, "x": number, "y": number, "rotation": int=0,
+    "package": str=?, "library": str=?}`.
+
+    **Heterogeneous BOM merge (the 30+-distinct-part capability, FIXED 2026-10-18
+    second pass):** each component may carry its own optional `library` (a `.olb` path;
+    defaults to the tool's `library_file`) and `package` (a package name; defaults to
+    `package_name`, which itself may be `None` = "first package in that library"). This
+    tool groups the components by `(library, package)` and resolves+instantiates
+    EVERY distinct combination in this ONE design, so a 30+-distinct-part heterogeneous
+    BOM — the typical SamacSys/UltraLibrarian "one vendor `.olb` per part" export shape
+    — merges into a single `.dsn` with each part genuinely its own part, NOT N copies of
+    one.
+
+    Why this needed a second fix pass: the first (same-day) multi-library version
+    opened EVERY distinct vendor `.olb` up front and kept all of them open through the
+    whole placement pass. Live probing against the installed DLL build (Sigrity 2024.0 /
+    SPB 22.1 `orDb_Dll_Tcl64.dll`, see `runs/olb_union_fix_report.md` for the full
+    evidence trail) confirmed that session tolerates AT MOST ONE open `DboLib` handle at
+    a time when the paths differ — a second `GetLib` of a different path returns
+    `ERROR(ORDBDLL-1021): Object Not Found` (even for a valid existing file) until the
+    first handle is `RemoveLib`'d. With 30+ distinct one-part-per-file vendor `.olb`s
+    (the actual target case) every group after the first failed with 1021 — the exact
+    "no way to union 30+ distinct vendor .olbs" defect. The generated script now
+    interleaves per group: `GetLib(lib_i)` -> resolve that group's package/part/device
+    -> place that group's components -> `RemoveLib(lib_i)`, so no two distinct
+    libraries are ever open simultaneously (the one confirmed-working pattern). The
+    first group's `GetLib` also necessarily precedes `NewSchematic`/`NewPage`, because a
+    design page created before ANY `GetLib` has run also poisons the lib-directory cache
+    (a second, independent, confirmed constraint) and makes the very first `GetLib`
+    return 1021 too.
+
+    For a homogeneous BOM (all the same package/library), the same call works as before
+    by omitting `library`/`package` per component — a single group is used and the
+    generated script is functionally equivalent to the original confirmed-live path.
 
     `wires`: list of `{"x1", "y1", "x2", "y2"}` (page user-units, same coordinate space
     as `components`' `x`/`y` — both get multiplied by the page's own
