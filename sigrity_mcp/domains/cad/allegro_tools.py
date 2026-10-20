@@ -44,8 +44,9 @@ set_variable, run_drc, save_design` — from this file), geometry ops (`create_t
 create_via, create_simple_padstack, place_module_instance, assign_net, delete_connect,
 create_copper_shape, create_film, get_module_instance_location, get_net_length` — from
 allegro_geometry_tools.py), and constraint ops (`set_spacing_constraint,
-set_physical_constraint, create_ecset, get_net_constraint` — from
-allegro_constraint_tools.py). Every operation's underlying validation/SKILL-quoting is
+set_physical_constraint, create_ecset, delete_ecset, set_electrical_constraint,
+get_electrical_constraint, set_electrical_check_mode, get_net_constraint, list_ecsets,
+design_value_set` — from allegro_constraint_tools.py). Every operation's underlying validation/SKILL-quoting is
 UNCHANGED — this only changes how many separate tool calls an agent needs, not what each
 operation does or how safely it's built. `start_allegro_session` and `allegro_run_session`
 are unaffected and remain individually exposed. See `allegro_configure`'s own docstring
@@ -54,6 +55,7 @@ for the full op list.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any, Literal, Optional, Union
 
 from sigrity_mcp.core.skillscript import skill_path, skill_str
@@ -64,17 +66,27 @@ from sigrity_mcp.domains.cad.allegro_geometry_tools import (
     allegro_assign_net,
     allegro_create_copper_shape,
     allegro_create_film,
+    allegro_create_keepout,
+    allegro_create_package_keepin,
     allegro_create_simple_padstack,
     allegro_create_trace,
     allegro_create_via,
     allegro_delete_connect,
     allegro_get_module_instance_location,
     allegro_get_net_length,
+    allegro_import_package,
+    allegro_list_packages,
     allegro_place_module_instance,
 )
 from sigrity_mcp.domains.cad.allegro_constraint_tools import (
     allegro_create_ecset,
+    allegro_delete_ecset,
+    allegro_design_value_set,
+    allegro_get_electrical_constraint,
     allegro_get_net_constraint,
+    allegro_list_ecsets,
+    allegro_set_electrical_check_mode,
+    allegro_set_electrical_constraint,
     allegro_set_physical_constraint,
     allegro_set_spacing_constraint,
 )
@@ -358,13 +370,23 @@ _CONFIGURE_OPS = {
     "delete_connect": allegro_delete_connect,
     "create_copper_shape": allegro_create_copper_shape,
     "create_film": allegro_create_film,
+    "create_package_keepin": allegro_create_package_keepin,
+    "create_keepout": allegro_create_keepout,
+    "list_packages": allegro_list_packages,
+    "import_package": allegro_import_package,
     "get_module_instance_location": allegro_get_module_instance_location,
     "get_net_length": allegro_get_net_length,
     # constraint ops (allegro_constraint_tools.py)
     "set_spacing_constraint": allegro_set_spacing_constraint,
     "set_physical_constraint": allegro_set_physical_constraint,
     "create_ecset": allegro_create_ecset,
+    "delete_ecset": allegro_delete_ecset,
+    "set_electrical_constraint": allegro_set_electrical_constraint,
+    "get_electrical_constraint": allegro_get_electrical_constraint,
+    "set_electrical_check_mode": allegro_set_electrical_check_mode,
     "get_net_constraint": allegro_get_net_constraint,
+    "list_ecsets": allegro_list_ecsets,
+    "design_value_set": allegro_design_value_set,
 }
 
 
@@ -384,9 +406,12 @@ async def allegro_configure(session_id: str, operations: list[dict]) -> dict:
       save_design`
     - geometry (allegro_geometry_tools.py): `create_trace, create_via,
       create_simple_padstack, place_module_instance, assign_net, delete_connect,
-      create_copper_shape, create_film, get_module_instance_location, get_net_length`
+      create_copper_shape, create_film, create_package_keepin, create_keepout,
+      list_packages, import_package, get_module_instance_location, get_net_length`
     - constraint (allegro_constraint_tools.py): `set_spacing_constraint,
-      set_physical_constraint, create_ecset, get_net_constraint`
+      set_physical_constraint, create_ecset, delete_ecset, set_electrical_constraint,
+      get_electrical_constraint, set_electrical_check_mode, get_net_constraint,
+      list_ecsets, design_value_set`
 
     `kwargs` are that operation's own parameters (everything except `session_id`, which is
     threaded through automatically) — see each corresponding `allegro_*` function's own
@@ -423,7 +448,31 @@ async def allegro_configure(session_id: str, operations: list[dict]) -> dict:
 @mcp.tool
 async def allegro_run_session(session_id: str, board_file: str) -> dict:
     """Write out the session's accumulated SKILL macro and launch Allegro against a real board as a background job.
-Call load_skill('sigrity-cad') for the full verified playbook, pitfalls, and a live example."""
+
+    Multi-arg constraint calls queued via `tcl_sessions.add_il` are NOT written as bare
+    `.scr` lines — Allegro 22.1's `-s` command-replay parser (the `lineread` top-level
+    reader) corrupts any `skill <expr>` line whose form has more than one top-level
+    whitespace-separated token (it keeps only the first, so e.g.
+    `axlCNSSetSpacing(nil nil 'line_line 5)` re-parses to `axlCNSGetSpacing(nil nil
+    'line_line)` -> "not a function" / silent no-op; confirmed live 2026-10-18, 4
+    independent repros). Those calls are instead written to `auto_il.il` in the board's
+    directory (the design-dir-relative path convention `load`/`outfile` use) and invoked
+    as the documented `skill (load "...")` + `skill <func>` single-token pair. See
+    `allegro_constraint_tools.py`'s module docstring for the full evidence + rule-name
+    ground truth.
+    Call load_skill('sigrity-cad') for the full verified playbook, pitfalls, and a live example."""
+    session = tcl_sessions.get(session_id)
+    has_il = bool(session.il_lines)
+    if has_il:
+        il_path = Path(board_file).parent / "auto_il.il"
+        il_path.write_text("\n\n".join(session.il_lines) + "\n", encoding="utf-8")
+        il_abs = str(il_path).replace("\\", "/")
+        # Load the .il once (it defines all queued defuns), then call each by its
+        # single-token name in queue order. Each emitted line is a 1-token `skill (...)`
+        # form, which the lineread parser handles correctly.
+        session = tcl_sessions.add_line(session_id, f'skill (load "{il_abs}")')
+        for func_name in session.il_func_names:
+            session = tcl_sessions.add_line(session_id, f"skill ({func_name})")
     session = tcl_sessions.add_line(session_id, "quit")
     has_save = any("axlSaveDesign" in line for line in session.script._lines)
     clear_stale_design_lock(board_file)
@@ -443,4 +492,14 @@ Call load_skill('sigrity-cad') for the full verified playbook, pitfalls, and a l
             "Verify the expected output file genuinely changed (size/mtime, or an "
             "independent report.exe read-back) before trusting this result."
         )
+    if has_il:
+        il_note = (
+            "Multi-arg constraint calls ran via a loaded auto_il.il in the board's "
+            "directory (a bare .scr line cannot carry a multi-token SKILL form on this "
+            "22.1 build). Each call's return value (t/nil) is captured to a "
+            "design-dir cns_<id>.txt file, NOT returned to this process -- verify a set "
+            "by reading that file or re-querying via the matching axlCNS*Get* function / "
+            "report.exe."
+        )
+        result["note"] = (result.get("note", "") + " " + il_note).strip()
     return result

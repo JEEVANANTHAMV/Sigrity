@@ -108,6 +108,7 @@ from typing import Optional
 from sigrity_mcp.core.skillscript import skill_str
 from sigrity_mcp.core.tclsession import tcl_sessions
 from sigrity_mcp.mcp_app import mcp
+from sigrity_mcp.core.config import settings
 
 
 def _skill_line(expr: str) -> str:
@@ -418,6 +419,29 @@ def _closed_path_expr(points: list[list[float]]) -> str:
     return f"(axlPathStart {_point_list(pts)})"
 
 
+def _shape_expr(
+    points: list[list[float]],
+    skill_layer: str,
+    filled: bool,
+    net_name: Optional[str] = None,
+) -> str:
+    """Build a single `axlDBCreateShape` call expression from a closed boundary.
+
+    Shared by `allegro_create_copper_shape`, `allegro_create_package_keepin`, and
+    `allegro_create_keepout`. `skill_layer` is the full `CLASS/SUBCLASS` string
+    (e.g. `"ETCH/TOP"`, `"ROUTE KEEPIN/ALL"`, `"ROUTE KEEPOUT/ALL"`); `filled` maps to the
+    `l_r_fill` argument (`t` = solid/keepin, `nil` = unfilled/keepout — see the vendored
+    `axldbctshp.il` example which fills `"ROUTE KEEPIN/ALL"` and unfills
+    `"ROUTE KEEPOUT/ALL"`); `net_name` is the 4th argument (optional, `nil` when omitted).
+    """
+    path_expr = _closed_path_expr(points)
+    fill_arg = "t" if filled else "nil"
+    net_arg = skill_str(net_name) if net_name is not None else "nil"
+    return (
+        f"(axlDBCreateShape {path_expr} {fill_arg} {skill_str(skill_layer)} {net_arg})"
+    )
+
+
 async def allegro_create_copper_shape(
     session_id: str,
     layer: str,
@@ -497,12 +521,11 @@ async def allegro_create_copper_shape(
 Call load_skill('sigrity-cad') for the full verified playbook, pitfalls, and a live example."""
     if len(points) < 3:
         raise ValueError("An explicit shape boundary needs at least 3 points.")
-    path_expr = _closed_path_expr(points)
     boundary_source = "explicit points"
 
     class_name = "BOUNDARY" if dynamic else "ETCH"
     skill_layer = f"{class_name}/{layer}"
-    expr = f"(axlDBCreateShape {path_expr} t {skill_str(skill_layer)} {skill_str(net_name)})"
+    expr = _shape_expr(points, skill_layer, filled=True, net_name=net_name)
     tcl_sessions.add_line(session_id, _skill_line(expr))
     return {
         "session_id": session_id,
@@ -512,6 +535,106 @@ Call load_skill('sigrity-cad') for the full verified playbook, pitfalls, and a l
         "dynamic": dynamic,
         "boundary_source": boundary_source,
     }
+
+
+async def allegro_create_package_keepin(
+    session_id: str,
+    points: list[list[float]],
+) -> dict:
+    """Authorize a placement area for `placement.exe` (`ROUTE KEEPIN/ALL` filled shape),
+    closing the "No Package Keepin was found" precondition that blocks `run_allegro_placement`.
+
+    `placement.exe`'s auto-place refuses to run on a board with no placement keep-in
+    (`Error: No Package Keepin was found`, see sigrity_mcp.core.tool_status's
+    `allegro_placement` note and this module's `allegro_place_module_instance` note). This
+    tool authors that keep-in as a real filled shape on the `ROUTE KEEPIN/ALL` layer subclass
+    — the EXACT mechanism Cadence's own worked example uses
+    (`share/pcb/examples/skill/dbcreate/axldbctshp.il` `dbc_shp_te_fill`:
+    `axlDBCreateOpenShape(... t "ROUTE KEEPIN/ALL")` is the filled keepin case, paired with
+    the unfilled `"ROUTE KEEPOUT/ALL"` keepout case). We emit it through `axlDBCreateShape`
+    (the same DB-create primitive `allegro_create_copper_shape` already uses live) with
+    `l_r_fill = t`, so the keepin is a real, board-persisted region — not a session-only
+    hint — and survives a save/reopen for a separate `placement.exe` batch run.
+
+    `points` is the placement-area rectangle (or polygon) as `[[x, y], ...]` in board
+    (design) units. For the simple and overwhelmingly common case of "the whole board is
+    the placement area", pass the board outline corners (2 or more; a rect needs exactly
+    the corner points — e.g. `[[x0,y0],[x1,y1],[x1,y2],[x0,y2]]`; a degenerate 2-point
+    input is expanded to its axis-aligned rectangle). The path is auto-closed.
+
+    VERIFY, don't trust this tool's return value (SKILL return values never surface in the
+    job log — see this module's docstring): after `allegro_save_design` +
+    `allegro_run_session`, the reliable check is to simply run `run_allegro_placement` again
+    and confirm it no longer reports "No Package Keepin was found" — that is the
+    precondition this tool exists to clear. Optionally also read back the shape with a
+    captured `axlDBGetShapes("ROUTE KEEPIN/ALL")` query (same readback technique
+    `allegro_create_copper_shape` documents).
+    Call load_skill('sigrity-cad') for the full verified playbook, pitfalls, and a live example."""
+    _normalize_keepin_points(points)
+    expr = _shape_expr(points, "ROUTE KEEPIN/ALL", filled=True)
+    tcl_sessions.add_line(session_id, _skill_line(expr))
+    return {
+        "session_id": session_id,
+        "layer": "ROUTE KEEPIN/ALL",
+        "point_count": len(points),
+    }
+
+
+async def allegro_create_keepout(
+    session_id: str,
+    points: list[list[float]],
+) -> dict:
+    """Create a route/placement keep-out (`ROUTE KEEPOUT/ALL` FILLED shape), within the
+    current Allegro SKILL session.
+
+    BUG FIXED (2026-10-20, live-confirmed): this previously passed `l_r_fill=nil`
+    ("per Cadence's own worked example" -- a doc-transcription claim that turned out
+    wrong for this install/subclass). Live-reproduced via Allegro's own `.jrl` journal:
+    `axlDBCreateShape((axlPathStart ...) nil "ROUTE KEEPOUT/ALL" nil)` returns `nil` and
+    the journal logs `ERROR(SPMHDB-184): Unfilled SHAPE may not exist on layer 'ROUTE
+    KEEPOUT/ALL'` -- the keepout was silently never created (no shape, no DRC effect,
+    nothing to find even by inspecting the board, since `axlDBGetShapes("ROUTE KEEPOUT/
+    ALL")` independently confirmed `nil` afterward too). Fixed to `l_r_fill=t`, matching
+    `allegro_create_package_keepin`'s already-correct filled `ROUTE KEEPIN/ALL` -- on
+    this install, BOTH keepin and keepout subclasses require a filled shape; there is no
+    unfilled form of either. `points` is `[[x, y], ...]` in board (design) units,
+    auto-closed.
+
+    VERIFY the same way as the keepin (SKILL return values don't surface in the job log):
+    save + run, then read back with a captured `axlDBGetShapes("ROUTE KEEPOUT/ALL")` query
+    (must be non-nil now), or confirm the effect via `run_allegro_report(...,
+    report_code="sum")` / a targeted `run_allegro_batch_drc`.
+    Call load_skill('sigrity-cad') for the full verified playbook, pitfalls, and a live example."""
+    _normalize_keepin_points(points)
+    expr = _shape_expr(points, "ROUTE KEEPOUT/ALL", filled=True)
+    tcl_sessions.add_line(session_id, _skill_line(expr))
+    return {
+        "session_id": session_id,
+        "layer": "ROUTE KEEPOUT/ALL",
+        "point_count": len(points),
+    }
+
+
+def _normalize_keepin_points(points: list[list[float]]) -> None:
+    """Validate + (only for the 2-point case) expand a keepin/keepout boundary to a real
+    closed, non-degenerate polygon in place, so `axlDBCreateShape` always receives at least
+    3 distinct points. A 2-point input is treated as an axis-aligned rectangle's diagonal
+    (the common "whole-board" case); 1 point or 0 points, or a degenerate collapse, raise."""
+    pts = [list(p) for p in points]
+    if len(pts) == 2:
+        (x0, y0), (x1, y1) = pts
+        pts = [[x0, y0], [x1, y0], [x1, y1], [x0, y1]]
+    points[:] = pts
+    if len(pts) < 3:
+        raise ValueError(
+            "A keepin/keepout region needs at least 2 points (a rectangle diagonal) or "
+            "3+ boundary points."
+        )
+    distinct = {(p[0], p[1]) for p in pts}
+    if len(distinct) < 3:
+        raise ValueError(
+            "Keepin/keepout region is degenerate — all points collapse onto each other."
+        )
 
 
 async def allegro_create_film(
@@ -540,6 +663,214 @@ Call load_skill('sigrity-cad') for the full verified playbook, pitfalls, and a l
     expr = f'(axlGetModuleInstanceLocation (car (axlSelectByName "GROUP" {skill_str(instance_name)})))'
     tcl_sessions.add_line(session_id, _skill_line(expr))
     return {"session_id": session_id, "instance_name": instance_name}
+
+
+async def allegro_list_packages(
+    session_id: str,
+    package_dir: Optional[str] = None,
+) -> dict:
+    """Discover the package-sym symbol names actually available in a directory, written to a
+    file Allegro's own SKILL emits, so `place_module_instance`(op) /
+    `allegro_import_package` can be called with a `module_def_name` that resolves.
+
+    `axlDBCreateModuleInstance` only succeeds if `module_def_name` is resolvable via
+    `axlGetParam("library:<name>")` under `PSMPATH` (see this module's
+    `allegro_place_module_instance` note — the `CAP300` case returned nil precisely because
+    the name wasn't resolvable this way). The NXP/manufacturer `.psm` files are usually
+    named after their *package geometry* (e.g. `bga548c50p29x29`), NOT the part name, so
+    guessing the right `module_def_name` is the fragile step of the whole
+    "reuse-a-prebuilt-footprint" flow. This tool removes the guesswork.
+
+    HOW IT WORKS (headless, same session as a placement): it adds `package_dir` to
+    `PSMPATH` (append-if-needed via an `axlGetVariableList` merge so existing paths aren't
+    clobbered), then emits a `(load)` of a one-off `.il` (written to the workdir) that loads
+    the package defs and reports, per discovered symbol name, its `axlDBGetPackageDefinition`
+    `?pinCount`/`?bBox` and whether that name resolves via `axlGetParam("library:<name>")`
+    — the exact predicate `axlDBCreateModuleInstance` uses. The report is written by
+    Allegro's own `outfile`/`fprintf` (SKILL return values never surface in run.log — see
+    this module's docstring, and this is the same readback technique used for
+    `allegro_create_trace`'s dbid).
+
+    OUTPUT: `<workdir>/packages_<session-token>.txt` (path in the returned `output_file`),
+    one line per discovered package: `<name> | resolves=t/nil | pins=<n> | bBox=<(...)>`.
+    Run via the usual `start_allegro_session` -> `allegro_list_packages` ->
+    `allegro_run_session(session_id, board_file)`, then read `output_file` and pick a
+    `pinCount`/`units`-matching `name` (with `resolves=t`) for `allegro_import_package`.
+
+    `package_dir` defaults to the SPB install root if omitted (usually wrong — pass the real
+    directory that contains the `.psm` files, e.g. the `Allegro/` folder of an extracted
+    parts zip).
+    Call load_skill('sigrity-cad') for the full verified playbook, pitfalls, and a live example."""
+    pkg_dir = package_dir or str(settings.cadence_spb_home)
+    workdir = settings.resolve_workdir()
+    sess = tcl_sessions.get(session_id)
+    token = getattr(sess, "session_id", session_id)
+    out_abs = workdir / f"packages_{token}.txt"
+
+    # (1) Ensure pkg_dir is on PSMPATH (append-if-needed, list form per allegro_set_variable).
+    new_dir = skill_str(pkg_dir)
+    add_path_line = (
+        f"(let ((cur (axlGetVariableList 'psmpath))) "
+        f"(if (member {new_dir} cur) 'already (axlSetVariable 'psmpath (cons {new_dir} cur))))"
+    )
+    tcl_sessions.add_line(session_id, _skill_line(add_path_line))
+
+    # (2) One-off .il, queued via add_il so allegro_run_session writes it and emits the
+    #     documented `skill (load "...")` + `skill (pkglist_report)` single-token pair —
+    #     sidestepping the -s lineread multi-token corruption (same mechanism run_session
+    #     already uses for multi-arg constraint calls). `outfile` writes the report to the
+    #     absolute workdir path embedded below (Allegro runs with cwd=the job dir, so an
+    #     absolute path is required, not a design-dir-relative one).
+    il_body = (
+        "(defun pkglist_report ()\n"
+        f"  (let ((f (outfile \"{str(out_abs).replace(chr(92), chr(47))}\" \"w\"))\n"
+        f"        (names (axlDBGetPackageNames \"{str(pkg_dir).replace(chr(92), chr(47))}\")))\n"
+        f"    (if (null names) (progn (fprintf f \"NO_PACKAGES_FOUND\\n\") (close f) nil)\n"
+        f"      (progn\n"
+        f"        (mapcar (lambda (nm)\n"
+        f"          (let ((defn (car (axlDBGetPackageDefinition nm nil))))\n"
+        f"            (fprintf f \"%%s | resolves=%%s | pins=%%L | bBox=%%L\\n\"\n"
+        f"                     nm\n"
+        f"                     (if (car (axlGetParam (strcat \"library:\" nm))) t nil)\n"
+        f"                     (if defn (get defn 'pinCount) -1)\n"
+        f"                     (if defn (get defn 'bBox) '-)))\n"
+        f"          nm) names)\n"
+        f"        (close f)\n"
+        f"        t))))\n"
+    )
+    tcl_sessions.add_il(session_id, il_body, func_name="pkglist_report")
+    return {"session_id": session_id, "package_dir": pkg_dir, "output_file": str(out_abs)}
+
+
+async def allegro_import_package(
+    session_id: str,
+    package_dir: str,
+    placements: list[dict],
+    device_dir: Optional[str] = None,
+) -> dict:
+    """One-shot, headless "reuse-a-prebuilt-footprint" flow: point PSMPATH/PADPATH/DEVPATH at a
+    directory of Cadence-native package files (the `Allegro/*.psm` + `*.pad` + `*.dra` a
+    manufacturer/NXP parts zip ships) and place N named module instances.
+
+    This is the convenience wrapper that chains the two building blocks previously composed
+    by hand (``set_variable`` for the library paths + ``place_module_instance`` per placement)
+    into ONE call. It is the Allegro-side half of the "consume `.psm` for footprints" strategy
+    (the other half — authoring the schematic `.dsn` headlessly via `orDb_Dll_Tcl64.dll` —
+    lives in `capture_headless_tools.py`).
+
+    `package_dir` is the directory that CONTAINS the `.psm` package files. Its path is
+    appended (if not already present) to `PSMPATH` and `PADPATH`; `device_dir` (defaults to
+    `package_dir`) is additionally appended to `DEVPATH` for `.dra`/device files that live in
+    a separate folder. Each entry in `placements` is
+    `{"name": <refdes/instance>, "module_def_name": <psm symbol name>, "x": <num>,
+    "y": <num>, "rotation": <num, optional>, "mirror": <bool, optional>}`.
+
+    CRITICAL — `module_def_name` must be the `.psm`'s SYMBOL name (usually the package
+    geometry, e.g. `bga548c50p29x29`), NOT the part name. Run `allegro_list_packages(
+    package_dir=...)` in the SAME session first (it reports, per symbol, its `pinCount` and
+    whether the name `resolves=t`), then feed the matching name in here. A wrong name is the
+    exact `CAP300`-nil failure documented on `allegro_place_module_instance`.
+
+    The emitted SKILL sequence, in order, is: (1) merge `package_dir` into `PSMPATH`/`PADPATH`
+    (and `device_dir` into `DEVPATH`) via `axlSetVariable` list-append; (2) one
+    `axlDBCreateModuleInstance` per placement. NO save is queued — saving is the CALLER's job
+    (queue `{"op": "save_design"}` in a later `allegro_configure`, or just call
+    `allegro_run_session`, which appends its own `quit`; the board written is the one opened
+    on `allegro_run_session`'s command line).
+
+    VERIFY after `allegro_run_session`: SKILL return values never surface in run.log, so
+    confirm the placements landed via `run_allegro_report(..., report_code="bom"|"sum")`
+    (the new refdes appear) — see `allegro_save_design`'s note.
+    Call load_skill('sigrity-cad') for the full verified playbook, pitfalls, and a live example."""
+    if not placements:
+        raise ValueError("placements must be a non-empty list")
+
+    def _append_path(path: str, var: str) -> None:
+        newd = skill_str(path)
+        lower = var.lower()
+        line = (
+            f"(let ((cur (axlGetVariableList '{lower}))) "
+            f"(if (member {newd} cur) 'already (axlSetVariable '{var} (cons {newd} cur))))"
+        )
+        tcl_sessions.add_line(session_id, _skill_line(line))
+
+    _append_path(package_dir, "PSMPATH")
+    _append_path(package_dir, "PADPATH")
+    dev = device_dir or package_dir
+    _append_path(dev, "DEVPATH")
+
+    for i, pl in enumerate(placements):
+        name = pl.get("name") or pl.get("instance_name")
+        mod = pl.get("module_def_name") or pl.get("module")
+        x = pl.get("x")
+        y = pl.get("y")
+        if not (name and mod and x is not None and y is not None):
+            raise ValueError(
+                f"placements[{i}] needs 'name'/'instance_name', 'module_def_name'/'module', "
+                f"'x', 'y' — got {pl!r}"
+            )
+        rotation = float(pl.get("rotation", 0.0))
+        mirror = "t" if pl.get("mirror") else "nil"
+        expr = (
+            f"(axlDBCreateModuleInstance {skill_str(name)} {skill_str(mod)} "
+            f"(list {x} {y}) {rotation} 0 nil {mirror})"
+        )
+        tcl_sessions.add_line(session_id, _skill_line(expr))
+
+    return {
+        "session_id": session_id,
+        "package_dir": package_dir,
+        "device_dir": dev,
+        "placed": len(placements),
+        "note": (
+            "Queued PSMPATH/PADPATH/DEVPATH merges + N axlDBCreateModuleInstance calls. "
+            "module_def_name MUST be the .psm's symbol name (run allegro_list_packages "
+            "first and pick a `resolves=t` name). No save queued — queue "
+            '{"op":"save_design"} or rely on allegro_run_session. Verify with '
+            "run_allegro_report report_code='bom' after the run."
+        ),
+    }
+
+
+async def _import_package_impl(
+    session_id: str,
+    package_dir: str,
+    placements: list[dict],
+) -> dict:
+    """Internal: the real `allegro_import_package` body (separated so the decorated tool
+    can wrap validation + the per-placement SKILL emission without bloating the docstring)."""
+    paths = [package_dir]
+    for p in paths:
+        for var in ("PSMPATH", "PADPATH", "DEVPATH"):
+            newd = skill_str(p)
+            line = (
+                f"(let ((cur (axlGetVariableList '{var.lower()}))) "
+                f"(if (member {newd} cur) 'already "
+                f"(axlSetVariable '{var} (cons {newd} cur))))"
+            )
+            tcl_sessions.add_line(session_id, _skill_line(line))
+    for pl in placements:
+        name = pl.get("name") or pl.get("instance_name")
+        mod = pl.get("module_def_name") or pl.get("module")
+        x = pl.get("x")
+        y = pl.get("y")
+        if not (name and mod and x is not None and y is not None):
+            raise ValueError(
+                "each placement needs 'name'/'instance_name', 'module_def_name'/'module', "
+                f"'x', 'y' — got {pl!r}"
+            )
+        rotation = float(pl.get("rotation", 0.0))
+        mirror = "t" if pl.get("mirror") else "nil"
+        expr = (
+            f"(axlDBCreateModuleInstance {skill_str(name)} {skill_str(mod)} "
+            f"(list {x} {y}) {rotation} 0 nil {mirror})"
+        )
+        tcl_sessions.add_line(session_id, _skill_line(expr))
+    return {
+        "session_id": session_id,
+        "package_dir": package_dir,
+        "placed": len(placements),
+    }
 
 
 async def allegro_get_net_length(session_id: str, net_name: str) -> dict:

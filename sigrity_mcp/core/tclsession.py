@@ -66,6 +66,18 @@ class ScriptSession:
     tool: str
     script: TclScript = field(default_factory=TclScript)
     step_count: int = 0
+    # Accumulated SKILL defun sources for tools whose call is too large to ride a bare
+    # `.scr` line. Allegro 22.1's `-s` command-replay parser (lineread) corrupts any
+    # `skill <expr>` line whose form has more than one top-level whitespace-separated
+    # token (it keeps only the first; e.g. `skill (axlCNSSetSpacing nil nil 'line_line
+    # 5)` re-parses with the space before the symbol dropped -> "not a function" / silent
+    # no-op; confirmed live 2026-10-18, see allegro_constraint_tools.py's docstring).
+    # The documented error-proof pattern (SKILL Language Reference `load`/`lineread`
+    # sections + Cadence's own dp_rep.il) is: put the multi-arg call in a `.il`, `load`
+    # it, call a single-token function. `run_session` writes these to <board dir>/auto_il.il
+    # and emits `skill (load "...")` + `skill <func>` per call.
+    il_lines: list[str] = field(default_factory=list)
+    il_func_names: list[str] = field(default_factory=list)
 
 
 # Backward-compat alias: every Sigrity-domain module imports this name specifically
@@ -120,6 +132,18 @@ class ScriptSessionManager:
         self._snapshot(session)
         return session
 
+    def add_il(self, session_id: str, source: str, func_name: str) -> ScriptSession:
+        """Queue a multi-arg SKILL call to run via a loaded `.il` file (see
+        `ScriptSession.il_lines` for why a bare `.scr` line cannot carry it). `source`
+        is a complete SKILL `defun NAME () ...` body; `func_name` is the symbol it
+        defines. `run_session` writes all queued sources to one `.il` and emits the
+        documented `load` + single-token-call sequence for each, in queue order."""
+        session = self.get(session_id)
+        session.il_lines.append(source)
+        session.il_func_names.append(func_name)
+        self._snapshot(session)
+        return session
+
     def preview(self, session_id: str) -> str:
         return self.get(session_id).script.render()
 
@@ -153,6 +177,8 @@ class ScriptSessionManager:
                         "tool": session.tool,
                         "step_count": session.step_count,
                         "lines": list(session.script._lines),
+                        "il_lines": list(session.il_lines),
+                        "il_func_names": list(session.il_func_names),
                     },
                     indent=2,
                 ),
@@ -180,7 +206,13 @@ class ScriptSessionManager:
                 "cleaned up by a close()."
             )
         data = json.loads(path.read_text(encoding="utf-8"))
-        session = ScriptSession(session_id=data["session_id"], tool=data["tool"], step_count=data["step_count"])
+        session = ScriptSession(
+            session_id=data["session_id"],
+            tool=data["tool"],
+            step_count=data["step_count"],
+            il_lines=list(data.get("il_lines", [])),
+            il_func_names=list(data.get("il_func_names", [])),
+        )
         for line in data["lines"]:
             session.script.raw(line)
         self._sessions[session_id] = session
@@ -209,22 +241,24 @@ async def run_session(
     (SKILL command-replay via `-s`, written as `.scr`) — see `core.process.submit_job`'s
     docstring for the exact semantics.
 
-    `tool in ("allegro", "capture")` always launches as `dismiss_dialogs=True` -- every
-    `run_session` caller that passes `tool="allegro"` is a real
-    `allegro.exe -s <script> <board>` interactive-GUI launch (confirmed by grep across
-    the domain modules: every other Allegro-family batch exe -- report.exe,
-    batch_drc.exe, designextractor.exe, ... -- goes through `core.process.submit_job`
-    directly under its own distinct tool name, not through a script session at all), and
-    this is CONFIRMED LIVE to be able to raise a modal startup dialog with nothing
-    present to click it -- see `core.win32gui_helper.DismissWatcher`'s docstring for the
-    live repro evidence. Setting this here, once, means every current and future
-    `tool="allegro"` call site (`allegro_tools.allegro_run_session`,
-    `aurora.scope_tools`'s in-design-analysis workflow, `allegro_placement_tools`'s
-    zrouter run, `spif_specctra_tools`'s SPECCTRA import) gets the fix automatically,
-    with nothing for any of those call sites (or the LLM agent calling them) to remember
-    to do.
+    `tool in ("allegro", "apd", "capture")` always launches as `dismiss_dialogs=True` --
+    every `run_session` caller that passes `tool="allegro"` is a real
+    `allegro.exe -s <script> <board>` launch (confirmed by grep across the domain modules:
+    every other Allegro-family batch exe -- report.exe, batch_drc.exe,
+    designextractor.exe, ... -- goes through `core.process.submit_job` directly under its
+    own distinct tool name, not through a script session at all), and this is CONFIRMED
+    LIVE to be able to raise a modal startup dialog with nothing present to click it -- see
+    `core.win32gui_helper.DismissWatcher`'s docstring for the live repro evidence.
+    `tool="apd"` is the same class of launch (the `apd.exe` launcher stub spawns
+    `allegro.exe -product <APD tier> -nograph ...`; even with `-nograph`, a one-time
+    Product Choices or similar modal can still appear on an unexpected state), so it is
+    covered by the same watcher. Setting this here, once, means every current and future
+    `allegro`/`apd` call site (`allegro_tools.allegro_run_session`, `aurora/scope_tools.py`'s
+    in-design-analysis workflow, `apd_package_tools`'s zrouter/apd-batch/apr runs,
+    `spif_specctra_tools`'s SPECCTRA import) gets the fix automatically, with nothing for
+    any of those call sites (or the LLM agent calling them) to remember to do.
 
-    The same `tool in ("allegro", "capture")` check also applies
+    The same `tool in ("allegro", "apd", "capture")` check also applies
     `settings.allegro_session_stall_timeout_seconds` (300s by default) in place of the
     global 2-hour stall watchdog default -- a real, repeatable failure mode (ripping up
     and re-routing a
@@ -290,9 +324,9 @@ async def run_session(
         tcl_arg_flag=tcl_arg_flag,
         extra_args=extra_args,
         script_filename=script_filename,
-        dismiss_dialogs=(tool in ("allegro", "capture")),
+        dismiss_dialogs=(tool in ("allegro", "apd", "capture")),
         stall_timeout_seconds=(
-            settings.allegro_session_stall_timeout_seconds if tool in ("allegro", "capture") else None
+            settings.allegro_session_stall_timeout_seconds if tool in ("allegro", "apd", "capture") else None
         ),
         extra_env=({"ENABLE_CAPTURE_AUTOMATION": "TRUE"} if tool == "capture" else None),
     )
