@@ -185,14 +185,28 @@ and SKILL function reference, and found three of them wrong:
   (importing the routed session back into the `.brd`), `run_allegro_specctra_import` uses Allegro's
   native `specctra in <session.ses>` command via batch script replay to safely merge routes without
   database corruption errors.
-- **Constraint Manager IS SKILL-scriptable** — `allegro_constraint_tools.py`. The
-  original conclusion ("no `axl*Constraint*` API found") only failed because it
-  searched for the wrong substring — the real naming convention is `axlCNS*`/`axlCns*`
-  (~60 real, individually documented functions in
-  `share/pcb/examples/skill/DOC/FUNCS/`, confirmed present by filename). Wraps spacing
-  rules (`axlCNSSetSpacing`), physical rules (`axlCNSSetPhysical`), electrical
-  constraint sets (`axlCNSEcsetCreate`), and net-level constraint queries
-  (`axlCnsNetFlattened`).
+- **Constraint Manager IS SKILL-scriptable, CONFIRMED LIVE with value-level readback** —
+  `allegro_constraint_tools.py`. The original conclusion ("no `axl*Constraint*` API
+  found") only failed because it searched for the wrong substring — the real naming
+  convention is `axlCNS*`/`axlCns*` (~60 real, individually documented functions in
+  `share/pcb/examples/skill/DOC/FUNCS/`, confirmed present by filename). Two real bugs
+  were found and fixed: (1) rule names are SKILL *symbols* (`'line_line`), not strings —
+  a string silently no-ops; (2) Allegro 22.1's `-s` script-replay parser corrupts any
+  multi-token `skill (...)` line, so every multi-arg `axlCNS*` call now routes through a
+  generated `.il` file (`load`ed once, then called by single-token name) instead of a
+  bare `.scr` line. With both fixed, values are confirmed to actually land — e.g.
+  `axlCNSEcsetValueSet("DP_SET" 'Impedance "ALL:ALL:50:1:1500:4.4:0")` read back
+  verbatim via an independent `axlCNSEcsetValueGet` call — not just a clean exit code.
+  Covers spacing rules (`axlCNSSetSpacing`), physical rules incl. the 4 diff-pair gaps
+  (`axlCNSSetPhysical`), ecset create/delete (`axlCNSEcsetCreate`/`Delete`), electrical
+  constraint values incl. impedance/diff-pair-impedance/length-match
+  (`axlCNSEcsetValueSet`/`Get`), electrical check on/off/batch mode
+  (`axlCNSEcsetModeSet`), ecset listing (`axlCnsList`), design-wide values
+  (`axlCNSDesignValueSet`), and net-level flattened queries (`axlCnsNetFlattened`). See
+  `core/tool_status.py`'s `"allegro"` note and the module's own docstring for the full
+  evidence and live-enumerated rule-name ground truth. NOT yet proven: whether
+  SPECCTRA's autorouter actually honors a set constraint while routing — that's
+  separate, still-open work.
 - **PSpice batch simulation IS real** — `pspice_tools.py`. `pspice.exe`/`pspiceaa.exe`
   are still correctly GUI-only, but a separate, dedicated executable, `psp_cmd.exe`,
   confirmed live: headless, real diagnostics, no hang — ran a real shipped OrCAD PSpice

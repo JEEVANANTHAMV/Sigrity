@@ -17,3 +17,16 @@ scripts/*.prd
 *.jrl,*
 .venv-eval/
 .claude/
+# Scratch/report artifacts that land at repo root from ad-hoc tool runs (not source)
+*.rpt
+*.log,[0-9]*
+act2cds.info
+alt2cds.info
+idx_design_info.txt
+importMentor.log*
+start.idx
+pdf_out/
+.kilo/
+doc_index/
+search_index/
+signoise.run/

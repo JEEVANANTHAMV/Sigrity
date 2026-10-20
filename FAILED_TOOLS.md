@@ -32,7 +32,7 @@
 | # | Software (exe) | Tools | # | Cause class |
 |---|---|---|---|---|
 | 1 | **OrCAD Capture** (`Capture.exe`) | 11 tools + `generate_schematic_from_spec` | **12** | Machine-level defect in Capture's `Open <project>` path |
-| 2 | **SPB Translators** (`con2xml`/`cap2xml`/`dml2con`/`apd2con`) | 4 tools | **4** | Feature pack not installed (empty stubs) |
+| 2 | **SPB Translators** (`con2xml`/`cap2xml`/`dml2con`/`apd2con`) | 4 tools | **4** | **WORK via the GUI** (product-chooser + Translate dialog); bare headless CLI is a best-effort fallback that stops at the `pcb_librarian_expert` checkout — **not** a missing feature/defect — see §2 |
 | 3 | **checkplus** (`checkplus.exe`) | 1 tool | **1** | Wrong product scope (DE-HDL, no `.brd` input) |
 | 4 | **designextractor** (`designextractor.exe`) | 1 tool | **1** | Needs an external connectivity server |
 | | | | **18** | |
@@ -163,39 +163,60 @@ async def generate_schematic_from_spec(
 
 ---
 
-## 2. SPB Translators — 4 tools, all `known_blocked`
+## 2. SPB Translators — 4 tools — **WORK via the GUI** (corrected 2026-10-18, user-confirmed)
 
 **Software:** `C:\Cadence\SPB_22.1\tools\bin\{con2xml,cap2xml,dml2con,apd2con}.exe`
-**Invocation style:** standalone CLI, `submit_job(tool=…, build_args=[input_file, output_file?])`.
+**Working path:** GUI product-chooser + "Translate" dialog — `launch_translator_gui("<tool>")`, select product, pick the DSN/OLB + Design file, click Translate, verify the output artifact. These are GUI+CLI hybrids and the user runs them successfully this way on this install.
 
-All four share the identical argv shape (verbatim, `interchange_tools.py`):
+> **Correction (2026-10-18, 2nd pass, user-confirmed).** The entries in this section that
+> called the four exes "empty PE stubs / GENUINELY ABSENT / feature pack not installed," and
+> the framing that they are "blocked by an unsatisfied license checkout," are **WRONG about
+> capability**. All four are real, distinct executables (different sizes 39–47 KB and different
+> SHA-256 hashes) and they **WORK** — driven through the GUI. They are not a blocked/defective
+> class. The bare *headless CLI* is a separate invocation path that, on this build, stops at
+> the `pcb_librarian_expert` checkout; that is a property of the headless path, NOT evidence the
+> tools are broken, and it is NOT the recommended way to run them. The `run_*` CLI helpers
+> carry the doc-verified switch contracts (from
+> `C:\Cadence\SPB_22.1\doc\pdv\console_commands.html`) as a best-effort fallback only. See
+> `core.tool_status.py` notes for the per-tool evidence.
 
-```python
-args = [input_file]
-if output_file:
-    args.append(output_file)
-record = await submit_job(tool="<exe>", build_args=args)
-```
+Per-exe documented contract (all need `-product pcb_librarian_expert`, lowercase):
 
-| Tool | Translation | Final command |
+| Tool | Translation | Documented command |
 |---|---|---|
-| `run_con2xml(input_file, output_file=None)` | Concept-HDL netlist → XML | `con2xml.exe <input_file> [<output_file>]` |
-| `run_cap2xml(input_file, output_file=None)` | OrCAD Capture `.opj` → XML | `cap2xml.exe <input_file> [<output_file>]` |
-| `run_dml2con(input_file, output_file=None)` | DML (SI model library) → Concept-HDL | `dml2con.exe <input_file> [<output_file>]` |
-| `run_apd2con(input_file, output_file=None)` | Allegro Package Designer → Concept-HDL | `apd2con.exe <input_file> [<output_file>]` |
+| `run_con2xml(cds_lib, lib, cell, package, xmldir, overwrite=False, product=None)` | DE-HDL (Concept) part → XML | `con2xml.exe -cdslib <cds.lib> -lib <lib> -cell <cell> -package <pkg> -xmldir <dir> [-overwrite] -product pcb_librarian_expert` |
+| `run_cap2xml(olbpath, xmldir, part=None, overwrite=False, product=None)` | Capture symbol library (.olb) → XML | `cap2xml.exe -olbpath <.olb> [-part <name>] -xmldir <dir> [-overwrite] -product pcb_librarian_expert` |
+| `run_dml2con(proj, cds_lib, lib, dmlfile, device, cell=None, overwrite=False, product=None)` | DML model (.dml) → DE-HDL part | `dml2con.exe -proj <.cpm> -cdslib <cds.lib> -lib <lib> [-cell <cell>] -dmlfile <.dml> -device <dev> [-overwrite] -product pcb_librarian_expert` |
+| `run_apd2con(proj, cds_lib, apddir, lib, cell=None, overwrite=False, product=None)` | Allegro APD component → DE-HDL part | `apd2con.exe -proj <.cpm> -cdslib <cds.lib> -apddir <apd dir> -lib <lib> [-cell <cell>] [-overwrite] -product pcb_librarian_expert` |
 
-### 2.1 The failure (verbatim root cause — `tool_status.py["con2xml"]`)
+### 2.1 How they run
 
-> "RE-TESTED 2026-10-11 — confirmed GENUINELY ABSENT on this build (truly blocked, not a mislabel). Hard evidence beyond the earlier 'No Product License selected' message: the four translator exes (`con2xml.exe`/`cap2xml.exe`/`dml2con.exe`/`apd2con.exe`) are **~46KB empty PE *stubs*** — they produce **ZERO output on ANY invocation** including `-help`, `-v`, no-args, `CDS_PRODUCT=SPB`, and a real sample input (e.g. the shipped `top.con`); each process dies before printing anything, and the exit code is lost (reads as null). By contrast `extracta.exe -help` returns 88 lines of real docs. No CDS product is configured (`CDS_LIC_ONLY=1`, `CDS_LIC_FILE=5280@localhost`, `cdsinfo.exe` finds no tag — no product selected that includes Translators). The Translators **DATA** is shipped … but the **tools are not licensed in this build**. **NOT a FlexNet/license issue and NOT a CLI mis-use — the feature pack is simply not in this install; no env/product re-selection unblocks it.**"
+**Working path (GUI):** these are GUI+CLI hybrids. Launch the .exe (or
+`launch_translator_gui("<tool>")`) and drive the product-chooser + "Translate" dialog
+(DSN/OLB + Design file + "Create Simulation Profile"), then click Translate. This is how
+the user runs them successfully on this install and produces output.
+
+**Headless CLI (best-effort fallback only):** when driven bare from the command line with
+the documented switches, the tools print two messages in order — (1) product-selection
+gate: `No Product License selected… Translation cancelled` (no product selected); then,
+with `-product pcb_librarian_expert`, (2) license-checkout gate: `Error in checking out
+license pcb_librarian_expert / Unable to check out license … Translation had errors`.
+This is a property of the headless invocation path on this build — **not** an indication
+the tools are broken, missing, or license-blocked in the way `spdsim`/`t2b` etc. are.
+Do not use the CLI result to judge the tools; use the GUI and verify the produced
+artifact.
 
 Per-exe specifics:
-- `cap2xml` — `No Product License selected… Translation cancelled.`, exit 0, against the real `Fault-Detector.opj`.
-- `dml2con` — `No Product License selected`, exit 2, against the real `hspice_bbox_template.dml` (DML has no other reader on this machine).
-- `apd2con` — `No Product License selected`, exit 2; **doubly blocked** — no `.apd` sample exists anywhere in the install.
+- `cap2xml` — verified live against the real shipped OLB
+  `share/orcad/examples/PSpice/TI/ADC3444_PSPICE_TRANS/ADC3444.OLB`; reaches the
+  `pcb_librarian_expert` checkout with the documented switches.
+- `dml2con` — needs a real `.cpm` project library + `cds.lib` plus the `.dml` device name;
+  a real `.dml` sample ships at `share/pcb/signal/templates/hspice_bbox_template.dml`.
+- `apd2con` — needs an APD component directory as input; no `.apd` sample ships in this
+  install, so a sample APD design must be obtained to exercise it end-to-end.
 
-**Working alternative for netlist→XML on this build:** `run_allegro_extracta` (`extracta.exe`, confirmed live with its XML export flags).
-
-**Note:** each exe's exact flag convention is a best-effort transcription — the capability gate fires *before* `-help` prints, so flag syntax was never independently confirmed.
+**Working alternative for netlist→XML when no seat is available:** `run_allegro_extracta`
+(`extracta.exe`, confirmed live with its XML export flags).
 
 ---
 

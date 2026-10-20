@@ -44,7 +44,6 @@ ROOT = Path(__file__).resolve().parents[2]
 os.environ.setdefault("SIGRITY_HOME", r"C:\Cadence\Sigrity2024.0")
 os.environ.setdefault("SIGRITY_LICENSE_MANAGER_HOME", r"C:\Cadence\LicenseManager")
 os.environ.setdefault("SIGRITY_CADENCE_SPB_HOME", r"C:\Cadence\SPB_22.1")
-os.environ.setdefault("SIGRITY_LICENSE_FILE", "5280@localhost")
 os.environ.setdefault("SIGRITY_WORKDIR", r"C:\Users\aicoe\Desktop\Sigrity\runs")
 
 from fastmcp import Client  # noqa: E402

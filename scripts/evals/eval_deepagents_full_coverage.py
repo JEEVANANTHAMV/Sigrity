@@ -109,7 +109,6 @@ CONNECTIONS = {
             "SIGRITY_HOME": SIGRITY,
             "SIGRITY_LICENSE_MANAGER_HOME": "C:/Cadence/LicenseManager",
             "SIGRITY_CADENCE_SPB_HOME": SPB,
-            "SIGRITY_LICENSE_FILE": "5280@localhost",
             "SIGRITY_WORKDIR": f"{REPO_ROOT}/runs",
         },
     }

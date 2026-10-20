@@ -678,3 +678,82 @@ treat those as unverified until re-tested.
 - **`allegro_run_session` appends a bare `quit`** and passes the board as `allegro.exe`'s positional (there is
   no "open" step in the macro); it clears a stale sibling `.lck` before launch. A session closes on run —
   reusing a closed `session_id` errors `No open script session`.
+
+## Task — CONFIRMED LIVE headless: APD batch, Z-Router fanout, and APR (Advanced Package Router)
+
+These three are in `sigrity_mcp.domains.cad.apd_package_tools` and were each proven end-to-end
+headless on a real sample design (see that module's docstring + `core.tool_status` for the exact
+live evidence: journals, save/re-read diffs, and the router status logs). The earlier belief that
+APD/`apd.exe` was GUI-only is WRONG — `apr.exe`/`placeroute.exe` *bare* are GUI-only, but the APD
+batch mechanism + the Advanced Package Router route a real flip-chip design headlessly.
+
+### 1) APD batch — the base for everything (`run_apd_batch_script`)
+
+    run_apd_batch_script(design_file="…\\d.mcm", skill_line="(axlSaveDesign ?mode \"nocheck\")")
+
+- Launches `apd.exe -product <tier> -nograph -s <apd_batch.scr> <design.mcm>`. Loads a package
+  design, runs the SKILL, saves, quits, NO GUI. `apd.exe` is a thin launcher stub for `allegro.exe`.
+- **CRITICAL GOTCHA: you MUST pass `product` (default `Allegro_Adv_Packaging_Plus`).** Without
+  `-product` the process dies in ~50ms at the non-graphic Product Choices stage with zero output and
+  an UNMODIFIED design — the silent early-exit that makes `-product` look optional. Legal tiers are in
+  `C:\Cadence\SPB_22.1\share\pcb\batchhelp\apd.txt` (`Allegro_Adv_Packaging_Plus` = APD+, which gates
+  the APR option; `Allegro_Packaging_Designer_XL_II` = APD L).
+- **Verify**: the job's `apd.jrl` (in the job dir) should show `Design opened` → `skill '(axlSaveDesign
+  …)'` → the saved design name → `quit`; and `report.exe -v sum` (i.e. `run_allegro_report
+  report_code="sum"`) must open the saved `.mcm` and read back real Package Symbols/Pins.
+
+### 2) Z-Router fanout (`run_allegro_zrouter`) — via/pin-escape, NOT full-board autorouting
+
+    run_allegro_zrouter(board_file="…\\b.brd", control_file="…\\connections.txt",
+                        x_grid=10.0, y_grid=10.0, min_space=5.0)
+
+- `control_file` is the Z-Router **Connections Control File** (plain text): lines of
+  `<I/O refdes> <net> <extend_layer> <min#vias> [max#vias]` (net may be `*`). **`extend_layer` is a
+  BARE ETCH subclass name** (e.g. `BOTTOM`, `TOP`) — `ETCH/BOTTOM` is rejected with "Illegal subclass
+  name". A line `U3 * BOTTOM 1 1` routes vias from every still-unrouted pin on U3 to BOTTOM.
+- The tool drives the dialog headlessly with the form's INTERNAL lowercase field names
+  (`filename`/`xgrid`/`ygrid`/`xoffset`/`yoffset`/`minspace` — NOT the display labels, NOT the old
+  `grid` token), fires the Run button as `FORM zrouter execute` (the MENUBUTTON's internal NAME —
+  `FORM zrouter Run` fails in -nograph), then closes it with `FORM zrouter cancel` BEFORE the save
+  (otherwise the modeless dialog makes the next command a "Finish current command first" no-op).
+- **Verify via a before/after via diff, never the return code**: `report_code="sum"` before and after
+  and diff `Number of Vias`; `Zrouter.log` (next to the board) shows `number pins with vias added: N`.
+  A clean `0 vias added` on an already-routed/fabricated board is a legitimate no-op (zrouter only
+  touches pins not already connected, on a routed-capable subclass) — the log tells you which it was.
+
+### 3) APR — Advanced Package Router, the real dense flip-chip auto-router (`run_allegro_apr`)
+
+    run_allegro_apr(design_file="…\\FC.mcm", routing_goal="COMPLETE", via_method="SPIRAL")
+
+- Runs `apd.exe -product Allegro_Adv_Packaging_Plus -option "Advanced Package Router" -nograph -s
+  <apr_run.scr> <design.mcm>`; the script opens the dialog with the menu callback `pkg_router`, fires
+  routing with `FORM icp_pkg_router route`, closes with `FORM icp_pkg_router cancel`, then saves.
+- **This job takes MINUTES** (APR blocks the process for the whole pass sequence — the journal logs
+   "All actions will be blocked until routing is finished"). Do NOT treat it as a quick call.
+- **CRITICAL GOTCHA: `apd.exe` is a 20-ms launcher stub.** It exits immediately after spawning the
+   real `allegro.exe` child (which does the actual routing). `wait_for_job`/`get_job_status` on the
+   `apd` job will report `state:"succeeded"` rc0 almost immediately while `allegro` is still routing.
+   The reliable completion signal is the APR's own `<design>_<stamp>_status.log` (written by the
+   router at the end of routing, before the save): poll for it to appear with a non-zero
+   `Total Pass:` value. The save confirmation dialog can add several more minutes before the
+   routed `.mcm` is written to disk.
+- Enum args use short token names that the tool maps to the form's POPUP display names internally
+   (the `FORM` command requires the display name, not the token code): `routing_goal` ∈ {COMPLETE,
+   ESTIMATE, FANOUT, PASSES}; `routing_priority` ∈ {COMPLETION, FLOW, MULTI_LAYER}; `detour_type` ∈
+   {RATIO, LENGTH}; `via_method` ∈ {SPIRAL, STAGGER, STAIRCASE}; `net_filter` ∈ {ALL, SIGNALS,
+   SELECTED, NONSELECTED}. The tool converts e.g. `routing_goal="COMPLETE"` to
+   `FORM icp_pkg_router routing_goal 100% Completion` (the display name from `icp_pkg_router.form`).
+   Passing a raw display name directly also works (the mapping falls through if the token isn't in
+   the mapping table).
+- **Verify**: `<design>_<timestamp>_status.log` + `<design>_<timestamp>_pass_status.log` land NEXT TO
+  the design file (use `list_files`/`list_job_files` or look beside the input). The status log's
+  `Completion:`/`Total Vias:`/`Total Connected Connections:` are the real result. Then `report_code=
+  "sum"` on the saved design: the via count should match the APR total (e.g. 1718 HDI vias persisted).
+
+### Where these three land (vs the usual job dir)
+- Z-Router: `Zrouter.log` + the modified `.brd` → **beside the board file** (you pass the board path;
+  the tool copies the design lock but writes in place unless you pass `output_file`).
+- APR: the two `*_status.log` files + the routed `.mcm` → **beside the design file** (unless
+  `output_file` is given).
+- APD batch: `apd.jrl` → job dir; the saved design → `output_file` or in place.
+Use `list_job_files` for the job-dir ones; look beside the input for the log artifacts.
