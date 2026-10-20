@@ -315,6 +315,16 @@ async def generate_multilayer_stackup(session_id: str, layers: list[dict[str, An
     correspond to any SKILL call made against the board. Order your `layers` list so the
     intended reference plane is physically adjacent to its signal layer; that adjacency alone
     is what Allegro's calculator uses.
+
+    This adjacency IS independently, exactly-controllable via the one SKILL primitive this
+    tool uses, and is verified LIVE against a real board (2026-10-18): two fresh copies
+    authored with identical stackups differing ONLY in which named GND plane brackets the
+    90Ω differential signal layer (CONTROL `L_GND_A`/`L_SIG_DIFF`/`L_GND_B` vs SWAPPED
+    `L_GND_B`/`L_SIG_DIFF`/`L_GND_A`) landed exactly that way on disk per the report.exe
+    x-section read-back — so the reference plane the calculator reads for the 50/90/100Ω
+    targets is the plane WE placed adjacent. Script:
+    `scripts/smoke/smoke_ref_plane_adjacency.py`; deterministic regression test:
+    `tests/cad/test_cad_rigid_flex_stackup_tools.py::test_reference_plane_assigned_only_via_adjacency_not_a_skill_field`.
 Call load_skill('sigrity-cad') for the full verified playbook, pitfalls, and a live example."""
     if not layers:
         raise ValueError("layers must be a non-empty list, in top-to-bottom physical order.")
