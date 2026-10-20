@@ -42,6 +42,32 @@ native `specctra_in` command via script replay instead of the crashing standalon
 sidestepping the bug entirely. The confirmed *export+route* half of this bridge remains
 reliable either way — a routed `.ses`/`.rte` result plus `final.sts` connection stats is
 directly useful on its own.
+
+DOES A CONSTRAINT-MANAGER PHYSICAL CONSTRAINT MAKE SPECCTRA ROUTE DIFFERENTLY? Tested
+live and directly answered (2026-10-20), NOT speculated: set `allegro_set_physical_
+constraint("width_min", 15.0, cset="", layer="TOP")`, independently re-confirmed it
+landed via a fresh-session `axlCNSGetPhysical("", "TOP", 'width_min)` readback (returned
+`15.0` exactly — Constraint Manager itself is 100% correct), then ran
+`run_spif_export_to_specctra` on the SAME saved board and inspected the generated
+`<board>_rules.do`: it still reads `rule PCB (width 5)`, completely unaffected by the
+width_min=15 change. CONCLUSION: `width_min` is a DRC LOWER-BOUND CHECK (flags a
+violation if a trace is narrower than the value), not a "target/default route width"
+setting — these are two unrelated mechanisms in this product, and SPECCTRA's exported
+rule for what width to DRAW WITH does not derive from it. Practical implication for
+impedance-critical nets (the BRS-style "hit 50/90/100 Ohm" scenarios): do not expect
+setting an Allegro CM physical/electrical constraint to make SPECCTRA automatically
+route at a specific calculated width — it won't. The two real, confirmed-live
+alternatives are (1) hand-edit the exported `<board>_rules.do` directly before invoking
+`run_specctra_autoroute` (it is a plain text SPECCTRA rule script — `rule PCB (width
+<N>)` or a per-net-class rule — SPECCTRA's own router is well known to strictly obey its
+own native `.do` rules; only the *automatic* Allegro-CM-to-SPECCTRA-rule translation was
+tested and shown absent, not SPECCTRA's own rule-following), or (2) bypass SPECCTRA for
+that specific net and route it directly with `allegro_create_trace`'s explicit `width`
+argument (already confirmed live elsewhere in this suite to draw exactly the width
+given). Whether `Impedance`/`Diff_Pair_Impedance` ecset values (as opposed to the
+generic `width_min` physical check) propagate any differently was NOT separately tested
+— this finding is specific to `width_min`, not a blanket claim about every constraint
+type.
 """
 
 from __future__ import annotations

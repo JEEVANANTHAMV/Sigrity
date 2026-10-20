@@ -35,9 +35,15 @@ class SigritySettings(BaseSettings):
     sibling Cadence product line from the Sigrity Suite, used for CAD creation (schematic
     capture, PCB layout). Same tools/bin layout convention as Sigrity's `home`."""
 
-    license_file: str = "5280@localhost"
-    """Default FlexNet license server spec, as understood by `lmutil lmstat -c`. Matches
-    this machine's CDS_LIC_FILE env var by default; override if your license server differs."""
+    license_file: str | None = None
+    """Optional FlexNet license-server spec for `lmutil` diagnostics (e.g.
+    ``5280@host``), passed to `lmstat -c`. This is a PREMIUM, no-license-required
+    install: no tool needs a license server to run, so there is NO default here. The
+    FlexNet client under `license_manager_home` is only a diagnostic aid (``lmutil
+    lmstat``/``lmhostid``); leave unset unless you point diagnostics at a specific
+    server. Do not confuse this with Cadence's product-selection gate — the translators'
+    "No Product License selected" is a product-tier selection, not a FlexNet server
+    address. See `domains.cad.interchange_tools`."""
 
     workdir: Path = Path("runs")
     """Directory (relative to CWD unless absolute) where per-job scratch folders are created."""
