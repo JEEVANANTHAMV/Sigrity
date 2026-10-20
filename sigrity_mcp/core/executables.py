@@ -25,6 +25,12 @@ LICENSE_EXECUTABLES: dict[str, str] = {
 CAD_EXECUTABLES: dict[str, str] = {
     "capture": "Capture.exe",
     "allegro": "allegro.exe",
+    # apd.exe is a thin launcher stub (307KB) for allegro.exe that starts Allegro Package
+    # Designer (APD) in the APD product tier. CONFIRMED LIVE as a headless batch runner when
+    # given `-product <APD tier> -nograph -s <script.scr> <design.mcm>` (see
+    # apd_package_tools.py). Without `-product` it dies in ~50ms at the non-graphic Product
+    # Choices stage with an unmodified design — always pass the product tier.
+    "apd": "apd.exe",
     # allegro_batch.exe (the "central batch utility" multiplexer) is confirmed to have at
     # least one broken sub-program dispatch (dbdoctor: "Cannot find program 'dbdoctor'")
     # even though its own -help/<program> -help output is fine — so tools call each
@@ -59,8 +65,14 @@ CAD_EXECUTABLES: dict[str, str] = {
     # --- Design data extraction (confirmed live CLI, see allegro_extraction_tools.py) ---
     "allegro_designextractor": "designextractor.exe",
     "allegro_extracta": "extracta.exe",
-    # --- Interchange translators (real CLI, blocked on this build by a SPB Translators
-    # capability gate, NOT a license problem — see interchange_tools.py and core.tool_status) ---
+    # --- Interchange translators (GUI+CLI hybrids — WORK on this install via the GUI
+    # product-chooser / "Translate" dialog, user-confirmed 2026-10-18). The supported
+    # automation path is launch_translator_gui("<tool>") then driving the dialog. The
+    # per-tool doc-verified switch contracts (doc\pdv\console_commands.html, all need
+    # `-product pcb_librarian_expert`) live in interchange_tools.py as a best-effort
+    # headless fallback; on THIS build the bare CLI stops at the pcb_librarian_expert
+    # checkout — a property of the headless path, NOT a broken/missing tool. See the
+    # tool_status notes. ---
     "con2xml": "con2xml.exe",
     "cap2xml": "cap2xml.exe",
     "dml2con": "dml2con.exe",

@@ -15,9 +15,27 @@ function reference, `allegro_batch -help`, live probes of `apr.exe`/`placeroute.
 found no standalone or SKILL-scriptable batch interface for interactive autorouting
 anywhere on this installation — `apr.exe`/`placeroute.exe` both launch a GUI window with
 no CLI usage text. What IS confirmed batch-scriptable on the routing side is narrower:
-`ncroute.exe` (NC drill-route file generation, not signal routing) and `zrouter.exe`
-(via/pin-escape fanout routing driven by a Connections Control File, not general trace
-routing).
+`ncroute.exe` (NC drill-route file generation, not signal routing) and Z-Router
+(via/pin-escape fanout routing, now in `apd_package_tools.py`, not this module).
+
+IMPORTANT (UPDATED 2026-10-18 — SUPERSEDES the "no batch autorouting" claim above): that
+conclusion was correct for `apr.exe`/`placeroute.exe` *specifically* (bare `apr.exe` opens
+a GUI with no CLI args), but it was wrong as a claim about Allegro/Allegro-APD *generally*.
+The real, CONFIRMED-LIVE headless autorouting paths now live in sibling modules:
+- `apd_package_tools.py` — **APR (Advanced Package Router)**, the dense flip-chip package
+  auto-router, runs fully headless via `apd -product <APD+> -option "Advanced Package
+  Router" -nograph -s` + `pkg_router`/FORM replay (91.4% completion / 1718 real vias on a
+  real tutorial design, confirmed live). Z-Router fanout is ALSO in there, confirmed live
+  headless (real new vias added + independently re-read).
+- `spif_specctra_tools.py` — general board-level SPECCTRA autorouting via the SPIF bridge
+  (`spif_batch` + `specctra -nog -do`), confirmed live at 100% / 0-conflict.
+So the routing side IS automatable headlessly — just not through `apr.exe`/`placeroute.exe`
+directly. See `apd_package_tools.py` and `spif_specctra_tools.py` for the full evidence.
+
+NOTE: the `run_allegro_zrouter` tool that used to live in this module has been MOVED to
+`apd_package_tools.py` (re-implemented on the confirmed `-nograph` batch launcher with the
+correct zrouter form field names + `FORM zrouter cancel` before the save) and re-exported
+from there for import compatibility.
 
 `ncroute.exe`'s flags (`-q`/`-v`/`-o`/`-n`) were confirmed live (see its own tool
 docstring below).
@@ -113,41 +131,10 @@ Call load_skill('sigrity-cad') for the full verified playbook, pitfalls, and a l
     return {"job_id": record.job_id, "state": record.state, "job_dir": record.job_dir, "command": record.command}
 
 
-@mcp.tool
-async def run_allegro_zrouter(
-    board_file: str,
-    control_file: str,
-    output_file: Optional[str] = None,
-    grid_spacing: Optional[float] = None,
-) -> dict:
-    """Run Allegro's Z-Router for via/pin-escape fanout routing via automated Allegro script-form replay, as a background job.
-Call load_skill('sigrity-cad') for the full verified playbook, pitfalls, and a live example."""
-    clear_stale_design_lock(board_file)
-    session = tcl_sessions.create("allegro")
-    clean_ctrl = str(control_file).replace("\\", "/")
-
-    tcl_sessions.add_line(session.session_id, "setwindow pcb")
-    tcl_sessions.add_line(session.session_id, "zrouter")
-    tcl_sessions.add_line(session.session_id, "setwindow form.zrouter")
-    tcl_sessions.add_line(session.session_id, f'FORM zrouter filename "{clean_ctrl}"')
-    if grid_spacing is not None:
-        tcl_sessions.add_line(session.session_id, f"FORM zrouter grid {grid_spacing}")
-    tcl_sessions.add_line(session.session_id, "FORM zrouter execute")
-    tcl_sessions.add_line(session.session_id, "FORM zrouter done")
-    tcl_sessions.add_line(session.session_id, "setwindow pcb")
-
-    if output_file:
-        clean_out = str(output_file).replace("\\", "/")
-        tcl_sessions.add_line(session.session_id, f'skill (axlSaveDesign ?design {skill_str(clean_out)} ?mode {skill_str("nocheck")})')
-    else:
-        tcl_sessions.add_line(session.session_id, f'skill (axlSaveDesign ?mode {skill_str("nocheck")})')
-    tcl_sessions.add_line(session.session_id, "quit")
-
-    record = await run_session(
-        session.session_id,
-        tool="allegro",
-        tcl_arg_flag="-s",
-        extra_args=[board_file],
-        script_filename="zrouter_run.scr",
-    )
-    return {"job_id": record.job_id, "state": record.state, "job_dir": record.job_dir, "command": record.command}
+# run_allegro_zrouter MOVED to sigrity_mcp.domains.cad.apd_package_tools (re-implemented
+# on the confirmed `allegro -s <scr> -nograph <board>` launcher with the correct zrouter
+# form field names — filename/xgrid/ygrid/xoffset/yoffset/minspace — and `FORM zrouter
+# cancel` before the save; CONFIRMED LIVE headless with real new vias added). Re-exported
+# here so existing `from ...allegro_placement_tools import run_allegro_zrouter` calls
+# (incl. tests) keep working unchanged.
+from sigrity_mcp.domains.cad.apd_package_tools import run_allegro_zrouter  # noqa: E402,F401

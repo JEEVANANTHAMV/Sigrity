@@ -39,8 +39,19 @@ async def test_run_allegro_ncroute_with_flags(fake_exe):
 
 
 @pytest.mark.asyncio
-async def test_run_allegro_zrouter_executes_allegro_script(fake_exe):
-    result = await run_allegro_zrouter("board.brd", "control.txt", output_file="out.brd", grid_spacing=25.0)
-    assert result["command"][1] == "-s"
-    assert result["command"][2].endswith("zrouter_run.scr")
-    assert result["command"][3] == "board.brd"
+async def test_run_allegro_zrouter_uses_nograph_batch_launcher(fake_exe):
+    result = await run_allegro_zrouter(
+        "board.brd",
+        "control.txt",
+        output_file="out.brd",
+        x_grid=10.0,
+        y_grid=10.0,
+        min_space=5.0,
+    )
+    # The command must be `allegro -nograph -s <script> <board>` — the confirmed-live
+    # headless batch mechanism (not the old interactive-GUI session). build_args (-nograph)
+    # come before the script flag, so the argv is [exe, -nograph, -s, script, board].
+    assert result["command"][-1] == "board.brd"
+    assert result["command"][-2].endswith("zrouter_run.scr")
+    assert result["command"][-3] == "-s"
+    assert "-nograph" in result["command"]
