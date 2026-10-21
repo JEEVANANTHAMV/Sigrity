@@ -258,6 +258,41 @@ SELECTOR_DIALOG_PATTERNS: dict[str, dict[str, object]] = {
         "note": "'waiting on a resource' / 'checking ...' / 'contacting ...' probe. "
         "Confirms local continuation so the tool does not hang on a network resource.",
     },
+    # "Choose License Suites" (PowerSI/PowerDC and other Sigrity analysis tools, even on
+    # a no-seat-limit/PREMIUM install): a multi-checkbox feature-selection modal -- NOT a
+    # single confirm button -- so the plain confirm-word ladder in the base DismissWatcher
+    # can never advance it: the process idles/exits with an empty log and silently writes
+    # no simulation output at all (e.g. `sigrity::begin simulation` logs "the layout is
+    # empty. First load an SPD layout file" because the tool never got as far as opening
+    # the design without a chosen feature suite). CONFIRMED LIVE 2026-10-21 as the actual
+    # root cause behind the long-standing "PowerSI batch mode produces no S-params"
+    # failure -- every `-b -tcl` run silently exited in ~3s rc=0, no window, no dialog ever
+    # caught by the screen watcher, no side `.log`, for every macro tried (5/5 reproducible,
+    # see sigrity_mcp/domains/si/powersi_tools.py's module docstring for the full evidence
+    # trail and per-probe job dirs). Answer: select the relevant feature suite for the tool
+    # being launched (PowerSI 2D for the S-parameter/RLGC extraction paths this suite
+    # targets; "Choose all" is the dialog's own fallback "select every available suite"
+    # button and is the safe universal answer on this no-license-restriction install,
+    # matching the 'choose the default/continue answer' convention used for every other
+    # selector dialog above) plus tick "Save the chosen suites and do not prompt again"
+    # so subsequent launches skip the prompt entirely.
+    "license": {
+        # Multi-step (see core.gui_tool_runner._auto_answer_selector's "answer_steps"
+        # contract): click "Choose all" (selects every available suite -- this install is
+        # PREMIUM/no-license-restriction, so choosing all licensed suites is the correct,
+        # universal answer, not an over-broad one) AND THEN separately click the dialog's
+        # own final-dismiss "Close" button. A single-click keyword ladder alone (the old
+        # default behavior) could only ever click the FIRST matched word and stop,
+        # leaving the dialog open after just selecting suites -- `answer_steps` exists
+        # precisely to drive both clicks in sequence.
+        "answer_steps": ("choose all", "close"),
+        "answer_keywords": ("choose all", "powersi 2d", "close"),
+        "note": "one-time (persists if 'Save the chosen suites and do not prompt again' is "
+        "also ticked): Sigrity analysis-tool feature-license-suite chooser. Auto-answers "
+        "'Choose all' then 'Close' (two distinct controls, driven in order via "
+        "answer_steps) so the tool has a valid feature checkout to actually run a "
+        "simulation with, instead of silently exiting with no output.",
+    },
 }
 """Registry of 'make-a-selection' modals that block GUI-tool launches, plus how the
 runner auto-answers each (default/local/localhost/continue). See module docstring and

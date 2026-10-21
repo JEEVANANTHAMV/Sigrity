@@ -29,23 +29,39 @@ with the result independently re-read by a separate code path (`report.exe -v su
    requires the APD+ tier (`Allegro_Adv_Packaging_Plus`).
 
 2. Z-Router (`run_allegro_zrouter`, re-wired to this module's same -nograph launcher):
-   allegro.exe -s <script.scr> -nograph <board.brd>
-   Ran the documented `zrouter` dialog via FORM replay headlessly against a real sample
-   .brd (doc/cmadvcnstut/examples/start.brd) with a Connections Control File. The board
-   gained 2 REAL new vias (a before/after `report.exe -v sum` via-count diff of 0 -> 2;
-   "number pins with vias added: 2" in Zrouter.log), a genuine Zrouter.log was written,
-   and the saved board re-read as valid (186 drilled holes, 0 DRC errors, 100% connection
-   completeness). The exact form field names (from share/pcb/text/forms/zrouter.form) and
-   the two non-obvious requirements are the load-bearing detail:
-     * `FORM zrouter <field> <value>` uses the form's INTERNAL field NAMES (lowercase):
-       filename / xgrid / ygrid / xoffset / yoffset / minspace — NOT the display text
-       ("X-grid spacing:") and NOT the older `grid` token.
-     * The RUN button is the MENUBUTTON field `execute` and the CLOSE button is the
-       MENUBUTTON field `cancel` (their display labels are "Run"/"Close"). In -nograph
-       mode `FORM zrouter Run` fails with "Form field label not found"; `FORM zrouter
-       execute` runs the router. A bare `setwindow pcb` after execute is NOT enough — the
-       modeless dialog then blocks the next command ("Finish current command first"), so
-       `FORM zrouter cancel` must be issued to close the dialog before the save.
+    allegro.exe -s <script.scr> -nograph <board.brd>
+    Ran the documented `zrouter` dialog via FORM replay headlessly against a real sample
+    .brd with a Connections Control File. The board gained REAL new vias (before/after
+    `report.exe -v sum` via-count diff; "number pins with vias added: N" in zrouter.log),
+    a genuine `zrouter.log` (lowercase — landed in the BOARD'S directory, not the job_dir)
+    was written, and the saved board re-read as valid. The exact form field names (from
+    share/pcb/text/forms/zrouter.form) and the THREE non-obvious requirements are the
+    load-bearing detail:
+      * `FORM zrouter <field> <value>` uses the form's INTERNAL field NAMES (lowercase):
+        filename / xgrid / ygrid / xoffset / yoffset / minspace — NOT the display text
+        ("X-grid spacing:") and NOT the older `grid` token.
+      * The RUN button is the MENUBUTTON field `execute` and the CLOSE button is the
+        MENUBUTTON field `cancel` (their display labels are "Run"/"Close"). In -nograph
+        mode `FORM zrouter Run` fails with "Form field label not found"; `FORM zrouter
+        execute` runs the router. A bare `setwindow pcb` after execute is NOT enough — the
+        modeless dialog then blocks the next command ("Finish current command first"), so
+        `FORM zrouter cancel` must be issued to close the dialog before the save.
+      * **GRID/offset/minspace MUST be explicitly set before `execute` fires.** This is the
+        biggest trap and a confirmed live root cause: if the REALFILLIN fields (xgrid,
+        ygrid, xoffset, yoffset, minspace) are left at their empty/uninitialized form
+        default when `FORM zrouter execute` is fired, the Z-Router's execute callback
+        validates the form, finds the grid/spacing unset (the form even ships `MESSAGE
+        nogrid "Grid must be greater than 0."`), and SILENTLY returns WITHOUT routing: it
+        writes no `zrouter.log`, adds 0 vias, and emits no error to run.log or the
+        journal. The journal logs `FORM zrouter execute`, `FORM zrouter cancel`, and the
+        save, and the job still reports state=succeeded with rc=0 — a "successful" run
+        that did nothing (0% connection completion, 0 vias). Reproduced live: a minimal
+        `run_allegro_zrouter(board, control)` (no grid args) added 0 vias on the demo
+        pre_fanout.brd BGA, while the identical call WITH xgrid/ygrid/minspace set added
+        15. So `run_allegro_zrouter` ALWAYS emits all five REALFILLIN FORM lines (defaults
+        10/10/0/0 and min_space 3.0, which route the 50 mil demo BGA to 15/15 interior
+        pins) and then parses the real `zrouter.log` so a silent no-op is reported as an
+        explicit `zrouter_result.silent_no_op` / `note` instead of a bare 'succeeded'.
 
 3. APR (`run_allegro_apr`):
     apd.exe -product Allegro_Adv_Packaging_Plus -option "Advanced Package Router" -nograph \
@@ -95,24 +111,197 @@ to fire this way in -nograph mode, which is why both tools are `confirmed_live` 
 
 VERIFICATION (do not trust return code 0 alone)
 -----------------------------------------------
-Each tool returns the job record; `Zrouter.log`, the APR `<design>_<stamp>_status.log`
-files, `apd.jrl`/`allegro.jrl`, and an independent `report.exe -w` re-read of the saved
-design are the real success signals (see tool_status.TOOL_STATUS_NOTES for the live
-evidence trail and exact counts).
+Each tool returns the job record; `zrouter.log` (lowercase — the Z-Router's own log,
+which Allegro writes into the DESIGN's directory / beside the board, NOT the job_dir and
+NOT with uppercase `Zrouter.log`), the APR `<design>_<stamp>_status.log` files,
+`apd.jrl`/`allegro.jrl`, and an independent `report.exe -w` re-read of the saved design
+are the real success signals (see tool_status.TOOL_STATUS_NOTES for the live evidence
+trail and exact counts). `run_allegro_zrouter` returns these machine-parsed as
+`zrouter_result` (vias_added / errors / silence_no_op) by default.
 """
 
 from __future__ import annotations
 
+import re
+from pathlib import Path
 from typing import Optional
 
+from sigrity_mcp.core import jobs as _jobs
+from sigrity_mcp.core.config import settings
 from sigrity_mcp.core.skillscript import skill_str
 from sigrity_mcp.core.tclsession import clear_stale_design_lock, run_session, tcl_sessions
 from sigrity_mcp.mcp_app import mcp
+
+# Z-Router's `execute` MENUBUTTON validates the form before it launches the I/O Pin
+# Router. If the REALFILLIN fields (xgrid / ygrid / xoffset / yoffset / minspace) are
+# left in their empty/uninitialized state when `execute` fires, the router validates
+# them, finds them unset, and SILENTLY returns without routing: it does not write
+# zrouter.log, does not add a single via, and emits no error anywhere. The journal logs
+# `FORM zrouter execute` and moves straight to `cancel`, so the whole run looks
+# "succeeded" with 0% completion. This is the silent-no-op that made a minimal
+# `run_allegro_zrouter(board, control)` call add 0 vias while the identical call WITH
+# grid/offset/minspace values set added a real 15. The form even ships a `MESSAGE
+# nogrid "Grid must be greater than 0."` — a grid is mandatory. Defaults below are the
+# values confirmed live to route the 50 mil-pitch demo BGA (pre_fanout.brd) to 15/15
+# interior pins at minspace 3.0 (see this module's REPORT.md / bga_fanout evidence).
+_ZROUTER_DEFAULT_XGRID = 10.0
+_ZROUTER_DEFAULT_YGRID = 10.0
+_ZROUTER_DEFAULT_XOFFSET = 0.0
+_ZROUTER_DEFAULT_YOFFSET = 0.0
+# minspace is the min via-to-pad-edge clearance (mil). 3.0 is the board's measured max
+# working clearance for the 50 mil demo BGA; a tighter-pitch BGA needs it lower (the
+# caller passes it explicitly for those). We never emit a minspace line for a None — no,
+# we ALWAYS emit it (see above) so the real default here only matters if a caller
+# explicitly passes 0.0. Kept a documented constant so the default is visible and tested.
+_ZROUTER_DEFAULT_MINSPACE = 3.0
 
 
 def _to_fwd(path: str) -> str:
     """Normalize a path to forward slashes for use inside a Cadence .scr command line."""
     return str(path).replace("\\", "/")
+
+
+def _fmt_grid_value(value: float) -> str:
+    """Render a grid/offset/minspace value for a FORM line with no trailing-0 ambiguity:
+    an integer-valued float prints without a decimal point (the form reads both, but the
+    confirmed-live scripts used `10.0`/`3.0`/`0.0` form, so we keep one decimal for
+    non-integers and a clean `10.0` style)."""
+    return f"{float(value):g}"
+
+
+def _find_zrouter_log(board_file: str) -> Optional[Path]:
+    """Locate the Z-Router's own `zrouter.log` after a run.
+
+    Allegro's Z-Router writes `zrouter.log` (lowercase) into the DESIGN's directory
+    (the directory of the board file it routed) — NOT the job's scratch job_dir that
+    allegro.exe was launched from (confirmed live: every successful run's zrouter.log
+    sat beside the routed board.brd, none ever appeared in the job_dir). On a
+    case-insensitive filesystem a `Zrouter.log` probe matches; on a case-sensitive one
+    it would not, so we probe both spellings and return the first real hit.
+    """
+    board_dir = Path(board_file).expanduser().resolve().parent
+    for name in ("zrouter.log", "Zrouter.log", "ZROUTER.LOG"):
+        candidate = board_dir / name
+        if candidate.is_file() and candidate.stat().st_size > 0:
+            return candidate
+    # Fall back to a non-empty case-insensitive scan of the board dir (covers any other
+    # casing Allegro might choose) but ignore the .scr/journal we wrote ourselves.
+    try:
+        for entry in board_dir.iterdir():
+            stem_match = entry.name.lower() == "zrouter.log"
+            if stem_match and entry.is_file() and entry.stat().st_size > 0:
+                return entry
+    except OSError:
+        pass
+    return None
+
+
+def _parse_zrouter_log(log_path: Optional[Path]) -> dict:
+    """Parse zrouter.log into the machine-readable summary the tool returns.
+
+    Returns a dict with:
+      * `log_found`  — True if a real (non-empty) zrouter.log exists. When False the
+        router did NOT actually execute (the silent-no-op signature); the caller turns
+        that into an explicit, explained result instead of a bare 'succeeded' with 0.
+      * `vias_added` — int, the "number pins with vias added" total (summed across every
+        refdes the file routes), or None when the log is absent/unparseable.
+      * `errors`     — Total number of error messages (int) or None.
+      * `warnings`   — Total number of warning messages (int) or None.
+      * `legal_connections` — "Number of legal I/O Pin Connections found in the file" or None.
+      * `file_errors`       — "Number of errors found in the file" or None.
+      * `per_pin_failures`  — list of the "Unable to connect any vias to pin ..." lines
+        (the per-pin geometry/minspace failures from REPORT.md), capped.
+      * `silent_no_op`      — True when log_found is False AND vias_added would be 0:
+        the router never ran at all (no log written), the dangerous case this whole
+        fix exists to surface.
+    """
+    result = {
+        "log_found": False,
+        "vias_added": None,
+        "errors": None,
+        "warnings": None,
+        "legal_connections": None,
+        "file_errors": None,
+        "per_pin_failures": [],
+        "silent_no_op": False,
+    }
+    if log_path is None:
+        result["silent_no_op"] = True
+        return result
+    try:
+        text = log_path.read_text(errors="replace")
+    except OSError:
+        result["silent_no_op"] = True
+        return result
+    result["log_found"] = bool(text.strip())
+    if not result["log_found"]:
+        result["silent_no_op"] = True
+        return result
+    pins_added = 0
+    saw_any = False
+    for line in text.splitlines():
+        m = re.search(r"number pins with vias added[:\s]*(\d+)", line, re.IGNORECASE)
+        if m:
+            pins_added += int(m.group(1))
+            saw_any = True
+    if saw_any:
+        result["vias_added"] = pins_added
+    m = re.search(r"Total number of error messages[:\s]*(\d+)", text, re.IGNORECASE)
+    if m:
+        result["errors"] = int(m.group(1))
+    m = re.search(r"Total number of warning messages[:\s]*(\d+)", text, re.IGNORECASE)
+    if m:
+        result["warnings"] = int(m.group(1))
+    m = re.search(r"Number of legal I/O Pin Connections found in the file[:\s]*(\d+)", text, re.IGNORECASE)
+    if m:
+        result["legal_connections"] = int(m.group(1))
+    m = re.search(r"Number of errors found in the file[:\s]*(\d+)", text, re.IGNORECASE)
+    if m:
+        result["file_errors"] = int(m.group(1))
+    failures = [
+        re.sub(r"\s+", " ", line.strip())
+        for line in text.splitlines()
+        if "unable to connect any vias to pin" in line.lower()
+    ]
+    result["per_pin_failures"] = failures[:50]
+    return result
+
+
+def _zrouter_result_note(rz: dict) -> str:
+    """Human-readable summary line for the tool result's `note`, keyed off the parsed
+    zrouter.log so the silent-0-via no-op can never masquerade as a clean success."""
+    if not rz["log_found"]:
+        return (
+            "Z-Router DID NOT actually run: no zrouter.log was produced, so 0 vias were "
+            "added and the board is unchanged. This is the silent-no-op signature — most "
+            "commonly the REALFILLIN grid/offset/minspace form fields were empty when "
+            "`FORM zrouter execute` fired. Re-run with explicit x_grid/y_grid/min_space "
+            "(this tool now sets them by default) and confirm zrouter.log appears beside "
+            "the board. Do NOT treat state=succeeded as proof of routing."
+        )
+    if rz.get("vias_added"):
+        return (
+            f"Z-Router ran and added vias to {rz['vias_added']} pin(s); "
+            f"{rz.get('errors', 0)} error(s), {rz.get('warnings', 0)} warning(s) in zrouter.log."
+            + (
+                " Some pins could not be escaped — see per_pin_failures; lower min_space "
+                "(via-to-pad-edge clearance) below the board's pitch/2 knee."
+                if rz.get("errors")
+                else ""
+            )
+        )
+    if rz.get("errors"):
+        return (
+            f"Z-Router ran but added 0 vias with {rz['errors']} error(s): every matching "
+            "pin failed to connect, typically because min_space is above the board's "
+            "actual via-to-pad-edge clearance. See per_pin_failures. Lower min_space."
+        )
+    return (
+        "Z-Router ran cleanly and matched pins, but 0 vias were added — on an "
+        "already-routed/fabricated board that is a legitimate no-op (nothing left to "
+        "route); on an unrouted BGA it means no pin qualified (check the refdes/net in "
+        "the control file and the extend_layer subclass)."
+    )
 
 
 @mcp.tool
@@ -162,15 +351,54 @@ async def run_allegro_zrouter(
     x_offset: Optional[float] = None,
     y_offset: Optional[float] = None,
     min_space: Optional[float] = None,
+    wait_for_completion: bool = True,
+    wait_timeout_seconds: Optional[float] = None,
 ) -> dict:
     """Run Allegro's Z-Router (via/pin-escape fanout routing) headlessly via
-    `allegro -s <script.scr> -nograph <board.brd>` + FORM replay of the zrouter dialog, as a
-    background job. `control_file` is the Z-Router Connections Control File
+    `allegro -s <script.scr> -nograph <board.brd>` + FORM replay of the zrouter dialog.
+    `control_file` is the Z-Router Connections Control File
     (<I/O refdes> <net> <extend_layer> <min#vias> [max#vias]; `extend_layer` is a BARE ETCH
-    subclass name like BOTTOM/TOP, NOT ETCH/BOTTOM). Grid/offset/min-space args are optional.
-    CONFIRMED LIVE headless (real new vias added + independently re-read). This supersedes the
-    older interactive-GUI-session implementation — see this module's docstring. Call
-    load_skill('sigrity-cad') for the verified playbook."""
+    subclass name like BOTTOM/TOP, NOT ETCH/BOTTOM).
+
+    CRITICAL: x_grid, y_grid, x_offset, y_offset and min_space are ALWAYS written to the
+    form (defaulting to 10/10/0/0 and min_space 3.0), because leaving the REALFILLIN
+    fields empty makes `FORM zrouter execute` SILENTLY no-op — the router never runs, no
+    zrouter.log is written, 0 vias are added, and the job still reports 'succeeded'.
+    Passing explicit values (or none — the defaults now fill them) is the difference
+    between a real fanout and a silent 0. CONFIRMED LIVE headless (real new vias added +
+    independently re-read). `wait_for_completion=True` (the default, correct for BGA
+    fanout which finishes in seconds to a couple minutes) blocks until the job finishes
+    and returns a `zrouter_result` parsed from the real `zrouter.log` beside the board:
+    `vias_added`, `errors`, and a `silent_no_op` flag that is True iff the router never
+    actually ran. Set `wait_for_completion=False` to just launch and poll the job_id via
+    the platform job tools instead. Call load_skill('sigrity-cad') for the verified
+    playbook."""
+    # --- Pre-flight validation: fail fast and LOUDLY on inputs that would otherwise
+    # launch a doomed/silent job, instead of letting Allegro open a design and do nothing.
+    board = Path(board_file).expanduser()
+    ctrl = Path(control_file).expanduser()
+    if not board.is_file():
+        return {"error": f"board_file not found: {board_file}", "state": "not_launched"}
+    if board.suffix.lower() not in (".brd", ".mcm"):
+        return {"error": f"board_file does not look like an Allegro design (.brd/.mcm): {board_file}", "state": "not_launched"}
+    if not ctrl.is_file():
+        return {"error": f"control_file not found: {control_file} (the Connections Control File must be a real, existing .txt/.cnv path)", "state": "not_launched"}
+
+    # Resolve the REAL values that will be written to the form, applying the documented
+    # defaults so `execute` is never fired against empty REALFILLIN fields (the silent
+    # no-op). Explicit caller values always win.
+    xg = _ZROUTER_DEFAULT_XGRID if x_grid is None else float(x_grid)
+    yg = _ZROUTER_DEFAULT_YGRID if y_grid is None else float(y_grid)
+    xo = _ZROUTER_DEFAULT_XOFFSET if x_offset is None else float(x_offset)
+    yo = _ZROUTER_DEFAULT_YOFFSET if y_offset is None else float(y_offset)
+    ms = _ZROUTER_DEFAULT_MINSPACE if min_space is None else float(min_space)
+    # The form rejects a grid of 0 (shipped MESSAGE nogrid "Grid must be greater than 0")
+    # and a negative spacing is nonsensical — reject before launching, not after a 5s no-op.
+    if xg <= 0 or yg <= 0:
+        return {"error": f"x_grid and y_grid must both be > 0 (got x_grid={xg}, y_grid={yg}); the Z-Router requires a non-zero via grid", "state": "not_launched"}
+    if ms < 0:
+        return {"error": f"min_space must be >= 0 (got {ms}); it is the min via-to-pad-edge clearance in mils", "state": "not_launched"}
+
     clear_stale_design_lock(board_file)
     session = tcl_sessions.create("allegro")
 
@@ -178,16 +406,14 @@ async def run_allegro_zrouter(
     tcl_sessions.add_line(session.session_id, "zrouter")
     tcl_sessions.add_line(session.session_id, "setwindow form.zrouter")
     tcl_sessions.add_line(session.session_id, f"FORM zrouter filename {_to_fwd(control_file)}")
-    if x_grid is not None:
-        tcl_sessions.add_line(session.session_id, f"FORM zrouter xgrid {x_grid}")
-    if y_grid is not None:
-        tcl_sessions.add_line(session.session_id, f"FORM zrouter ygrid {y_grid}")
-    if x_offset is not None:
-        tcl_sessions.add_line(session.session_id, f"FORM zrouter xoffset {x_offset}")
-    if y_offset is not None:
-        tcl_sessions.add_line(session.session_id, f"FORM zrouter yoffset {y_offset}")
-    if min_space is not None:
-        tcl_sessions.add_line(session.session_id, f"FORM zrouter minspace {min_space}")
+    # ALWAYS set the grid/offset/minspace REALFILLIN fields before firing `execute`.
+    # Omitting any of them is the root cause of the silent-0-via no-op (see the
+    # _ZROUTER_DEFAULT_* constants' comment above and this module's docstring).
+    tcl_sessions.add_line(session.session_id, f"FORM zrouter xgrid {_fmt_grid_value(xg)}")
+    tcl_sessions.add_line(session.session_id, f"FORM zrouter ygrid {_fmt_grid_value(yg)}")
+    tcl_sessions.add_line(session.session_id, f"FORM zrouter xoffset {_fmt_grid_value(xo)}")
+    tcl_sessions.add_line(session.session_id, f"FORM zrouter yoffset {_fmt_grid_value(yo)}")
+    tcl_sessions.add_line(session.session_id, f"FORM zrouter minspace {_fmt_grid_value(ms)}")
     # Fire the RUN button: the MENUBUTTON's internal field name is `execute` (display "Run").
     # `FORM zrouter Run` (the caption) fails in -nograph mode with "Form field label not found".
     tcl_sessions.add_line(session.session_id, "FORM zrouter execute")
@@ -210,7 +436,37 @@ async def run_allegro_zrouter(
         extra_args=[board_file],
         script_filename="zrouter_run.scr",
     )
-    return {"job_id": record.job_id, "state": record.state, "job_dir": record.job_dir, "command": record.command}
+    base = {"job_id": record.job_id, "state": record.state, "job_dir": record.job_dir, "command": record.command}
+    if not wait_for_completion:
+        # Caller opts to launch-and-poll via the platform job tools. Tell them where the
+        # real router log lands so a later poll doesn't mistake its absence for 0 vias.
+        base["note"] = (
+            "Launched without waiting. The Z-Router writes zrouter.log into the BOARD's "
+            f"directory ({Path(board_file).parent}), not the job_dir. Poll "
+            "wait_for_job/get_job_status, then read zrouter.log to confirm vias were added "
+            "(its 'number pins with vias added' line is the real success signal, not rc=0)."
+        )
+        return base
+
+    # Wait for completion (real time-bounded; BGA fanout is fast, not a multi-hour SIM).
+    timeout = float(wait_timeout_seconds) if wait_timeout_seconds is not None else max(
+        float(settings.allegro_session_stall_timeout_seconds), 60.0
+    )
+    try:
+        finished = await _jobs.job_manager.wait(record.job_id, timeout=timeout)
+    except Exception:
+        finished = record
+    base["state"] = finished.state
+    base["returncode"] = finished.returncode
+    # Parse the REAL router log (zrouter.log, in the board's dir) into an honest result.
+    log_path = _find_zrouter_log(board_file)
+    base["zrouter_log"] = str(log_path) if log_path is not None else None
+    rz = _parse_zrouter_log(log_path)
+    base["zrouter_result"] = rz
+    base["note"] = _zrouter_result_note(rz)
+    if finished.state != "succeeded":
+        base["failure_note"] = getattr(finished, "failure_note", "") or ""
+    return base
 
 
 # FORM icp_pkg_router enum fields require the POPUP *display name* (first string in the
