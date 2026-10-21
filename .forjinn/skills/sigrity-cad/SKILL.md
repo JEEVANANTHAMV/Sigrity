@@ -704,8 +704,11 @@ batch mechanism + the Advanced Package Router route a real flip-chip design head
 
 ### 2) Z-Router fanout (`run_allegro_zrouter`) — via/pin-escape, NOT full-board autorouting
 
+    # Minimal call is now SAFE — the tool fills in default grid/offset/minspace itself:
+    run_allegro_zrouter(board_file="…\\b.brd", control_file="…\\connections.txt")
+    # …or pass them explicitly for a tight-pitch BGA (lower min_space below its pitch/2 knee):
     run_allegro_zrouter(board_file="…\\b.brd", control_file="…\\connections.txt",
-                        x_grid=10.0, y_grid=10.0, min_space=5.0)
+                        x_grid=10.0, y_grid=10.0, min_space=2.0)
 
 - `control_file` is the Z-Router **Connections Control File** (plain text): lines of
   `<I/O refdes> <net> <extend_layer> <min#vias> [max#vias]` (net may be `*`). **`extend_layer` is a
@@ -716,10 +719,36 @@ batch mechanism + the Advanced Package Router route a real flip-chip design head
   `grid` token), fires the Run button as `FORM zrouter execute` (the MENUBUTTON's internal NAME —
   `FORM zrouter Run` fails in -nograph), then closes it with `FORM zrouter cancel` BEFORE the save
   (otherwise the modeless dialog makes the next command a "Finish current command first" no-op).
-- **Verify via a before/after via diff, never the return code**: `report_code="sum"` before and after
-  and diff `Number of Vias`; `Zrouter.log` (next to the board) shows `number pins with vias added: N`.
-  A clean `0 vias added` on an already-routed/fabricated board is a legitimate no-op (zrouter only
-  touches pins not already connected, on a routed-capable subclass) — the log tells you which it was.
+- **CRITICAL GOTCHA — the grid/offset/minspace must be set, or `execute` SILENTLY no-ops**
+  (root-caused + fixed 2026-10-20, re-tested live): if the REALFILLIN fields `xgrid`/`ygrid`/
+  `xoffset`/`yoffset`/`minspace` are left at their empty/uninitialized form state when
+  `FORM zrouter execute` fires, the router validates them, finds the grid unset (the form ships
+  `MESSAGE nogrid "Grid must be greater than 0."`), and SILENTLY returns WITHOUT routing — no
+  `zrouter.log` is written, 0 vias are added, no error reaches run.log or the journal, and the job
+  STILL reports `state="succeeded"` rc 0 (a "successful" no-op at 0% completion). This was the exact
+  failure of a minimal `run_allegro_zrouter(board, control)` call on a real BGA. **`run_allegro_zrouter`
+  now ALWAYS emits all five REALFILLIN FORM lines** (defaults xgrid/ygrid=10, xoffset/yoffset=0,
+  min_space=3.0 — confirmed to route the 50 mil demo `pre_fanout.brd` U1 to 15/15 interior pins), so
+  you never have to remember this. It also validates inputs up front (rejects x_grid/y_grid ≤ 0,
+  min_space < 0, and a missing board/control file) with a clear `{"error": …, "state":"not_launched"}`
+  instead of launching a doomed job.
+- **Read the returned `zrouter_result`, never the return code.** With the default
+  `wait_for_completion=True` the tool blocks until the job finishes and returns a machine-parsed
+  `zrouter_result` from the real **`zrouter.log`** (lowercase — Allegro writes it BESIDE THE BOARD,
+  not in the job_dir, and NOT with uppercase `Zrouter.log`): `vias_added`, `errors`, `warnings`,
+  `legal_connections`, `per_pin_failures`, and `silent_no_op`. The human `note` disambiguates the
+  three honest outcomes:
+    * vias added → routed (e.g. "added vias to 15 pin(s)").
+    * `silent_no_op=True` (no `zrouter.log`) → the router did NOT actually run.
+    * log found but `vias_added=0` + `errors>0` → it ran but every pin failed, almost always
+      **min_space above the board's via-to-pad-edge clearance** → lower `min_space` (tighter-pitch
+      BGA like LPDDR4 ~1–2 mil; 50 mil BGA ~3.0), and check `per_pin_failures`.
+    * log found, `vias_added=0`, `errors=0` → a legitimate no-op on an already-routed board (nothing
+      left to route) — NOT a bug.
+  A before/after `report_code="sum"` via diff corroborates: diff `Number of Vias`. Pass
+  `wait_for_completion=False` to just launch and poll the job_id via the platform job tools instead
+  (in that case read `zrouter.log` beside the board after completion — its absence is how you tell a
+  silent no-op from a real 0-via run).
 
 ### 3) APR — Advanced Package Router, the real dense flip-chip auto-router (`run_allegro_apr`)
 
@@ -751,8 +780,10 @@ batch mechanism + the Advanced Package Router route a real flip-chip design head
   "sum"` on the saved design: the via count should match the APR total (e.g. 1718 HDI vias persisted).
 
 ### Where these three land (vs the usual job dir)
-- Z-Router: `Zrouter.log` + the modified `.brd` → **beside the board file** (you pass the board path;
-  the tool copies the design lock but writes in place unless you pass `output_file`).
+- Z-Router: `zrouter.log` (lowercase — NOT `Zrouter.log`) + the modified `.brd` → **beside the board
+  file** (you pass the board path; the tool copies the design lock but writes in place unless you pass
+  `output_file`). The job dir only holds the generated `zrouter_run.scr`, `run.log`, `job.json` — there
+  is no router log there, so a missing `zrouter.log` beside the board is the silent-no-op signature.
 - APR: the two `*_status.log` files + the routed `.mcm` → **beside the design file** (unless
   `output_file` is given).
 - APD batch: `apd.jrl` → job dir; the saved design → `output_file` or in place.
