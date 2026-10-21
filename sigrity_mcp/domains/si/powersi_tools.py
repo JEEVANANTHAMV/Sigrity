@@ -29,6 +29,38 @@ Confirmed real batch invocation (doc/psi_ug/ch5_run_simulation_re_Command_Line_a
 and the `sigrity::` Tcl command vocabulary below is transcribed from doc/psi_ug's Tcl
 chapters and confirmed sample usage, not guessed.
 
+ROOT CAUSE, CONFIRMED (previously mislabeled "pre-existing launcher issue", resolved
+2026-10-21): the "no S-param, no window, silent rc=0 in ~3-5s" failure on every
+historical `PowerSI.exe -b -tcl` launch (5/5 reproducible, see jobs
+runs/powersi-0b32fd1b56, -59cbfee8aa7a1, -fb19b3d25f, -119b8aa7a1, and the original
+-d2bc1e3cc8, plus scripts/smoke/smoke_powersi_port_fix.py for the port-command probes
+themselves) is a "Choose License Suites" modal PowerSI raises at startup that the
+previous auto-dismiss machinery could never advance: it is a MULTI-CHECKBOX
+feature-selection dialog (Clarity 3D / Clarity 3D V8 / Clarity PCB/IC/Advanced IC
+Package Extraction Suite / Clarity 3D Cloud NG / Clarity 3D Premier / Clarity 3D Cloud /
+Clarity 3D V8 Token / Multiphysics GUI Pool, with a "Choose all" button and a "Save the
+chosen suites and do not prompt again" checkbox), not a plain confirm/OK button — so the
+`win32gui_helper.DismissWatcher`'s confirm-word ladder (OK/Next/Continue) had nothing in
+it to click, and the process simply exited with no feature license checked out.
+Consequently `sigrity::begin simulation` (and every downstream command in the macro)
+runs against an empty, never-opened layout — PowerSI's own side-log for this case says
+exactly that: "Failed to run the command because the layout is empty. First load an SPD
+layout file" — which is indistinguishable from, and was previously misdiagnosed as, the
+"component-free stub geometry" port-creation problem this module's other docstrings
+address (an orthogonal, already-correct issue: the emitted Tcl lines were always
+byte-correct per psi_ug.pdf; the tool was never far enough through startup to even
+reach them). Fixed by adding the "license" entry to
+`core.executables.SELECTOR_DIALOG_PATTERNS` (auto-answers "Choose all" — the dialog's
+own select-every-suite button, the correct universal answer on this no-license-
+restriction/PREMIUM install, matching the "default/continue" answer convention already
+used for every other selector dialog there — plus the "Save the chosen suites and do
+not prompt again" persistence checkbox where available), so future PowerSI/PowerDC/
+other-Sigrity-analysis-tool launches through `powersi_run_session` and its siblings get
+this dialog answered before any real Tcl runs. Re-verify with
+`scripts/smoke/smoke_powersi_port_fix.py` (probes A and B should now produce real
+`*S<N>p` files) if this dialog ever starts reappearing (e.g. a new Sigrity patch that
+changes the dialog title or control layout).
+
 Usage pattern: start_powersi_session -> one or more powersi_* "compose" tools (each just
 appends a Tcl line, no process launched) -> powersi_run_session (writes the accumulated
 script and actually launches PowerSI once). Use preview_tcl_session/close_tcl_session
@@ -155,8 +187,24 @@ async def powersi_add_ports_auto(
     signal_ref_impedance: Optional[float] = None,
     power_ref_impedance: Optional[float] = None,
 ) -> dict:
-    """Auto-generate ports for every pin of a component (or every component if ref_des is omitted).
-Call load_skill('sigrity-si') for the full verified playbook, pitfalls, and a live example."""
+    """Auto-generate ports by component, using `sigrity::add port -all`.
+
+    DOC-VERIFIED LIMITATION (psi_ug.pdf "PowerSI Tcl Commands", printed pp. 410-412):
+    this command family is component-centric. `-all` is documented as "Auto Generate
+    Ports by Components" and every documented example is scoped to a real 2-terminal
+    (or multi-pin) component: `sigrity::add port -all -circuit {die} {!}`,
+    `sigrity::add port -circuit {die} -SignalRefZ {2} -PowerRefZ {1} {!}`. It works by
+    pairing each component's own positive/negative pins on enabled nets. A design
+    (or a test geometry) whose nets have NO component at either end -- e.g. a bare
+    2-point trace stub drawn by hand with no part at its tips -- is an input shape none
+    of the `add port` forms are designed for: there is no component/pin to pair, so
+    `add port -all` generates nothing and the later `begin simulation` silently yields
+    no S-parameters (rc 0, empty result, which looks exactly like a "syntax" failure
+    but is not). For component-free nets use `powersi_add_port_manual` (explicit
+    coordinates + reference nodes on a named -circuit scope) instead, or terminate the
+    trace at a real component and use `powersi_add_port_component_pins`.
+
+    Call load_skill('sigrity-si') for the full verified playbook, pitfalls, and a live example."""
     parts = ["sigrity::add port -all"]
     if ref_des:
         parts.append(f"-circuit {tcl_str(ref_des)}")
@@ -169,25 +217,179 @@ Call load_skill('sigrity-si') for the full verified playbook, pitfalls, and a li
     return {"session_id": session_id, "ref_des": ref_des}
 
 
+async def powersi_add_port_component_pins(
+    session_id: str,
+    name: str,
+    ref_des: str,
+    pos_pins: list,
+    neg_pins: list,
+    port_type: int = 0,
+) -> dict:
+    """Create ONE port from a real component's pins: `sigrity::add port -name ... -type
+    {0|1} -circuit {RefDes} -posPins {...} -negPins {...}`.
+
+    DOC-VERIFIED (psi_ug.pdf "PowerSI Tcl Commands", printed p. 413, "Create Port Based
+    on Existing Component Pins") -- the only `add port` form with a complete, concrete,
+    unambiguous worked example:
+        -type {0}  create package port   sigrity::add port -name {PortTest} -type {0} -circuit {cap1} -posPins {0} -negPins {1}
+        -type {1}  create circuit port   sigrity::add port -name {PortTest1} -type {1} -circuit {cap1} -posPins {0} -negPins {1}
+
+    PIN NUMBERING CORRECTION (2026-10-21, CONFIRMED LIVE against the real Fault-Detector
+    sample board, `.spd` of `runs/innosynth_imx8mp/powersi_verify/board.brd`): the doc's
+    own example (`-posPins {0} -negPins {1}`) is misleading for an ordinary 2-pin part.
+    `pos_pins`/`neg_pins` are the component's REAL, 1-based pin NUMBERS (the same
+    numbers printed on the part's own datasheet/footprint), not a 0-based index into
+    the pin list. `posPins {0} -negPins {1}` against a real resistor `R14` fails hard:
+    `"The circuit node {0} is not connected to any package node."` — pin `0` does not
+    exist on a part whose real pins are `1`/`2`. Re-run with `posPins {1} -negPins {2}`
+    completed a REAL, full PowerSI simulation end to end (FEM mesh, 18-point 1-50MHz
+    AFS sweep, `[Number of Ports] 1`) and produced a genuine Touchstone `.s1p` file with
+    real S11 data — independently re-read from disk, not inferred from a clean exit
+    code. This is the first fully-confirmed PowerSI field-solver run in this project.
+    `pos_pins`/`neg_pins` accept pin NAMES too (not just numbers) per the doc's own
+    `-posPins`/`-negPins` grammar — prefer a part's real pin name when one exists and is
+    known, falling back to the real (1-based) pin number otherwise.
+
+    This is the recommended way to port a physical board net: terminate the net at a
+    real 2-pin component (small resistor, pad/via pair, the actual IC under test) and
+    reference that component's real refdes + real pin numbers/names here.
+    Call load_skill('sigrity-si') for the full verified playbook, pitfalls, and a live example."""
+    if not (isinstance(port_type, int) and port_type in (0, 1)):
+        raise ValueError(f"port_type must be 0 (package port) or 1 (circuit port); got {port_type!r}")
+    if not pos_pins or not neg_pins:
+        raise ValueError("pos_pins and neg_pins must both be non-empty")
+    if len(pos_pins) != len(neg_pins):
+        raise ValueError(f"pos_pins ({len(pos_pins)}) and neg_pins ({len(neg_pins)}) must be the same length")
+    parts = [
+        "sigrity::add port",
+        f"-name {tcl_str(name)}",
+        f"-type {{{port_type}}}",
+        f"-circuit {tcl_str(ref_des)}",
+        f"-posPins {{{' '.join(str(p) for p in pos_pins)}}}",
+        f"-negPins {{{' '.join(str(n) for n in neg_pins)}}}",
+        "{!}",
+    ]
+    tcl_sessions.add_line(session_id, " ".join(parts))
+    return {"session_id": session_id, "name": name, "ref_des": ref_des, "port_type": port_type}
+
+
+async def powersi_add_port_manual(
+    session_id: str,
+    ref_des: str,
+    ref_nodes: list,
+    h_coords: list,
+    v_coords: list,
+    row: int = 1,
+    col: int = 1,
+    on_pin: bool = True,
+) -> dict:
+    """Create ONE coordinate-based port: `sigrity::add port -circuit {RefDes} -select
+    {manual} -row {n} -col {n} -RefNode {...} -HCoord {x1,x2} -VCoord {y1,y2} -OnPin {!}`.
+
+    DOC-VERIFIED (psi_ug.pdf "PowerSI Tcl Commands", printed p. 412, "Auto Generate
+    Ports on Pins", select="manual") -- the closest documented mechanism to "port at an
+    arbitrary board location". Still circuit-scoped (requires -circuit {RefDes} to
+    scope it, it is NOT purely net-based). `ref_nodes` are `{node <net>}`-style node
+    name strings (doc example: `-RefNode {Node559::GND Node579::GND}`); `h_coords` and
+    `v_coords` are the matching X/Y coordinate pairs (doc example:
+    `-HCoord {-0.00498,-0.00518} -VCoord {0.060225,0.095985}`). Use this when the
+    component-pin form doesn't fit (e.g. the net has no 2-pin component, but does have
+    a named structure to scope it to, and known coordinates).
+    Call load_skill('sigrity-si') for the full verified playbook, pitfalls, and a live example."""
+    if len(ref_nodes) < 2:
+        raise ValueError(f"-RefNode needs at least 2 node names (positive + negative); got {len(ref_nodes)}")
+    if len(h_coords) != len(ref_nodes) or len(v_coords) != len(ref_nodes):
+        raise ValueError(
+            f"h_coords ({len(h_coords)}), v_coords ({len(v_coords)}) and ref_nodes ({len(ref_nodes)})"
+            " must all be the same length"
+        )
+    parts = [
+        "sigrity::add port",
+        f"-circuit {tcl_str(ref_des)}",
+        "-select {manual}",
+        f"-row {{{row}}}",
+        f"-col {{{col}}}",
+        f"-RefNode {{{' '.join(str(n) for n in ref_nodes)}}}",
+        f"-HCoord {{{','.join(str(x) for x in h_coords)}}}",
+        f"-VCoord {{{','.join(str(y) for y in v_coords)}}}",
+    ]
+    if on_pin:
+        parts.append("-OnPin")
+    parts.append("{!}")
+    tcl_sessions.add_line(session_id, " ".join(parts))
+    return {"session_id": session_id, "ref_des": ref_des, "ref_nodes": list(ref_nodes)}
+
+
+async def powersi_add_port_vrn(
+    session_id: str,
+    ref_des: str,
+) -> dict:
+    """Add all ports of one component by its VRN: `sigrity::add port -circuit {RefDes}
+    -VRN {!}`.
+
+    DOC-VERIFIED (psi_ug.pdf "PowerSI Tcl Commands", printed p. 412, "Add Port by
+    Component"): `sigrity::add port -circuit {MF_1} -VRN {!}`. Use for a component
+    whose port topology is already defined in its VRN (pin net / reference net)
+    definition rather than derived from pin pairing.
+    Call load_skill('sigrity-si') for the full verified playbook, pitfalls, and a live example."""
+    tcl_sessions.add_line(session_id, f"sigrity::add port -circuit {tcl_str(ref_des)} -VRN {{!}}")
+    return {"session_id": session_id, "ref_des": ref_des}
+
+
 async def powersi_add_edge_port(
     session_id: str,
     name: str,
-    positive_node: str,
-    negative_node: str,
-    width: float,
+    positive_node: Optional[str] = None,
+    negative_node: Optional[str] = None,
+    positive_ckt_node: Optional[str] = None,
+    negative_ckt_node: Optional[str] = None,
+    width: float = 0.002,
     reference_impedance: float = 50.0,
 ) -> dict:
-    """Add one explicit edge port between a positive and negative node (e.g. a trace edge to a ground edge).
-Call load_skill('sigrity-si') for the full verified playbook, pitfalls, and a live example."""
-    tcl_sessions.add_line(
-        session_id,
-        (
-            f"sigrity::add EdgePort -positiveNode {tcl_str(positive_node)} "
-            f"-negativeNode {tcl_str(negative_node)} -Width {{{width}}} "
-            f"-RefZ {{{reference_impedance}}} {{!}} ; # port {tcl_str(name)}"
-        ),
-    )
-    return {"session_id": session_id, "name": name}
+    """Add one explicit edge port: `sigrity::add EdgePort -PositiveNode/-PositiveCktNode
+    {-NegativeNode/-NegativeCktNode} -Width {v} -RefZ {v} {!}`.
+
+    DOC-VERIFIED FLAG NAMES + EXAMPLE (psi_ug.pdf "PowerSI Tcl Commands", printed
+    p. 418-419): the documented example is
+        sigrity::add EdgePort -PositiveCktNode {PCN1::PCN2} -NegativeCktNode {NCN1::NCN2} -Width {.002} -RefZ {55} {!}
+    i.e. the real flags are `-PositiveNode|-pn`, `-NegativeNode|-nn` (package nodes) and
+    `-PositiveCktNode|-pn`, `-NegativeCktNode|-nn` (circuit nodes), with node strings in
+    `<RefDes>::<Net>` double-colon notation. The earlier implementation's
+    `-positiveNode`/`-negativeNode` (lower-case) was NOT the documented flag casing;
+    the package-node form `-PositiveNode/-NegativeNode` is accepted but the doc shows
+    NO worked example for a plain package node on a component-free net (only the
+    circuit-node example exists), so a bare-net edge port has no documented node-string
+    grammar -- treat that path as the least certain and prefer a component-scoped port
+    (`powersi_add_port_component_pins` / `powersi_add_port_manual`) when in doubt.
+    At least one of (positive_node, negative_node) must be given together with the
+    matching circuit-node pair or package-node pair; `name` is informational only --
+    PowerSI names edge ports on its own.
+    Call load_skill('sigrity-si') for the full verified playbook, pitfalls, and a live example."""
+    has_pkg = positive_node is not None or negative_node is not None
+    has_ckt = positive_ckt_node is not None or negative_ckt_node is not None
+    if not has_pkg and not has_ckt:
+        raise ValueError("at least one of positive_node/negative_node (package) or positive_ckt_node/negative_ckt_node (circuit) is required")
+    parts = ["sigrity::add EdgePort"]
+    if positive_node is not None:
+        parts.append(f"-PositiveNode {tcl_str(positive_node)}")
+    if positive_ckt_node is not None:
+        parts.append(f"-PositiveCktNode {tcl_str(positive_ckt_node)}")
+    if negative_node is not None:
+        parts.append(f"-NegativeNode {tcl_str(negative_node)}")
+    if negative_ckt_node is not None:
+        parts.append(f"-NegativeCktNode {tcl_str(negative_ckt_node)}")
+    parts.append(f"-Width {{{width}}}")
+    parts.append(f"-RefZ {{{reference_impedance}}}")
+    parts.append("{!}")
+    tcl_sessions.add_line(session_id, " ".join(parts) + f" ; # port {tcl_str(name)}")
+    return {
+        "session_id": session_id,
+        "name": name,
+        "positive_node": positive_node,
+        "negative_node": negative_node,
+        "positive_ckt_node": positive_ckt_node,
+        "negative_ckt_node": negative_ckt_node,
+    }
 
 
 async def powersi_add_excitation(
@@ -278,6 +480,9 @@ _CONFIGURE_OPS = {
     "set_mode": powersi_set_mode,
     "set_frequency_sweep": powersi_set_frequency_sweep,
     "add_ports_auto": powersi_add_ports_auto,
+    "add_port_component_pins": powersi_add_port_component_pins,
+    "add_port_manual": powersi_add_port_manual,
+    "add_port_vrn": powersi_add_port_vrn,
     "add_edge_port": powersi_add_edge_port,
     "add_excitation": powersi_add_excitation,
     "export_network": powersi_export_network,
@@ -291,12 +496,23 @@ async def powersi_configure(session_id: str, operations: list[dict]) -> dict:
     """Apply a list of PowerSI session-configuration operations in one call (replaces calling the 9 individual compose tools one at a time).
 
     Each item in `operations` is `{"op": "<name>", **kwargs}` where `<name>` is one of:
-    `save_document, set_mode, set_frequency_sweep, add_ports_auto, add_edge_port,
+    `save_document, set_mode, set_frequency_sweep, add_ports_auto,
+    add_port_component_pins, add_port_manual, add_port_vrn, add_edge_port,
     add_excitation, export_network, export_rlgc, generate_html_report` and `kwargs` are
     that operation's own parameters (everything except `session_id`, which is threaded
     through automatically) — see each corresponding `powersi_*` function's own docstring
     (still present in this module, just no longer individually exposed as a top-level
-    tool) for its exact kwargs. Operations are applied in list order, since later ones
+    tool) for its exact kwargs. PORT-CHOOSING GUIDANCE (all doc-verified against
+    psi_ug.pdf "PowerSI Tcl Commands", printed pp. 410-413): a real net must carry a
+    port before `begin simulation` produces S-parameters; choose the narrowest
+    component-scoped form that fits the actual geometry — `add_port_component_pins`
+    (net terminates in a real 2-pin component; preferred, has the only complete worked
+    example), `add_port_manual` (net has known coordinates + reference nodes),
+    `add_port_vrn` (component's VRN already defines its pins), or `add_ports_auto`
+    (bulk-generate ports for every component in scope). None of these work on a net
+    with no component at either end (a bare hand-drawn trace stub) — that is a test-
+    geometry problem, not a flag problem; terminate the trace at a real part first.
+    Operations are applied in list order, since later ones
     (e.g. adding ports) typically depend on earlier ones (e.g. the mode being set).
     Raises `ValueError` naming the exact index and op on an unknown `op` or a bad/missing
     kwarg, rather than silently skipping it.

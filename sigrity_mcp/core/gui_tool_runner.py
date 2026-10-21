@@ -138,13 +138,35 @@ def _auto_answer_selector(win: dict, key: str, spec: dict, confirmed: set, error
     waiting modal) BEFORE the generic confirm words, and it targets a selection control
     (a button or the default-list row), not just an OK. If no selection keyword resolves,
     it degrades to `_try_dismiss` so we no longer do worse than before.
+
+    MULTI-STEP SELECTIONS: some real dialogs (e.g. PowerSI/PowerDC's "Choose License
+    Suites") are not a single click — they need a SEQUENCE of distinct controls driven,
+    in order (e.g. click the "Choose all" checkbox button, then a SEPARATE "Close"
+    button to finally dismiss the modal). A bare single-click answer (the original
+    behavior, still what happens when `answer_steps` is absent, exactly as before)
+    clicks the first matching keyword and stops, leaving the rest of the dialog
+    unanswered. `spec["answer_steps"]`, if present, is a list of keywords to click IN
+    ORDER, each an independent `_find_child_by_text`+`BN_CLICKED` attempt, with a short
+    settle delay between clicks (so a control that only becomes clickable/enabled
+    after the prior click's state change has a chance to appear); only if a step finds
+    no matching child is it skipped (not treated as a hard failure — the dialog may
+    legitimately not have that particular control on some build). If `answer_steps`
+    is absent or empty, this function's behavior is byte-identical to the original
+    single-keyword implementation above (full backward compatibility for the existing
+    product/tree/proxy/waiting selector patterns).
     """
+    steps = list(spec.get("answer_steps") or tuple())
     keywords = list(spec.get("answer_keywords", tuple()))
+    to_try = steps if steps else keywords
     if win32gui_helper._WIN32:
+        import time as _time
+
         import win32gui
 
         hwnd = win["hwnd"]
-        for kw in keywords:
+        clicked_any = False
+        clicked_which = []
+        for kw in to_try:
             child = win32gui_helper._find_child_by_text(hwnd, kw)
             if child:
                 try:
@@ -152,11 +174,29 @@ def _auto_answer_selector(win: dict, key: str, spec: dict, confirmed: set, error
                     import win32con
 
                     win32api.PostMessage(child, win32con.WM_COMMAND, win32con.BN_CLICKED, 0)
-                    confirmed.add(hwnd)
-                    return f"selection:auto-answer[{key}] '{kw}'"
+                    clicked_any = True
+                    clicked_which.append(kw)
+                    if not steps:
+                        # Single-keyword mode (original behavior): exactly one click,
+                        # then done -- the "first match wins, stop" contract the other
+                        # four selector patterns (product/tree/proxy/waiting) already
+                        # rely on for plain "pick X, dialog closes" modals.
+                        confirmed.add(hwnd)
+                        return f"selection:auto-answer[{key}] '{kw}'"
+                    _time.sleep(0.25)
+                    # Multi-step mode: settle, then re-check the dialog is still there
+                    # (some dialogs close themselves on an intermediate click, e.g. if
+                    # a "Choose all" also triggers a confirmation) before trying the
+                    # next step's control.
+                    if not win32gui.IsWindow(hwnd):
+                        break
                 except Exception as e:
                     errors.append(f"selector {key} '{kw}': {e}")
-    # No selection keyword resolved — degrade to the generic confirm dismiss ladder.
+        if clicked_any and steps:
+            confirmed.add(hwnd)
+            return f"selection:auto-answer[{key}] " + " then ".join(repr(k) for k in clicked_which)
+    # No selection keyword resolved (or all steps found no matching child) — degrade to
+    # the generic confirm dismiss ladder.
     fallback = _try_dismiss(win, confirmed, errors)
     if fallback is None:
         return None
