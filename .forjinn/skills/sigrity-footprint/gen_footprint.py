@@ -99,7 +99,7 @@ def emit_author_il(spec, outdir):
          '(axlMsgPut (list "PADSTACK" (if PS "OK" "FAIL")))',
          "(set 'PINS 0)",
          "; (3) body boundary on PLACE_BOUND_TOP (solid filled)",
-         "(set 'BP (axlPathStart (list -%d:%d %d:%d %d:%d -%d:-%d -%d:%d)))" % (bw,bh,bw,bh,bw,-bh,-bw,-bh,-bw,bh),
+         "(set 'BP (axlPathStart (list -%d:-%d %d:-%d %d:%d -%d:%d -%d:-%d)))" % (bw,bh,bw,bh,bw,bh,bw,bh,bw,bh),
          "(set 'OP (axlDBCreateOpenShape BP t \"PACKAGE GEOMETRY/PLACE_BOUND_TOP\"))",
          "(set 'CS (axlDBCreateCloseShape OP t))",
          '(axlMsgPut (list "BODY" (if CS "OK" "FAIL")))',
@@ -117,80 +117,95 @@ def emit_author_il(spec, outdir):
           "(set 'C (axlCompileSymbol ?symbol \"%s\" ?type \"package\" ?silent t ?silentOnOverwrite t))" % name,
           '(axlMsgPut (list "COMPILE" (if C "OK" "FAIL")))',
           "(axlSaveDesign)",
-          '(axlMsgPut (strcat "DONE pins=" PINS " of" %d))' % n,
+          '(axlMsgPut (list "DONE pins=" PINS " of" %d))' % n,
           ")"]
-    il = os.path.join(outdir, "author_%s.il" % name)
+    base = os.path.abspath(os.path.join(outdir, "author_%s" % name))
+    il, scr = base + ".il", base + ".scr"
     open(il, "w").write("\n".join(L))
-    open(os.path.join(outdir, "author_%s.scr" % name), "w").write(
-        'skill (load "%s")\nquit\n' % il.replace("\\", "/"))
+    open(scr, "w").write('skill (load "%s")\nquit\n' % il.replace("\\", "/"))
     return il
 
 def emit_place_il(spec, outdir, psmpath_hint):
     name = spec["name"]
+    bd = int(round(spec.get("ball_dia", 8)))
+    # SKILL strings can't carry Windows backslash escapes -> use forward slashes
+    psm = psmpath_hint.replace("\\", "/")
     L = ["(progn",
-         '(axlMsgPut "PLACE %s")'.replace(" %s" % name, " %s" % name.upper()),
+         '(axlMsgPut "PLACE %s")' % name.upper(),
          "; put the compiled .psm on PSMPATH (keep any existing entries)",
-         "(axlSetVariable \"PSMPATH\" \"%s;%%PSMPATH%%\")" % psmpath_hint,
+         "(axlSetVariable \"PSMPATH\" \"%s;%%PSMPATH%%\")" % psm,
          "; expand the (likely empty/small) board extents so the package fits at origin",
          "(set 'ER (axlDBChangeDesignExtents (list -2000:-2000 2000:2000)))",
          '(axlMsgPut (list "extents" (if ER "OK" "FAIL")))',
+         "; recreate the ball padstack in THIS session so the psm's pad ref resolves",
+         "(set 'PS (axlDBFindByName 'padstack \"%s_ball\"))" % name,
+         ("(unless PS (set 'PS (axlDBCreatePadStack \"%s_ball\" nil "
+          "(cons (make_axlPadStackPad ?layer \"TOP\" ?type 'REGULAR ?figure 'CIRCLE ?figureSize %d:%d) nil) t)))"
+          % (name, bd, bd)),
+         '(axlMsgPut (list "padstack" (if PS "OK" "FAIL")))',
          "; place the package (l_symbolData form: (name type)). Refdes is auto-assigned.",
          "(set 'INST (axlDBCreateSymbol (list \"%s\" \"PACKAGE\") 0:0))" % name,
          '(axlMsgPut (list "place" (if INST "OK" "FAIL")))',
          "(axlSaveDesign)",
          '(axlMsgPut "BOARD SAVED")',
          ")"]
-    il = os.path.join(outdir, "place_%s.il" % name)
+    base = os.path.abspath(os.path.join(outdir, "place_%s" % name))
+    il, scr = base + ".il", base + ".scr"
     open(il, "w").write("\n".join(L))
-    open(os.path.join(outdir, "place_%s.scr" % name), "w").write(
-        'skill (load "%s")\nquit\n' % il.replace("\\", "/"))
+    open(scr, "w").write('skill (load "%s")\nquit\n' % il.replace("\\", "/"))
     return il
+
+def _bat(template, **kw):
+    """Replace __KEY__ placeholders (avoids clashing with bat's own %VAR% tokens)."""
+    s = template
+    for k, v in kw.items():
+        s = s.replace("__%s__" % k, str(v))
+    return s
 
 def emit_run_bats(spec, outdir, spb_root):
     name = spec["name"]
     allegro = os.path.join(spb_root, "tools", "bin", "allegro.exe").replace("\\", "/")
     # run_pack: author the .dra (fresh), compile .psm
-    pack = [
-        "@echo off",
-        "setlocal",
-        "set CDS_INST_DIR=%s" % spb_root,
-        "set ARDIR=%cd%"
-        "rem kill stale allegro + locks",
-        "taskkill /F /IM allegro.exe >nul 2>&1",
-        "timeout /t 2 >nul",
-        "del /q %ARDIR%\\*.lck >nul 2>&1",
-        "del /q %ARDIR%\\master.tag >nul 2>&1",
-        "del /q %ARDIR%\\%name%.dra >nul 2>&1",
-        "del /q %ARDIR%\\%name%.psm >nul 2>&1",
-        "echo AUTHORING %name%.psm headless..." % name,
-        '"%s" -symbol package -nograph -s "%ARDIR%\\author_%s.scr" "%ARDIR%\\%s.dra"' % (allegro, name, name),
-        "timeout /t 2 >nul",
-        "taskkill /F /IM allegro.exe >nul 2>&1",
-        "del /q %ARDIR%\\*.lck >nul 2>&1",
-        'if exist "%ARDIR%\\%s.psm" (echo OK: %s.psm created) else (echo WARN: check %s.log)' % (name, name, name),
-        "endlocal"
-    ]
-    # run_place: place into a .brd (board path is $1, default place_%s.brd in same dir)
-    place = [
-        "@echo off",
-        "setlocal",
-        "set CDS_INST_DIR=%s" % spb_root,
-        "set ARDIR=%cd%"
-        "set BRD=%~1",
-        'if "%BRD%"=="" set BRD=%ARDIR%\\%s.brd' % name,
-        "taskkill /F /IM allegro.exe >nul 2>&1",
-        "timeout /t 2 >nul",
-        "del /q %ARDIR%\\*.lck >nul 2>&1",
-        "echo PLACING %s into %BRD ..." % name,
-        '"%s" -nograph -s "%ARDIR%\\place_%s.scr" "%BRD%"' % (allegro, name),
-        "timeout /t 2 >nul",
-        "taskkill /F /IM allegro.exe >nul 2>&1",
-        "del /q %ARDIR%\\*.lck >nul 2>&1",
-        'if exist "%BRD%" (echo OK: saved to %BRD%) else (echo WARN: board not saved)',
-        "endlocal"
-    ]
-    open(os.path.join(outdir, "run_pack.bat"), "w").write("\r\n".join(pack))
-    open(os.path.join(outdir, "run_place.bat"), "w").write("\r\n".join(place))
+    pack = """@echo off
+setlocal
+set CDS_INST_DIR=__SPB__
+set ARDIR=%cd%
+rem kill stale allegro + locks
+taskkill /F /IM allegro.exe >nul 2>&1
+timeout /t 2 >nul
+del /q %ARDIR%\\*.lck >nul 2>&1
+del /q %ARDIR%\\master.tag >nul 2>&1
+del /q %ARDIR%\\__NAME__.dra >nul 2>&1
+del /q %ARDIR%\\__NAME__.psm >nul 2>&1
+echo AUTHORING __NAME__.psm headless
+"__ALLEGRO__" -symbol package -nograph -s "%ARDIR%\\author___NAME__.scr" "%ARDIR%\\__NAME__.dra"
+timeout /t 2 >nul
+taskkill /F /IM allegro.exe >nul 2>&1
+del /q %ARDIR%\\*.lck >nul 2>&1
+if exist "%ARDIR%\\__NAME__.psm" (echo OK: __NAME__.psm created) else (echo WARN: check __NAME__.log)
+endlocal
+"""
+    # run_place: place into a .brd (board path is %1, default __NAME__.brd in same dir)
+    place = """@echo off
+setlocal
+set CDS_INST_DIR=__SPB__
+set ARDIR=%cd%
+set BRD=%1
+if "%BRD%"=="" set BRD=%ARDIR%\\__NAME__.brd
+taskkill /F /IM allegro.exe >nul 2>&1
+timeout /t 2 >nul
+del /q %ARDIR%\\*.lck >nul 2>&1
+echo PLACING __NAME__ into %BRD%
+"__ALLEGRO__" -nograph -s "%ARDIR%\\place___NAME__.scr" "%BRD%"
+timeout /t 2 >nul
+taskkill /F /IM allegro.exe >nul 2>&1
+del /q %ARDIR%\\*.lck >nul 2>&1
+if exist "%BRD%" (echo OK: saved to %BRD%) else (echo WARN: board not saved)
+endlocal
+"""
+    env = dict(SPB=spb_root, ALLEGRO=allegro, NAME=name)
+    open(os.path.join(outdir, "run_pack.bat"),  "w").write(_bat(pack,  **env).replace("\n", "\r\n"))
+    open(os.path.join(outdir, "run_place.bat"), "w").write(_bat(place, **env).replace("\n", "\r\n"))
 
 def main():
     ap = argparse.ArgumentParser(description="Generate Allegro headless SKILL scripts for package authoring/placement")
