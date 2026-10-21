@@ -6,6 +6,7 @@ from sigrity_mcp.domains.si.powersi_tools import (
     powersi_add_edge_port,
     powersi_add_excitation,
     powersi_add_port_component_pins,
+    powersi_add_port_inject,
     powersi_add_port_manual,
     powersi_add_port_vrn,
     powersi_add_ports_auto,
@@ -232,6 +233,71 @@ async def test_add_edge_port_rejects_no_nodes():
     sid = session["session_id"]
     with pytest.raises(ValueError, match="at least one of"):
         await powersi_add_edge_port(sid, "P1", width=0.002)
+    await close_tcl_session(sid)
+
+
+# --- powersi_add_port_inject: the confirmed-working port-creation path --------------
+
+
+_FAKE_BASE_SPD = """* Port description lines
+
+* Extraction Setting description lines
+
+* Linkage description line
+.Connect C12 C_CAP300_C_c
+2 $Package.Node506!!2::N09032
+1 $Package.Node367!!1::N09000
+.EndC
+.Connect R14 R_RES400_R_r
+1 $Package.Node933!!1::+15V
+2 $Package.Node653!!2::N049980
+.EndC
+"""
+
+
+@pytest.mark.asyncio
+async def test_add_port_inject_builds_complete_port_from_real_connect_block(tmp_path):
+    session = await start_powersi_session(spd_file="board.spd")
+    sid = session["session_id"]
+    spd_file = tmp_path / "board.spd"
+    spd_file.write_text(_FAKE_BASE_SPD, encoding="utf-8")
+    result = await powersi_add_port_inject(sid, "C12", pos_pin=1, neg_pin=2, saved_spd=str(spd_file))
+    assert result["positive_node"] == "$Package.Node367!!1::N09000"
+    assert result["negative_node"] == "$Package.Node506!!2::N09032"
+    saved = spd_file.read_text(encoding="utf-8")
+    assert ".Port" in saved and ".EndPort" in saved
+    assert "+            PositiveTerminal $Package.Node367!!1::N09000" in saved
+    assert "+            NegativeTerminal $Package.Node506!!2::N09032" in saved
+    # RefZ must be written as a BARE INTEGER (PowerSI's .spd parser silently rejects a
+    # float-flavored "50.0" here, proven live 2026-10-21).
+    assert "RefZ = 50\n" in saved and "RefZ = 50.0" not in saved
+    # the injected block must sit BEFORE the original extraction-setting marker, replacing
+    # the previously-empty port section, and the rest of the file (incl. the .Connect block
+    # used to source the node refs) must survive intact
+    assert saved.index("* Port description lines") < saved.index("* Extraction Setting description lines")
+    assert ".Connect C12 C_CAP300_C_c" in saved
+    await close_tcl_session(sid)
+
+
+@pytest.mark.asyncio
+async def test_add_port_inject_rejects_unknown_refdes(tmp_path):
+    session = await start_powersi_session(spd_file="board.spd")
+    sid = session["session_id"]
+    spd_file = tmp_path / "board.spd"
+    spd_file.write_text(_FAKE_BASE_SPD, encoding="utf-8")
+    with pytest.raises(ValueError, match=r"no `\.Connect U99` block"):
+        await powersi_add_port_inject(sid, "U99", pos_pin=1, neg_pin=2, saved_spd=str(spd_file))
+    await close_tcl_session(sid)
+
+
+@pytest.mark.asyncio
+async def test_add_port_inject_rejects_bad_pin_number(tmp_path):
+    session = await start_powersi_session(spd_file="board.spd")
+    sid = session["session_id"]
+    spd_file = tmp_path / "board.spd"
+    spd_file.write_text(_FAKE_BASE_SPD, encoding="utf-8")
+    with pytest.raises(ValueError, match="pins 1/99 not found"):
+        await powersi_add_port_inject(sid, "C12", pos_pin=1, neg_pin=99, saved_spd=str(spd_file))
     await close_tcl_session(sid)
 
 
