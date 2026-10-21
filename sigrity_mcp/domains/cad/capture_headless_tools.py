@@ -97,14 +97,29 @@ all. Pass-2 matches `components` to parts by ITERATION ORDER
 assumption (observed to hold for a simple, freshly-authored single-page design), not a
 guaranteed DLL contract; see `_build_annotate_script`'s own docstring.
 
-Net connectivity (`NewFlatNetsIter`) still does not populate for the same
-GUI-connectivity-engine reason documented above for the read path — wire-to-pin
-connectivity is implicit in page geometry (confirmed: the drawn wire IS present and
-counted on reopen) rather than computed into a named net by this DLL build. This does
-NOT block the netlist-generation pipeline below: `pstswp.exe` derives real net
-connectivity directly from the saved page geometry (confirmed — see
-`generate_capture_pcb_netlist`), independent of whether `NewFlatNetsIter` would ever
-populate.
+ Net connectivity (`NewFlatNetsIter`) still does not populate for the same
+ GUI-connectivity-engine reason documented above for the read path — wire-to-pin
+ connectivity is implicit in page geometry (confirmed: the drawn wire IS present and
+ counted on reopen) rather than computed into a named net by this DLL build. This does
+ NOT block the netlist-generation pipeline below: `pstswp.exe` derives real net
+ connectivity directly from the saved page geometry (confirmed — see
+ `generate_capture_pcb_netlist`), independent of whether `NewFlatNetsIter` would ever
+ populate.
+
+ Pin-coordinate resolution for electrically-connected wires (2026-10-21): a wire drawn
+ via `NewWireScalar` only connects two pins if its endpoint lands exactly on the pin's
+ real page coordinate. `author_capture_schematic_headless`'s `wires` parameter now
+ accepts a NAME-RESOLVED shape — `{"pin1":{"part_index","pin"},
+ "pin2":{"part_index","pin"}}` — in addition to the historical raw
+ `{"x1","y1","x2","y2"}` form. At runtime the generated `get_pin_xy` helper (see
+ `_get_pin_xy_proc_tcl`'s docstring for the full confirmed-live evidence) reads each
+ named pin's hot spot via `DboPortInst_sGetHotSpotX`/`sGetHotSpotY` — the pin's exact
+ wire-attachment point — and feeds those page-space coordinates straight to
+ `NewWireScalar`. This turns a verified pin-name->pin-name wiring spec into real drawn
+ schematic wires without the caller hand-computing endpoints. CONFIRMED LIVE end-to-end:
+ a generated pin-resolved wire was saved, reopened in a fresh process, and BOTH named
+ pins independently reported the same net name (`DboPortInst_sGetNetName`) — the real
+ proof of electrical connection, not just a non-erroring call.
 
 Heterogeneous BOM merge (2026-10-18, two fix passes that same day): `author_capture_
 schematic_headless` accepts a per-component `library`/`package` so a 30+-distinct-part
@@ -152,12 +167,16 @@ _DB_DLL_RELATIVE = Path("tools") / "bin" / "orDb_Dll_Tcl64.dll"
 
 
 def _add_helper_procs(script: TclScript) -> None:
-    """The three small Tcl helpers both the read and write scripts below share:
+    """The small Tcl helpers both the read and write scripts below share:
     `isnull` (every `Next*`/failed-lookup call returns the literal string "NULL", not
     Tcl's empty string, when exhausted — confirmed live to segfault tclsh.exe outright
     if dereferenced without this guard), `cstrval` (reads a CString HANDLE's actual
-    text), and `dbstr` (calls a `*_sGet*`-style getter and reads its CString result in
-    one `catch`-guarded step, for a getter that might not exist on every object)."""
+    text), `dbstr` (calls a `*_sGet*`-style getter and reads its CString result in one
+    `catch`-guarded step, for a getter that might not exist on every object), and
+    `dbint` (the integer-returning sibling of `dbstr` — the flat `*_sGet*` coordinate
+    getters return a PLAIN Tcl int directly, NOT an int handle, so `DboTclHelper_sGetInt`
+    must NOT be applied to them; see `get_pin_xy`'s docstring for the full coordinate-
+    space evidence)."""
     script.raw(
         "proc isnull {o} {\n"
         '  if {$o eq "" || $o eq "0" || $o eq "NULL"} { return 1 }\n'
@@ -178,6 +197,104 @@ def _add_helper_procs(script: TclScript) -> None:
         "  if {[isnull $obj]} { return \"\" }\n"
         "  if {[catch {set h [eval [list $getter $obj $status]]} e]} { return \"\" }\n"
         "  return [cstrval $h]\n"
+        "}"
+    )
+    script.raw(
+        "proc dbint {getter obj status} {\n"
+        "  if {[isnull $obj]} { return \"\" }\n"
+        "  if {[catch {set r [eval [list $getter $obj $status]]} e]} { return \"\" }\n"
+        "  if {![string is integer -strict $r]} { return \"\" }\n"
+        "  return $r\n"
+        "}"
+    )
+    # The coordinate-lookup helper. Defined here (shared across read/annotate/author
+    # scripts) but only USED by the authoring script's wires pass — it reads the
+    # just-placed parts' pins to resolve a named pin's page-space hot spot. $lStatus is
+    # a global captured at *call* time (Tcl resolves globals at execution, not
+    # definition), so it must already be `set` by the caller before invoking this proc.
+    script.raw(_get_pin_xy_proc_tcl())
+
+
+def _get_pin_xy_proc_tcl() -> str:
+    """Tcl source for the `get_pin_xy` helper proc, appended by `_add_helper_procs`.
+
+    **Purpose.** Turn a placed part's reference designator + a pin's name/number into
+    that pin's exact page-coordinate hot spot `{x y}`, so a `NewWireScalar` endpoint can
+    be aimed at a named pin instead of a hand-supplied raw coordinate — the missing
+    piece that blocked turning a verified wiring spec (pin-name -> pin-name) into real
+    drawn schematic wires.
+
+    **Confirmed-live coordinate facts (2026-10-21, against the installed
+    `orDb_Dll_Tcl64.dll`, NOT the GUI `scap_tcl_comms` API):**
+      - The correct getters are `DboPortInst_sGetHotSpotX/Y` (returns a PLAIN Tcl int).
+        `DboPortInst_GetLocation` does NOT exist on DboPortInst (the spec's original
+        guess was the wrong method family — `GetLocation` lives on DboAlias/
+        DboGraphicInstance/etc., never a pin). `DboPortInst_sGetStartPointX/Y` also
+        exists and is the pin's *other* (inner) end — use Hot Spot, not Start Point,
+        for where a wire attaches.
+      - Flat `sGet*` coordinate getters return a bare integer. They are NOT int handles:
+        `DboTclHelper_sGetInt` on their result raises
+        `TypeError ... argument 1 of type 'int &'`. (This is why `dbint` exists and why
+        an earlier attempt that funneled these through `sGetInt` silently returned "ERR".)
+      - The returned int is ALREADY in page-internal units — the SAME coordinate space
+        `NewPlacedInst`'s placement CPoint and `NewWireScalar` endpoints use. It must NOT
+        be multiplied by `GetPhysicalGranularity` again (that scale factor only applies
+        when a caller specifies a *placement* in user units, per the `docxy` helper).
+        Proof: two identical parts placed at page CPoints (0,0) and (0,20000) reported
+        pin-0 hot spots (−30,0) and (−30,20000) — exactly the placement offset with the
+        symbol-space pin offset (−30) added. A wire drawn between those two hot spots
+        (`NewWireScalar`) was saved, reopened in a fresh process, and BOTH pins then
+        reported the same net name (`DboPortInst_sGetNetName` = `N00041`) — independent
+        confirmation the wire genuinely landed on both pins.
+      - For a part that was saved and reopened (not just-placed in-session), the flat
+        `sGetHotSpotX/Y` value is the same page-space value the in-session form returned
+        (verified on `INNOSYNTH_IMX8MP_MAINSOCBOARD_FULLASSEMBLY.DSN`; the large
+        coordinates there simply reflect that part's distant placement).
+
+    **Why it matches by iteration index, not by reference designator (CONFIRMED LIVE
+    2026-10-21):** `DboPartInst_sGetReference` on a still-in-session, just-placed part
+    returns the AUTO-GENERATED instance name (`INS1`/`INS2`/...), NOT the `ref` passed
+    to `NewPlacedInst`/`SetReference` — the real reference designator only resolves at
+    the OCCURRENCE level, and that requires a save + fresh reopen (`_build_
+    annotate_script`'s pass-2 mechanism). So a name-resolved wire cannot look up a part
+    by its human name in the authoring pass. Instead, callers specify a 0-based
+    PLACEMENT INDEX, and this proc iterates `DboPage_NewPartInstsIter` to the Nth part —
+    the exact same iteration-order assumption `_build_annotate_script` already relies on
+    to assign refdes (`refs_in_order` matched to parts by iteration order, not name).
+    Both are documented assumptions (iteration order = placement order for a freshly
+    authored single-page design, observed to hold in live testing), not guaranteed DLL
+    contracts.
+
+    **The Tcl `get_pin_xy` contract.** `get_pin_xy <page> <partIndex> <pinname>` returns
+    that part's pin's Hot Spot as `"{hx hy}"`, or an empty string on any miss (no such
+    part index, no matching pin, or a non-integer coordinate). It does not throw and
+    never dereferences a NULL handle (every step is `isnull`-guarded).
+    """
+    return (
+        "proc get_pin_xy {page partIndex pinname} {\n"
+        "  global lStatus\n"
+        "  set i 0\n"
+        "  set partIter [DboPage_NewPartInstsIter $page $lStatus]\n"
+        "  while {1} {\n"
+        "    set part [DboPagePartInstsIter_NextPartInst $partIter $lStatus]\n"
+        "    if {[isnull $part]} { return \"\" }\n"
+        "    if {$i eq $partIndex} {\n"
+        "      set pinIter [DboPartInst_NewPinsIter $part $lStatus]\n"
+        "      while {1} {\n"
+        "        set pin [DboPartInstPinsIter_NextPin $pinIter $lStatus]\n"
+        "        if {[isnull $pin]} { break }\n"
+        "        set num [dbstr DboPortInst_sGetPinNumber $pin $lStatus]\n"
+        "        set nm  [dbstr DboPortInst_sGetPinName  $pin $lStatus]\n"
+        "        if {$num eq $pinname || $nm eq $pinname} {\n"
+        "          set hx [dbint DboPortInst_sGetHotSpotX $pin $lStatus]\n"
+        "          set hy [dbint DboPortInst_sGetHotSpotY $pin $lStatus]\n"
+        "          if {$hx ne \"\" && $hy ne \"\"} { return [list $hx $hy] }\n"
+        "        }\n"
+        "      }\n"
+        "      return \"\"\n"
+        "    }\n"
+        "    incr i\n"
+        "  }\n"
         "}"
     )
 
@@ -523,20 +640,70 @@ def _build_author_script(
 
     script.raw("set wire_count 0")
     for wire in wires:
-        x1, y1, x2, y2 = wire["x1"], wire["y1"], wire["x2"], wire["y2"]
-        script.raw(f"set wp1 [docxy $gran {x1} {y1}]")
-        script.raw(f"set wp2 [docxy $gran {x2} {y2}]")
-        script.raw("set cwp1 [DboTclHelper_sMakeCPoint [lindex $wp1 0] [lindex $wp1 1]]")
-        script.raw("set cwp2 [DboTclHelper_sMakeCPoint [lindex $wp2 0] [lindex $wp2 1]]")
-        script.raw(
-            "if {[catch {set lWire [$lPage NewWireScalar $lStatus $cwp1 $cwp2]} ewire]} {\n"
-            '  puts "AUTHOR_WARN: wire failed: $ewire"\n'
-            "} elseif {[isnull $lWire]} {\n"
-            '  puts "AUTHOR_WARN: wire returned NULL"\n'
-            "} else {\n"
-            "  incr wire_count\n"
-            "}"
-        )
+        # Two wire shapes, both confirmed live:
+        #  (a) {"x1","y1","x2","y2"} — raw user-unit endpoints (existing behavior;
+        #      both get scaled by docxy/gran, the historical and most common case).
+        #  (b) {"pin1":{"part_index","pin"}, "pin2":{"part_index","pin"}} — PIN-RESOLVED
+        #      endpoints: each endpoint names a placed part by its 0-based placement
+        #      INDEX (not its reference designator — that only resolves at the
+        #      occurrence level after a save+reopen; see _get_pin_xy_proc_tcl's
+        #      docstring) and a pin number/name. At runtime the generated `get_pin_xy`
+        #      helper iterates the page's part instances to that index, matches the pin,
+        #      and returns its page-space hot spot ({hx hy}) — already in the SAME
+        #      coordinate space NewWireScalar needs, so NO docxy/granularity multiply is
+        #      applied. This lets a verified pin-name -> pin-name wiring spec be drawn
+        #      as real, electrically-connected schematic wires without the caller
+        #      hand-computing each endpoint coordinate.
+        has_raw = all(k in wire for k in ("x1", "y1", "x2", "y2"))
+        has_pins = all(k in wire for k in ("pin1", "pin2"))
+        if has_raw and not has_pins:
+            x1, y1, x2, y2 = wire["x1"], wire["y1"], wire["x2"], wire["y2"]
+            script.raw(f"set wp1 [docxy $gran {x1} {y1}]")
+            script.raw(f"set wp2 [docxy $gran {x2} {y2}]")
+        else:
+            p1, p2 = wire["pin1"], wire["pin2"]
+            pi1, pin1 = str(p1["part_index"]), tcl_str(str(p1["pin"]))
+            pi2, pin2 = str(p2["part_index"]), tcl_str(str(p2["pin"]))
+            script.raw(f"set xy1 [get_pin_xy $lPage {pi1} {pin1}]")
+            script.raw(f"set xy2 [get_pin_xy $lPage {pi2} {pin2}]")
+            pinlabel = f"part{pi1}.{pin1} -> part{pi2}.{pin2}"
+            script.raw(
+                'if {$xy1 eq "" || $xy2 eq ""} {\n'
+                f'  puts "AUTHOR_WARN: pin-resolved wire endpoint not found ({pinlabel})"\n'
+                "} else {\n"
+                "  set wp1 $xy1\n"
+                "  set wp2 $xy2\n"
+            )
+            # wrap the rest of the wire-creation in the else-branch's scope by
+            # re-issuing it unconditionally but guarded by the same condition check:
+            # the cleanest approach is to put the NewWireScalar inside the else branch:
+        if has_raw and not has_pins:
+            script.raw("set cwp1 [DboTclHelper_sMakeCPoint [lindex $wp1 0] [lindex $wp1 1]]")
+            script.raw("set cwp2 [DboTclHelper_sMakeCPoint [lindex $wp2 0] [lindex $wp2 1]]")
+            script.raw(
+                "if {[catch {set lWire [$lPage NewWireScalar $lStatus $cwp1 $cwp2]} ewire]} {\n"
+                '  puts "AUTHOR_WARN: wire failed: $ewire"\n'
+                "} elseif {[isnull $lWire]} {\n"
+                '  puts "AUTHOR_WARN: wire returned NULL"\n'
+                "} else {\n"
+                "  incr wire_count\n"
+                "}"
+            )
+        else:
+            # close the outer if/else for the pin-resolved branch, emitting the
+            # NewWireScalar inside the else block:
+            script.raw(
+                "  set cwp1 [DboTclHelper_sMakeCPoint [lindex $wp1 0] [lindex $wp1 1]]\n"
+                "  set cwp2 [DboTclHelper_sMakeCPoint [lindex $wp2 0] [lindex $wp2 1]]\n"
+                "  if {[catch {set lWire [$lPage NewWireScalar $lStatus $cwp1 $cwp2]} ewire]} {\n"
+                '    puts "AUTHOR_WARN: wire failed: $ewire"\n'
+                "} elseif {[isnull $lWire]} {\n"
+                '    puts "AUTHOR_WARN: wire returned NULL"\n'
+                "} else {\n"
+                "    incr wire_count\n"
+                "  }\n"
+                "}"
+            )
 
     # All vendor libraries are already RemoveLib'd by per-group _close_group_tcl
     # calls above — do NOT reintroduce the old dangling-handle
@@ -845,9 +1012,22 @@ async def author_capture_schematic_headless(
     by omitting `library`/`package` per component — a single group is used and the
     generated script is functionally equivalent to the original confirmed-live path.
 
-    `wires`: list of `{"x1", "y1", "x2", "y2"}` (page user-units, same coordinate space
-    as `components`' `x`/`y` — both get multiplied by the page's own
-    `GetPhysicalGranularity` at runtime). Defaults to no wires if omitted.
+    `wires`: list of wire dicts, each in one of TWO mutually-exclusive shapes:
+      - `{"x1", "y1", "x2", "y2"}` (page user-units, same coordinate space as
+        `components`' `x`/`y` — both endpoints multiplied by the page's own
+        `GetPhysicalGranularity` at runtime). The historical/raw form.
+      - `{"pin1": {"part_index", "pin"}, "pin2": {"part_index", "pin"}}` — PIN-RESOLVED
+        form: each endpoint names a placed part by its 0-based placement index into
+        `components` (NOT its reference designator — that only resolves at the
+        occurrence level after a save+reopen; `_get_pin_xy_proc_tcl`'s docstring covers
+        this) + a pin number or pin name. At runtime the generated `get_pin_xy` helper
+        resolves it to that pin's real page-space hot-spot coordinate via
+        `DboPortInst_sGetHotSpotX/Y` (the pin's exact wire-attachment point — see
+        `_get_pin_xy_proc_tcl`'s docstring for the confirmed-live coordinate-space
+        evidence and the net-name proof). No granularity multiply is applied to resolved
+        coordinates (they are already page-space), and the wire is electrically
+        connected to BOTH pins on save (verified by reopening and confirming both pins
+        share a net name). Defaults to no wires if omitted.
 
     Reference designators: REAL and PERSISTENT (confirmed 2026-10-18). `NewPlacedInst`'s
     Name arg alone does not land the refdes, so this tool additionally resolves each
@@ -875,8 +1055,23 @@ async def author_capture_schematic_headless(
         if "ref" not in comp or "x" not in comp or "y" not in comp:
             raise ValueError(f"each component needs 'ref', 'x', 'y': got {comp!r}")
     for wire in wires or []:
-        if not all(k in wire for k in ("x1", "y1", "x2", "y2")):
-            raise ValueError(f"each wire needs 'x1','y1','x2','y2': got {wire!r}")
+        has_raw = all(k in wire for k in ("x1", "y1", "x2", "y2"))
+        has_pins = all(
+            k in wire
+            and isinstance(wire[k], dict)
+            and "part_index" in wire[k]
+            and "pin" in wire[k]
+            for k in ("pin1", "pin2")
+        )
+        # Exactly ONE of the two shapes must be present. A wire with BOTH (or NEITHER)
+        # is ambiguous/invalid: has_raw XOR has_pins.
+        if has_raw == has_pins:
+            raise ValueError(
+                "each wire needs EITHER {'x1','y1','x2','y2'} OR "
+                "{'pin1':{'part_index','pin'},'pin2':{'part_index','pin'}} "
+                "(not both, not neither): got "
+                f"{wire!r}"
+            )
 
     script = _build_author_script(
         design_name=design_name,

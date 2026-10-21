@@ -350,6 +350,150 @@ def test_author_generated_script_interleaves_getlib_remove_lib_per_group():
 
 
 
+def test_author_generated_script_emits_get_pin_xy_for_pin_resolved_wires():
+    """Regression guard for the pin-resolved wire shape + coordinate-lookup helper.
+
+    A wire entry of the form {"pin1":{"part_index","pin"},"pin2":{"part_index","pin"}}
+    must generate a `get_pin_xy <page> <index> <pin>` call for EACH endpoint (resolving
+    a placed part's named pin to its page-space hot-spot via DboPortInst_sGetHotSpotX/Y),
+    NOT a docxy/granularity-scaled raw coordinate — the whole point of the shape is to
+    aim the wire at real pin locations instead of hand-supplied numbers. Confirmed live:
+    a wire drawn between two parts' resolved pin hot-spots was saved, reopened, and both
+    pins independently reported the same net name (N00041) — see capture_headless_
+    tools.py's `_get_pin_xy_proc_tcl` docstring for the full coordinate-space evidence.
+    """
+    from sigrity_mcp.domains.cad.capture_headless_tools import _build_author_script
+
+    rendered = (
+        _build_author_script(
+            design_name="T",
+            library_file="C:/fake/a.olb",
+            components=[{"ref": "U0", "x": 1, "y": 1}, {"ref": "U1", "x": 4, "y": 1}],
+            wires=[
+                {"pin1": {"part_index": 0, "pin": "F22"}, "pin2": {"part_index": 1, "pin": "39"}},
+            ],
+            output_dsn="C:/fake/out.dsn",
+            package_name=None,
+        )
+        .render()
+    )
+    # The coordinate-lookup helper proc is emitted (shared helper).
+    assert "proc get_pin_xy {page partIndex pinname}" in rendered
+    assert "global lStatus" in rendered  # globals must be declared inside the proc
+    # Each endpoint resolves via get_pin_xy with its 0-based placement index + pin name.
+    assert "get_pin_xy $lPage 0 {F22}" in rendered
+    assert "get_pin_xy $lPage 1 {39}" in rendered
+    # The Hot Spot (not Start Point) is the getter used for the wire attachment point.
+    assert "DboPortInst_sGetHotSpotX" in rendered
+    assert "DboPortInst_sGetHotSpotY" in rendered
+    # A pin-resolved endpoint must NOT be docxy/granularity-scaled (it is already in
+    # page-space) -- there is no `docxy` call anywhere in this script's wire block.
+    assert "docxy" not in rendered.split("set wire_count 0", 1)[1]
+    # The raw x1/y1/x2/y2 form still works alongside (back-compat). The get_pin_xy
+    # proc is a shared helper always emitted (so it appears in raw-wire scripts too),
+    # but a RAW wire must use docxy, NOT a get_pin_xy CALL -- check the call count.
+    rendered_raw = (
+        _build_author_script(
+            design_name="T",
+            library_file="C:/fake/a.olb",
+            components=[{"ref": "U0", "x": 1, "y": 1}],
+            wires=[{"x1": 10, "y1": 10, "x2": 30, "y2": 10}],
+            output_dsn="C:/fake/out2.dsn",
+            package_name=None,
+        )
+        .render()
+    )
+    assert "set wp1 [docxy $gran 10 10]" in rendered_raw
+    # No get_pin_xy CALL in the raw-wire script (the proc is present, but never invoked:
+    # a call looks like "[get_pin_xy $lPage ...", the proc def looks like "proc get_pin_xy").
+    raw_wire_section = rendered_raw.split("set wire_count 0", 1)[1]
+    assert "[get_pin_xy" not in raw_wire_section
+    # And the pin-resolved script DOES have the call (one per endpoint).
+    pin_wire_section = rendered.split("set wire_count 0", 1)[1]
+    assert rendered.count("get_pin_xy $lPage") == 2
+    assert "[get_pin_xy" in pin_wire_section
+
+
+@pytest.mark.asyncio
+async def test_author_pin_resolved_wire_validation_both_shapes_rejected(tmp_path, monkeypatch):
+    """A wire carrying BOTH the raw (x1..y2) and the pin-resolved (pin1/pin2) keys must
+    be rejected up-front (ValueError), BEFORE any job is submitted."""
+    import sigrity_mcp.core.jobs as jobs_module
+    import sigrity_mcp.domains.cad.capture_headless_tools as mod
+
+    reached = {"n": 0}
+    job_dir = tmp_path / "vjob"
+    job_dir.mkdir()
+    (job_dir / "run.log").write_text(
+        "AUTHOR_SUMMARY placed=2 wires=1 output_size=1\n"
+        "ANNOTATE_SUMMARY annotated=2 requested=2\n", encoding="utf-8"
+    )
+    output_dsn = tmp_path / "vout.dsn"
+    output_dsn.write_bytes(b"fake")
+    record = _FakeRecord(job_id="v", job_dir=str(job_dir), command=["tclsh.exe"])
+
+    async def _fake_submit_job(*args, **kwargs):
+        reached["n"] += 1
+        return record
+
+    monkeypatch.setattr(mod, "submit_job", _fake_submit_job)
+    monkeypatch.setattr(
+        jobs_module, "job_manager", _FakeJobManagerMulti({"v": record})
+    )
+    monkeypatch.setattr(mod, "job_manager", jobs_module.job_manager)
+
+    with pytest.raises(ValueError, match="EITHER"):
+        await author_capture_schematic_headless(
+            output_dsn=str(output_dsn),
+            library_file="C:/fake/a.olb",
+            components=[{"ref": "U0", "x": 1, "y": 1}, {"ref": "U1", "x": 4, "y": 1}],
+            wires=[
+                {"x1": 1, "y1": 1, "x2": 2, "y2": 2,
+                 "pin1": {"part_index": 0, "pin": "1"},
+                 "pin2": {"part_index": 1, "pin": "1"}},
+            ],
+        )
+    assert reached["n"] == 0, "rejected wire must not reach submit_job"
+
+
+@pytest.mark.asyncio
+async def test_author_pin_resolved_wire_validation_valid_reaches_submit(tmp_path, monkeypatch):
+    """A well-formed pin-resolved wire (part_index+pin on both endpoints) passes
+    validation and reaches the submit path."""
+    import sigrity_mcp.core.jobs as jobs_module
+    import sigrity_mcp.domains.cad.capture_headless_tools as mod
+
+    reached = {"n": 0}
+    job_dir = tmp_path / "vjob2"
+    job_dir.mkdir()
+    (job_dir / "run.log").write_text(
+        "AUTHOR_SUMMARY placed=2 wires=1 output_size=1\n"
+        "ANNOTATE_SUMMARY annotated=2 requested=2\n", encoding="utf-8"
+    )
+    output_dsn = tmp_path / "vout2.dsn"
+    output_dsn.write_bytes(b"fake")
+    record = _FakeRecord(job_id="v2", job_dir=str(job_dir), command=["tclsh.exe"])
+
+    async def _fake_submit_job(*args, **kwargs):
+        reached["n"] += 1
+        return record
+
+    monkeypatch.setattr(mod, "submit_job", _fake_submit_job)
+    monkeypatch.setattr(
+        jobs_module, "job_manager", _FakeJobManagerMulti({"v2": record})
+    )
+    monkeypatch.setattr(mod, "job_manager", jobs_module.job_manager)
+
+    await author_capture_schematic_headless(
+        output_dsn=str(output_dsn),
+        library_file="C:/fake/a.olb",
+        components=[{"ref": "U0", "x": 1, "y": 1}, {"ref": "U1", "x": 4, "y": 1}],
+        wires=[{"pin1": {"part_index": 0, "pin": "1"},
+                "pin2": {"part_index": 1, "pin": "1"}}],
+    )
+    assert reached["n"] >= 1, "valid pin-resolved wire must reach submit_job"
+
+
 def test_annotate_script_uses_two_arg_occurrence_setters():
     # Regression guard: DboInstOccurrence_SetReference/SetDesignator take exactly 2 args
     # (self, value) -- the 3-arg form with a status object raises "Wrong # args",
