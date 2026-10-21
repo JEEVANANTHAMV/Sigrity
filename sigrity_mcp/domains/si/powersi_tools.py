@@ -286,12 +286,39 @@ async def powersi_add_port_inject(
     where PowerSI's batch-Tcl port path works correctly, but NONE of those Tcl forms
     produce a complete, valid port on THIS specific build).
 
+    REQUIRED THREE-PHASE SEQUENCE (confirmed live 2026-10-21 -- this is NOT optional and
+    is the single most common way to misuse this tool): `powersi_save_document` only
+    appends a `sigrity::save` Tcl line to the session's in-memory script -- it does
+    nothing on disk until a `powersi_run_session` call actually launches PowerSI.exe and
+    executes that script. This function, by contrast, reads `saved_spd` off disk
+    SYNCHRONOUSLY, right now, in Python. Consequently:
+      1. `start_powersi_session` -> `powersi_configure([{"op": "save_document", ...}])`
+         -> `powersi_run_session` (a REAL PowerSI.exe launch; wait for it to finish) --
+         only after this completes does `saved_spd` actually exist on disk with the
+         `.Connect` blocks this function parses.
+      2. Call `powersi_add_port_inject(..., saved_spd=<that same path>)` as its own step
+         (it needs no live PowerSI process; it just edits the file).
+      3. `start_powersi_session(spd_file=<that same path>)` (now a real `.spd`, so no
+         `save_document` needed) -> `powersi_configure([set_mode, set_frequency_sweep])`
+         -> `powersi_run_session` for the actual simulation.
+    Putting `add_port_inject` in the SAME `powersi_configure` call as `save_document`
+    (one session, one `powersi_run_session`) fails immediately with the "base .spd not
+    found" error below, because step 1's PowerSI.exe hasn't run yet when this function
+    executes. Re-using a STALE `saved_spd` from a previous, unrelated run instead of
+    actually re-running phase 1 is the other common mistake -- it silently reinjects a
+    port for whatever design that stale file happened to hold, not the current one.
+
     Call load_skill('sigrity-si') for the full verified playbook, pitfalls, and a live example."""
     import re as _re
 
     src_path = Path(saved_spd)
     if not src_path.is_file():
-        raise ValueError(f"powersi_add_port_inject: base .spd not found at {saved_spd!r} — save_document must have run (and succeeded) first.")
+        raise ValueError(
+            f"powersi_add_port_inject: base .spd not found at {saved_spd!r}. "
+            "save_document must have been run to completion via a REAL powersi_run_session "
+            "call (not just queued via powersi_configure) before this function runs -- "
+            "see this function's docstring for the required 3-phase sequence."
+        )
     text = src_path.read_text(errors="replace")
     # CONFIRMED LIVE (2026-10-21, direct byte-level proof): PowerSI 2024.0's .spd port
     # section REFZ field is parsed strictly as an integer token — writing it as a
@@ -639,6 +666,18 @@ async def powersi_configure(session_id: str, operations: list[dict]) -> dict:
     other `add_port_*` forms are left in place for API compatibility and for installs
     where PowerSI's batch-Tcl port path works normally, but on THIS specific Sigrity
     2024.0 build they are all known-broken for this use case.
+
+    `add_port_inject` CANNOT be combined with `save_document` in this same operations
+    list: `save_document` only queues a Tcl line here, it does not execute until a
+    `powersi_run_session` call actually launches PowerSI.exe, but `add_port_inject`
+    needs the saved `.spd` to already exist on disk (it reads it synchronously). Run
+    `save_document` through its own `powersi_configure`+`powersi_run_session` pair
+    first, wait for that job to finish, THEN call `add_port_inject` against the now-real
+    file, THEN start a third `start_powersi_session`+`powersi_configure`+
+    `powersi_run_session` pass (opening that same already-ported `.spd`) for the actual
+    simulation. See `powersi_add_port_inject`'s own docstring for the full 3-phase
+    sequence -- skipping straight to one combined call fails immediately with
+    "base .spd not found".
     Operations are applied in list order, since later ones
     (e.g. adding ports) typically depend on earlier ones (e.g. the mode being set).
     Raises `ValueError` naming the exact index and op on an unknown `op` or a bad/missing
