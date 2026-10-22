@@ -1,0 +1,25 @@
+# PREVIEW ONLY -- not executable SKILL/Allegro commands.
+# To actually author this stackup on a real board, use generate_multilayer_stackup()
+# (session_id, layers=...) inside a start_allegro_session()/allegro_run_session() flow.
+# Cadence Allegro 18-Layer Rigid-Flex Stackup Configuration Script
+setwindow pcb
+generaledit
+cmgr
+# Layer 1: TOP (CONDUCTOR, RIGID)
+# Layer 2: L2_GND (PLANE, RIGID)
+# Layer 3: L3_SIG1 (CONDUCTOR, RIGID)
+# Layer 4: L4_PWR1 (PLANE, RIGID)
+# Layer 5: L5_SIG2 (CONDUCTOR, RIGID)
+# Layer 6: L6_GND2 (PLANE, RIGID)
+# Layer 7: L7_SIG3 (CONDUCTOR, RIGID)
+# Layer 8: L8_PWR2 (PLANE, RIGID)
+# Layer 9: L9_FLEX_SIG1 (CONDUCTOR, FLEX)
+# Layer 10: L10_FLEX_GND (PLANE, FLEX)
+# Layer 11: L11_PWR3 (PLANE, RIGID)
+# Layer 12: L12_SIG4 (CONDUCTOR, RIGID)
+# Layer 13: L13_GND3 (PLANE, RIGID)
+# Layer 14: L14_SIG5 (CONDUCTOR, RIGID)
+# Layer 15: L15_PWR4 (PLANE, RIGID)
+# Layer 16: L16_SIG6 (CONDUCTOR, RIGID)
+# Layer 17: L17_GND4 (PLANE, RIGID)
+# Layer 18: BOTTOM (CONDUCTOR, RIGID)
