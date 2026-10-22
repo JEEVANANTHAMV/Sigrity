@@ -11,8 +11,7 @@ from pathlib import Path
 sys.path.insert(0, ".")
 
 from sigrity_mcp.core.jobs import job_manager
-from sigrity_mcp.domains.cad.allegro_drc_tools import run_allegro_batch_drc, run_allegro_checkplus
-from sigrity_mcp.domains.cad.allegro_extraction_tools import run_allegro_design_extractor
+from sigrity_mcp.domains.cad.allegro_drc_tools import run_allegro_batch_drc
 from sigrity_mcp.domains.cad.allegro_library_tools import run_ibis_check
 from sigrity_mcp.domains.cad.allegro_manufacturing_tools import (
     run_ipc2581_export,
@@ -47,8 +46,6 @@ async def main():
     await run_and_report("ipc2581_export", run_ipc2581_export(BOARD, output_file="out.ipc2581.xml"))
     await run_and_report("ipc356_export", run_ipc356_export(BOARD, output_file="out.ipc356"))
     await run_and_report("step_export", run_step_export(BOARD, output_file="out.step"))
-    await run_and_report("design_extractor", run_allegro_design_extractor(BOARD, output_file="out.json"))
-    await run_and_report("checkplus", run_allegro_checkplus(BOARD))
     await run_and_report("ibis_check", run_ibis_check(IBIS, ibis_version="6"))
 
 

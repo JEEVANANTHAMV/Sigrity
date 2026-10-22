@@ -26,29 +26,6 @@ from sigrity_mcp.core.process import submit_job
 from sigrity_mcp.mcp_app import mcp
 
 
-@mcp.tool
-async def run_allegro_design_extractor(
-    project_file: str,
-    output_file: Optional[str] = None,
-    pretty_format: bool = True,
-    elastic_url: Optional[str] = None,
-    connectivity_server_as_source: bool = False,
-) -> dict:
-    """Extract an Allegro design's connectivity/data model to JSON, as a background job.
-Call load_skill('sigrity-cad') for the full verified playbook, pitfalls, and a live example."""
-    args = ["-p", project_file]
-    if output_file:
-        args += ["-o", output_file]
-    if pretty_format:
-        args.append("-f")
-    if elastic_url:
-        args += ["-u", elastic_url]
-    if connectivity_server_as_source:
-        args.append("-c")
-    record = await submit_job(tool="allegro_designextractor", build_args=args)
-    return {"job_id": record.job_id, "state": record.state, "job_dir": record.job_dir, "command": record.command}
-
-
 # CONFIRMED LIVE 2026-10-02: the view-name/field-name keywords below are copied from
 # Cadence's own shipped extract command files (`share/pcb/text/views/*.txt` -- e.g.
 # bom_rep.txt, net_rep.txt, cmp_rep.txt, cpin_bv.txt, tstpoint.txt, drc_rep.txt), NOT

@@ -249,7 +249,6 @@ from sigrity_mcp.domains.cad import (  # noqa: F401
     allegro_tools,
     audit_approval_tools,
     capture_headless_tools,
-    capture_tools,
     document_generation_tools,
     interchange_tools,
     manufacturing_analysis_tools,
@@ -258,7 +257,6 @@ from sigrity_mcp.domains.cad import (  # noqa: F401
     pspice_tools,
     rigid_flex_stackup_tools,
     schematic_checklist_tools,
-    schematic_generation_tools,
     spif_specctra_tools,
 )
 

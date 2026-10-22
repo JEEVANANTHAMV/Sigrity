@@ -106,29 +106,3 @@ Call load_skill('sigrity-cad') for the full verified playbook, pitfalls, and a l
             return result
         await asyncio.sleep(min(2.0, max(0.0, deadline - time.monotonic())))
     return result
-
-
-@mcp.tool
-async def run_allegro_checkplus(
-    project_file: str,
-    verbose: bool = False,
-    max_messages: Optional[int] = None,
-    include_path: Optional[str] = None,
-    env_file: Optional[str] = None,
-    rule_file: Optional[str] = None,
-) -> dict:
-    """Run Allegro's standalone constraint/rule checker (`checkplus.exe`) against a project file, as a background job.
-Call load_skill('sigrity-cad') for the full verified playbook, pitfalls, and a live example."""
-    args = ["-proj", project_file]
-    if verbose:
-        args.append("-verbose")
-    if max_messages is not None:
-        args += ["-max_messages", str(max_messages)]
-    if include_path:
-        args += ["-I", include_path]
-    if env_file:
-        args += ["-r", env_file]
-    if rule_file:
-        args += ["-r", rule_file]
-    record = await submit_job(tool="allegro_checkplus", build_args=args)
-    return {"job_id": record.job_id, "state": record.state, "job_dir": record.job_dir, "command": record.command}

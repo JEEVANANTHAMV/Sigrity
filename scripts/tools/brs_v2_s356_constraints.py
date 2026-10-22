@@ -40,7 +40,7 @@ from sigrity_mcp.domains.cad.allegro_tools import start_allegro_session, allegro
 from sigrity_mcp.domains.cad.allegro_constraint_tools import (
     allegro_create_ecset, allegro_set_physical_constraint,
 )
-from sigrity_mcp.domains.cad.allegro_drc_tools import run_allegro_batch_drc, run_allegro_checkplus
+from sigrity_mcp.domains.cad.allegro_drc_tools import run_allegro_batch_drc
 from sigrity_mcp.domains.cad.allegro_batch_tools import run_allegro_report
 from sigrity_mcp.domains.aurora.scope_tools import run_aurora_workflow, get_aurora_scope_notice
 from sigrity_mcp.domains.platform.job_tools import wait_for_job, tail_job_log
@@ -323,19 +323,8 @@ async def section6_drc() -> dict:
             out["batch_drc"][fname] = p.read_text(encoding="utf-8", errors="replace")[:4000]
             (PROOF_DIR / f"batch_drc_{fname}").write_text(p.read_text(encoding="utf-8", errors="replace"), encoding="utf-8")
 
-    # checkplus: takes a PROJECT file (not a .brd).  We try the main board's dir as a
-    # project dir — documented (built_untested) that -proj may not accept a raw .brd.
-    cp = await run_allegro_checkplus(WORK_BOARD_STR)
-    out["checkplus"]["job_id"] = cp["job_id"]
-    cp_status = await _wait_or(cp["job_id"], 90.0)
-    out["checkplus"]["state"] = cp_status["state"]
-    out["checkplus"]["returncode"] = cp_status.get("returncode")
-    cp_dir = Path(cp_status.get("job_dir", ""))
-    for fname in ("run.log",) + tuple(p.name for p in cp_dir.glob("*.log")):
-        p = cp_dir / fname
-        if p.is_file():
-            out["checkplus"].setdefault(fname, p.read_text(encoding="utf-8", errors="replace")[:4000])
-            (PROOF_DIR / f"checkplus_{fname}").write_text(p.read_text(encoding="utf-8", errors="replace"), encoding="utf-8")
+    # checkplus was removed (wrong product scope — DE-HDL rules checker, not .brd DRC).
+    # batch_drc is the confirmed-live DRC path for .brd boards.
 
     # DRC report via report.exe -v drc (reads existing violation state) for a read-back
     rep = await run_allegro_report(WORK_BOARD_STR, "drc", output_file=str(PROOF_DIR / "drc_report_main.rpt"))
