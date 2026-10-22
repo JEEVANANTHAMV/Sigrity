@@ -19,7 +19,7 @@ Only"); select the product, pick the design, click Translate, and the tool produ
 output. This is the path the user actually uses and the one to drive.
 
 The four `run_*` helpers below build the documented command-line contracts (from
-`doc\pdv\console_commands.html`) as a BEST-EFFORT headless fallback. All four are
+`doc\\pdv\\console_commands.html`) as a BEST-EFFORT headless fallback. All four are
 switch-based and require `-product pcb_librarian_expert` (lowercase). On THIS build
 the bare headless CLI stops at the pcb_librarian_expert license-checkout step
 ("Unable to check out license") before writing output -- that is a property of the
@@ -30,16 +30,12 @@ use the GUI path and verify the produced artifact.
 
 from __future__ import annotations
 
-import os
 import re
 from pathlib import Path
 from typing import Optional
 
-from sigrity_mcp.core.config import settings
 from sigrity_mcp.core.process import submit_job
 from sigrity_mcp.mcp_app import mcp
-
-_PRODUCT_PLACEHOLDER = "PCB_LIBRARIAN_EXPERT"
 
 # The translator product tier named in every live error message.
 _EXPECTED_PRODUCT = "PCB_LIBRARIAN_EXPERT"
@@ -101,27 +97,6 @@ _CLI_CONTRACTS: dict[str, dict] = {
         "positional": False,
     },
 }
-
-# Messages that identify the product-selection / license stage (NOT a missing exe).
-_GATE_RE = re.compile(
-    r"no\s+product\s+license\s+selected|"
-    r"only\s+pcb_librarian_expert\s+license|"
-    r"unable\s+to\s+check\s+out\s+license|"
-    r"error\s+in\s+checking\s+out\s+license|"
-    r"translation\s+cancelled|"
-    r"translation\s+had\s+errors",
-    re.IGNORECASE,
-)
-
-
-def _expected_extensions(tool: str) -> tuple[str, ...]:
-    return {
-        "con2xml": (".con", ".cpm", ".lib"),
-        "cap2xml": (".opj", ".dsn", ".olb"),
-        "dml2con": (".dml",),
-        "apd2con": (".apd",),
-    }.get(tool, ())
-
 
 def classify_gate(output: str) -> dict:
     """Classify a translator process's console output into the exact gate stage.
@@ -249,7 +224,6 @@ async def run_con2xml(
     NOT mean the tool is broken (it works via the GUI). The response's `gate` +
     `primary_via_gui` fields tell you which stage the CLI reached.
     """
-    exe = _CLI_CONTRACTS["con2xml"]
     args = [
         "-cdslib", cds_lib,
         "-lib", lib,
