@@ -395,6 +395,65 @@ wait_for_job(job_id, 120) -> state:"succeeded", rc 0
   it to represent the real board edge — it doesn't (see above); use
   `allegro_get_board_extent_points` instead, or your own exact outline.
 
+## Task 7b — EASY once you know the real keywords: `create_simple_padstack` (mounting holes, vias, SMT pads)
+
+`allegro_configure`'s own docstring is the authoritative kwarg reference (it's the only tool the
+LLM actually sees — the per-op functions like `allegro_create_simple_padstack` are dispatched
+internally and are NOT separately exposed, so their own docstrings never reach you) — read it
+before calling this op. Summarized here because an agent was observed (2026-10-25, a real client
+BRS build) spending 15+ failed attempts guessing field names for this exact op:
+
+```
+{"op": "create_simple_padstack", "name": "M3_MOUNT", "pad_layer": "TOP",
+ "pad_width": 125.98, "pad_height": 125.98, "pad_figure": "ROUND", "drill_diameter": 125.98}
+```
+
+- The layer kwarg is **`pad_layer`** — not `top_layer`, not `layer`.
+- The drill kwarg is **`drill_diameter`** (one scalar, a round drill only) — not `drill_x`/
+  `drill_y`/`drill`/`drill_size`. Omit it entirely for an SMT pad with no drill.
+- `pad_width`/`pad_height` are required even for a round pad (`pad_figure="ROUND"` — Allegro
+  still wants a bounding width/height).
+- `name` is the padstack's own name (used later to place vias against it via `create_via`'s
+  `padstack_name`), not a reference designator.
+- There is no separate "mounting hole" op — a mounting hole is just a padstack with a drill and
+  no net, placed via `create_via` (or by being referenced from a board outline/keepout step) —
+  there is no dedicated `create_mounting_hole`/`add_hole` operation; don't look for one.
+
+## Task 7c — `create_board_outline` vs `create_route_keepin`: two DIFFERENT shapes, don't confuse their reports
+
+Observed live (2026-10-25, real client BRS build): an agent called `create_board_outline`,
+saved, then checked `run_allegro_report(..., report_code="sum")` and saw `Layout area (sq in):
+0.00` and `Router Keepin (in): (0.0000,0.0000) by (0.0000,0.0000)` — and reported the outline
+op as broken. It wasn't. A standalone readback (bypassing the LLM) confirmed the real shape
+existed with the exact right bbox the whole time.
+
+- `create_board_outline(points)` draws the COSMETIC physical edge, layer `BOARD GEOMETRY/OUTLINE`.
+- `create_route_keepin(points)` draws the ROUTABLE boundary, layer `ROUTE KEEPIN/ALL`.
+- These are two independent shapes in Allegro's data model. `run_allegro_report`'s "Layout
+  area" / "Router Keepin" fields, and placement/routing tools generally, read ONLY the second
+  one (`axlDBGetDesign()->keepinRoute`). Calling only `create_board_outline` leaves them at
+  zero forever — that is expected, not a failure signal.
+- **Always call both**, same `points`, right after each other, in the same session:
+  ```
+  {"op": "create_board_outline", "points": [[0,0],[2362.2,0],[2362.2,2362.2],[0,2362.2]]},
+  {"op": "create_route_keepin", "points": [[0,0],[2362.2,0],[2362.2,2362.2],[0,2362.2]]}
+  ```
+- **Neither op is idempotent.** Re-calling either one does not replace the existing shape — it
+  adds a second, overlapping one. If a report makes you suspect a failure, do NOT just re-call
+  the op; verify for real first (see next bullet), because a false "it failed" retry is how you
+  end up with duplicate overlapping outline shapes on the same board.
+- **To verify either op actually worked**, don't trust the "sum" report's Layout/Drawing-Extents
+  fields (see Task 7's "#2 mistake" above — Drawing Extents is the sheet/canvas size, not the
+  board). Capture a real readback in the same session instead:
+  ```
+  (let ((f (outfile "verify.txt" "w"))
+        (shapes (axlDBGetShapes "BOARD GEOMETRY/OUTLINE")))
+    (fprintf f "count=%d bbox=%L\n" (length shapes) (when shapes (car shapes)->bBox))
+    (close f))
+  ```
+  (swap the layer string to `"ROUTE KEEPIN/ALL"` to verify the keepin instead), then read that
+  file after the run. A real bbox matching your intended board size is the only real proof.
+
 ## Task 8 — EASY once you know the real keywords: `run_allegro_extracta` (BOM/nets/components/pins/DRC dump)
 
 ```

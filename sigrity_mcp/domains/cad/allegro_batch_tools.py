@@ -37,8 +37,18 @@ async def run_allegro_report(
     output_file: Optional[str] = None,
     html: bool = False,
 ) -> dict:
-    """Generate a legacy Allegro design report (BOM, DRC, net list, summary, cross-section, ...) as a background job.
-Call load_skill('sigrity-cad') for the full verified playbook, pitfalls, and a live example."""
+    """Generate a legacy Allegro design report as a background job (`report.exe -v <report_code> board_file`).
+
+    `report_code` MUST be one of these EXACT short strings (confirmed live via `report.exe
+    -help`) — NOT a descriptive word guessed from what the report contains:
+    asf, bom, cbm, cmp, cpn, dpf, dpg, drc, drc_shorts, ecp, eld, ell, eln, elp, elw, fcn, fpn,
+    jcp, mod, net, netloop, pad, psu, psw, pcp, npr, slp, slt, spf, **sum** (the board summary —
+    NOT `"summary"`), spn, uaf, ucn, upc, vfb, waived_drc, vialist_net, vialist_netlayer,
+    **x-section** (the cross-section/stackup — NOT `"cross-section"`). Confirmed live 2026-10-25:
+    a caller guessed `"summary"` and `"cross-section"` for exactly those two reports (the natural
+    English words for what they contain) and both failed with "Extracta command file <name> does
+    not exist" — `report.exe` takes the short code literally, with no fuzzy matching.
+    Call load_skill('sigrity-cad') for the full verified playbook, pitfalls, and a live example."""
     args = ["-v", report_code]
     if html:
         args.append("-H")

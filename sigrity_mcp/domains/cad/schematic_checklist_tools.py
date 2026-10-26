@@ -211,19 +211,52 @@ async def run_schematic_checklist(
     rules: Optional[list[str]] = None,
 ) -> dict:
     """Run an organizational design checklist (decoupling, pull-ups/downs, clocks, resets, test points) over a real Allegro net/BOM report.
-Call load_skill('sigrity-cad') for the full verified playbook, pitfalls, and a live example."""
+
+    CRITICAL input contract (read before calling — do NOT invent a path):
+    - net_report_file is REQUIRED and MUST be the absolute path to an EXISTING CSV a real
+      `report.exe -v net` / netlist report produced (two-line banner header, column header
+      'Net Name,Net Pins'). You do NOT know where such a file lives — it must come from a
+      concrete path the orchestrator/user supplied (e.g. a report handed with the task). If no
+      such path was supplied, do NOT call this tool guessing: tell the orchestrator exactly
+      which net report file is missing so the user can provide it.
+    - bom_report_file is optional but follows the same rule (existing CSV, header
+      'SYM_NAME,COMP_DEVICE_TYPE').
+    - NEVER default to a hardcoded/sample path. A missing file returns an error that must be
+      reported to the orchestrator, not retried.
+    Call load_skill('sigrity-cad') for the full verified playbook, pitfalls, and a live example."""
     selected_rules = rules or list(_ALL_RULES)
     unknown_rules = [r for r in selected_rules if r not in _ALL_RULES]
     if unknown_rules:
         return {"error": f"Unknown rule(s) {unknown_rules}; valid rules are {list(_ALL_RULES)}"}
 
-    net_text = Path(net_report_file).read_text(encoding="utf-8", errors="replace")
+    net_path = Path(net_report_file)
+    if not net_path.exists():
+        return {
+            "error": (
+                f"NET_REPORT_FILE_NOT_FOUND: '{net_report_file}' does not exist on this machine. "
+                "This tool needs a REAL Allegro netlist/net report CSV (header 'Net Name,Net Pins') "
+                "whose path was supplied by the orchestrator or user. Do NOT retry with an invented "
+                "or different path. Report to the orchestrator that a net report file is required "
+                "and quote the path that was attempted, so the user can provide one."
+            ),
+        }
+    net_text = net_path.read_text(encoding="utf-8", errors="replace")
     nets = parse_net_report(net_text)
     refdes_to_nets = _build_refdes_to_nets(nets)
 
     bom_rows: list[dict[str, str]] = []
     if bom_report_file:
-        bom_text = Path(bom_report_file).read_text(encoding="utf-8", errors="replace")
+        bom_path = Path(bom_report_file)
+        if not bom_path.exists():
+            return {
+                "error": (
+                    f"BOM_REPORT_FILE_NOT_FOUND: '{bom_report_file}' does not exist. bom_report_file is "
+                    "optional — drop it and re-run with only net_report_file, or tell the orchestrator "
+                    "a BOM report (header 'SYM_NAME,COMP_DEVICE_TYPE') is needed for the test_points "
+                    "check. Do NOT retry with an invented path."
+                ),
+            }
+        bom_text = bom_path.read_text(encoding="utf-8", errors="replace")
         bom_rows = parse_bom_report(bom_text)
 
     findings: list[dict] = []

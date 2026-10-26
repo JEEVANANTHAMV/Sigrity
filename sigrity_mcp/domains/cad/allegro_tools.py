@@ -39,8 +39,8 @@ allegro_constraint_tools.py all compose into the SAME Allegro SKILL session (one
 ONE cross-file dispatcher tool, `allegro_configure(session_id, operations)`, defined here
 (each item is `{"op": "<short-name>", **kwargs}`, `short-name` = the function name with
 the `allegro_` prefix stripped). Grouped by what they do: net/component/board-level ops
-(`create_net, create_nets, create_component, create_board_outline, create_stackup,
-set_variable, run_drc, save_design` — from this file), geometry ops (`create_trace,
+(`create_net, create_nets, create_component, create_board_outline, create_route_keepin,
+create_stackup, set_variable, run_drc, save_design` — from this file), geometry ops (`create_trace,
 create_via, create_simple_padstack, place_module_instance, assign_net, delete_connect,
 create_copper_shape, create_film, get_module_instance_location, get_net_length` — from
 allegro_geometry_tools.py), and constraint ops (`set_spacing_constraint,
@@ -229,6 +229,33 @@ async def allegro_create_board_outline(session_id: str, points: list[list[float]
     proper `r_path` via `closed_outline_path_expr` and left unclosed-on-purpose is NOT an
     option: the path is auto-closed (first point repeated as last) per the SKILL doc's
     "a path that does not end at its start point is an ERROR" rule.
+
+    THIS OP WORKS — CONFIRMED LIVE AGAIN 2026-10-25 against a real client BRS build, by a
+    standalone readback bypassing the LLM entirely (`axlDBGetShapes("BOARD GEOMETRY/OUTLINE")`
+    returned a real shape, `(car shapes)->bBox` = `((0.0 0.0) (2362.2 2362.2))`, exactly the
+    60mm board requested). Do NOT trust `run_allegro_report(..., report_code="sum")`'s
+    "Layout area (sq in)" / "Router Keepin" fields to verify this op — a real BRS run drew
+    this conclusion backwards and reported the outline as broken. Those two report fields
+    read `axlDBGetDesign()->keepinRoute` (layer `ROUTE KEEPIN/ALL`), which is a COMPLETELY
+    SEPARATE shape from `BOARD GEOMETRY/OUTLINE` and stays nil until `create_route_keepin`
+    (below) is called — they report 0.00 / (0,0)-(0,0) even when the real outline exists and
+    is the right size. To verify this op for real, capture a readback via SKILL's own
+    `outfile`/`fprintf` in the same session (the same technique this module's
+    `allegro_get_net_length` docstring describes), e.g. `(let ((f (outfile "verify.txt" "w"))
+    (shapes (axlDBGetShapes "BOARD GEOMETRY/OUTLINE"))) (fprintf f "count=%d bbox=%L\\n"
+    (length shapes) (when shapes (car shapes)->bBox)) (close f))`, then read that file.
+
+    NOT IDEMPOTENT: calling this op again (e.g. after a report falsely suggested the first
+    call failed) does NOT replace the existing outline — it draws an ADDITIONAL overlapping
+    shape on top of it (confirmed: 2 retries on the same board left 3 outline shapes on
+    disk). If you need to redo an outline, delete the old shape first rather than re-calling
+    this blindly on suspected failure.
+
+    If you actually need the board to report a nonzero "Layout area" / have a routable
+    boundary Allegro's placement, routing, and report tools recognize, also call
+    `create_route_keepin` (same points, typically the same or inset polygon) — the physical
+    outline and the route keepin are two independent concepts in Allegro and this op only
+    creates the former.
     Call load_skill('sigrity-cad') for the full verified playbook."""
     if len(points) < 3:
         raise ValueError("A board outline needs at least 3 points.")
@@ -245,6 +272,39 @@ async def allegro_create_board_outline(session_id: str, points: list[list[float]
     # area 5579989.0 = 60mm², round-tripped through disk). The r_path itself is
     # auto-closed by closed_outline_path_expr; the fill flag is separate.
     expr = f'(let ((g_outline {path_expr})) (axlDBCreateShape g_outline nil "BOARD GEOMETRY/OUTLINE"))'
+    tcl_sessions.add_line(session_id, _skill_line(expr))
+    return {"session_id": session_id, "point_count": len(points)}
+
+
+async def allegro_create_route_keepin(session_id: str, points: list[list[float]]) -> dict:
+    """Create the ROUTE KEEPIN boundary from a closed polygon of [x, y] points — the
+    shape Allegro's placement/routing tools and `run_allegro_report(report_code="sum")`'s
+    "Layout area" / "Router Keepin" fields actually read (`axlDBGetDesign()->keepinRoute`),
+    as DISTINCT from the cosmetic `create_board_outline` shape (`BOARD GEOMETRY/OUTLINE`).
+
+    ADDED 2026-10-25 (real root-cause, real client BRS build): `create_board_outline`
+    was live-verified to genuinely work (see that op's docstring), but a report pulled
+    AFTER calling only `create_board_outline` still showed "Layout area (sq in): 0.00" and
+    "Router Keepin (in): (0.0000,0.0000) by (0.0000,0.0000)" — read as "the outline failed".
+    It didn't fail; nothing had populated `ROUTE KEEPIN/ALL` yet, because no tool did. Per
+    the vendored `axlDbidDoc.txt` ("DESIGN Attributes"): `keepinRoute` = "Route shape/rect
+    keepin, nil if none (layer ROUTE KEEPIN/ALL)" — a field entirely separate from
+    `designOutline` (layer `BOARD GEOMETRY/DESIGN_OUTLINE`, also separate from
+    `BOARD GEOMETRY/OUTLINE`) and from `create_board_outline`'s shape. In the normal Allegro
+    workflow these usually share the same polygon (draw the physical edge, then define the
+    routable area to match it) — call this op with the same `points` as
+    `create_board_outline` right after it, in the same session, unless you deliberately want
+    a smaller routable area inset from the physical edge.
+
+    Same construction as `create_board_outline` (`axlPathStart` -> `axlDBCreateShape`,
+    unfilled) on `"ROUTE KEEPIN/ALL"` instead of `"BOARD GEOMETRY/OUTLINE"`. Not idempotent
+    for the same reason noted on that op — do not re-call this speculatively if a report
+    still shows a zero area; verify via a captured `outfile`/`fprintf` readback instead.
+    Call load_skill('sigrity-cad') for the full verified playbook."""
+    if len(points) < 3:
+        raise ValueError("A route keepin needs at least 3 points.")
+    path_expr = closed_outline_path_expr(points)
+    expr = f'(let ((g_keepin {path_expr})) (axlDBCreateShape g_keepin nil "ROUTE KEEPIN/ALL"))'
     tcl_sessions.add_line(session_id, _skill_line(expr))
     return {"session_id": session_id, "point_count": len(points)}
 
@@ -357,6 +417,7 @@ _CONFIGURE_OPS = {
     "create_nets": allegro_create_nets,
     "create_component": allegro_create_component,
     "create_board_outline": allegro_create_board_outline,
+    "create_route_keepin": allegro_create_route_keepin,
     "create_stackup": allegro_create_stackup,
     "set_variable": allegro_set_variable,
     "run_drc": allegro_run_drc,
@@ -400,33 +461,72 @@ async def allegro_configure(session_id: str, operations: list[dict]) -> dict:
     `start_allegro_session` -> many `allegro_configure` calls -> one `allegro_run_session`),
     so this single dispatcher spans all three files rather than each file getting its own.
 
-    Each item in `operations` is `{"op": "<name>", **kwargs}` where `<name>` is one of:
-    - net/component/board-level (allegro_tools.py): `create_net, create_nets,
-      create_component, create_board_outline, create_stackup, set_variable, run_drc,
-      save_design`
-    - geometry (allegro_geometry_tools.py): `create_trace, create_via,
-      create_simple_padstack, place_module_instance, assign_net, delete_connect,
-      create_copper_shape, create_film, create_package_keepin, create_keepout,
-      list_packages, import_package, get_module_instance_location, get_net_length`
-    - constraint (allegro_constraint_tools.py): `set_spacing_constraint,
-      set_physical_constraint, create_ecset, delete_ecset, set_electrical_constraint,
-      get_electrical_constraint, set_electrical_check_mode, get_net_constraint,
-      list_ecsets, design_value_set`
+    Each item in `operations` is `{"op": "<name>", **kwargs}`. `kwargs` are EXACTLY that
+    operation's own parameters below (everything except `session_id`, which is threaded through
+    automatically) — these are the real Python keyword-argument names, read off the actual
+    function signatures; a key not listed here for a given op WILL raise `ValueError` naming the
+    exact index/op/bad-kwarg, it will never be silently accepted or ignored. This list is the
+    ONLY place these kwargs are documented to you — the individual `allegro_*` functions this
+    dispatches to are not separately exposed as callable tools, so their own docstrings are not
+    visible to you; do not guess a field name that isn't in this exact list, and do not invent an
+    op name or extra kwarg no matter how plausible it sounds (there is no `top_layer` field
+    anywhere below, for example — a padstack's layer kwarg is `pad_layer`).
 
-    `kwargs` are that operation's own parameters (everything except `session_id`, which is
-    threaded through automatically) — see each corresponding `allegro_*` function's own
-    docstring (still present in its original module, just no longer individually exposed
-    as a top-level tool) for its exact kwargs and caveats (e.g. `delete_connect`'s
-    destructive-NET warning, `save_design`'s "axlSaveDesign takes no path argument" note,
-    `create_trace`'s required-width/self-overlap-check behavior). Operations are applied
-    in list order, since later ones (e.g. assigning a net to a pin just created) can
-    depend on earlier ones. Raises `ValueError` naming the exact index and op on an
-    unknown `op` or a bad/missing kwarg, rather than silently skipping it.
+    - `create_net(net_name, net_type=None)`
+    - `create_nets(net_names, net_type=None)`  — `net_names` is a list of strings
+    - `create_component(ref_des, device_name, package=None, value=None)`
+    - `create_board_outline(points)`  — `points` is a list of `[x, y]` pairs. Draws the
+      COSMETIC physical outline (`BOARD GEOMETRY/OUTLINE`) only — `run_allegro_report`'s
+      "Layout area" / "Router Keepin" fields read a DIFFERENT shape and will show 0.00 /
+      (0,0)-(0,0) until `create_route_keepin` is also called; that is not a sign this op
+      failed. Not idempotent — do not re-call it speculatively (see its own docstring for
+      how to verify for real).
+    - `create_route_keepin(points)`  — same `points` shape as `create_board_outline`
+      (usually the identical polygon); draws the ROUTABLE boundary (`ROUTE KEEPIN/ALL`)
+      that placement/routing/reports actually use. Call right after `create_board_outline`
+      in the same session unless a smaller inset routable area is wanted.
+    - `create_stackup(position="bottom", name=None, layer_type=None, material=None, thickness_mil=None)`
+    - `set_variable(name, value)`
+    - `run_drc(batch_mode=False)`
+    - `save_design(output_file=None)`  — note: `axlSaveDesign` takes no path argument; `output_file` is for this tool's own bookkeeping only
+    - `create_trace(points, layer, net_name, width)`  — `width` is required
+    - `create_via(padstack_name, x, y, net_name=None, rotation=0.0, mirror=False)`
+    - `create_simple_padstack(name, pad_layer, pad_width, pad_height, pad_figure="RECTANGLE", drill_diameter=None)`
+      — `pad_layer` (NOT `top_layer`/`layer`) is the only layer kwarg; omit `drill_diameter`
+      entirely for an SMT pad with no drill (do not pass `drill_x`/`drill_y`/`drill`/`drill_size`
+      — a round drill takes one scalar, `drill_diameter`, and nothing else)
+    - `place_module_instance(instance_name, module_def_name, x, y, rotation=0.0, logic_from_schematic=False, mirror=False)`
+    - `assign_net(object_type, object_name, net_name, ripup=False, ignore_fixed=False)`
+    - `delete_connect(object_type, object_name, ripup=True)`  — DESTRUCTIVE: removes the connection, not reversible within the session
+    - `create_copper_shape(layer, net_name, points, dynamic=True)`
+    - `create_film(film_name, layers, negative=False, mirrored=False)`
+    - `create_package_keepin(points)`
+    - `create_keepout(points)`
+    - `list_packages(package_dir=None)`
+    - `import_package(package_dir, placements, device_dir=None)`
+    - `get_module_instance_location(instance_name)`
+    - `get_net_length(net_name)`
+    - `set_spacing_constraint(constraint, value, cset=None, layer=None)`
+    - `set_physical_constraint(constraint, value, cset=None, layer=None)`
+    - `create_ecset(name, copy_from=None)`
+    - `delete_ecset(name)`
+    - `set_electrical_constraint(ecset, check, value)`
+    - `get_electrical_constraint(ecset, check)`
+    - `set_electrical_check_mode(check, mode)`
+    - `get_net_constraint(net_name, constraint_name)`
+    - `list_ecsets(domain="electrical")`
+    - `design_value_set(check, value)`
+
+    Operations are applied in list order, since later ones (e.g. assigning a net to a pin just
+    created) can depend on earlier ones.
 
     Example: `operations=[{"op": "create_net", "net_name": "GND"},
     {"op": "create_trace", "points": [[0, 0], [100, 0]], "layer": "TOP",
     "net_name": "GND", "width": 5.0},
+    {"op": "create_simple_padstack", "name": "M3_MOUNT", "pad_layer": "TOP",
+    "pad_width": 125.98, "pad_height": 125.98, "pad_figure": "ROUND", "drill_diameter": 125.98},
     {"op": "set_spacing_constraint", "constraint": "LINE_TO_LINE", "value": 5.0}]`.
+    Pass `operations` as a real JSON array value, not as a JSON-encoded string.
     Call load_skill('sigrity-cad') for the full verified playbook, pitfalls, and a live example."""
     results = []
     for i, raw_op in enumerate(operations):
