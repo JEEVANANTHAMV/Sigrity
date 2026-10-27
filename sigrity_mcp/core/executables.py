@@ -201,20 +201,20 @@ EXECUTABLES: dict[str, str] = {
 #: through the screenshot+dismiss path instead. Keep in sync with
 #: `GUI_TOOL_EXE_NAMES` in core.gui_tool_runner (that set is the source of truth for
 #: exe-stem matching; this set is keyed by logical name for tool-facing messages).
+#:
+#: 2026-10-26 CORRECTION: only the tools that genuinely open a window even on their
+#: batch flags stay here. The other entries from the old list (powerdc, powersi,
+#: xtractim, clarity3d_workbench, optimizepi, xcitepi, xcitepi_console, broadbandspice,
+#: spdsim, spdsim_console, celsius3d) were removed after live verification (each was
+#: launched with its documented batch invocation -- `-b -tcl`, `--NoUI -tcl`,
+#: `-b -export_data`, `-b -<mode>`, `-b <file>`, `-tcl` -- and ran CONSOLE-ONLY with
+#: ZERO windows + a real return code). Keep them out: routing them through the GUI
+#: observer is what made them "open the GUI" (screenshots+dialog-dismiss) and disabled
+#: the log-stall watchdog, which read to callers as a hang. Re-add a name here ONLY if
+#: a fresh live probe shows it opens a window on its batch flags.
 GUI_TOOL_NAMES: frozenset[str] = frozenset({
-    "powerdc",
-    "powersi",
-    "xtractim",
-    "clarity3d_workbench",
-    "optimizepi",
-    "xcitepi",
-    "xcitepi_console",
-    "broadbandspice",
-    "spdsim",
-    "spdsim_console",
     "powertree",
     "optimality",
-    "celsius3d",
 })
 
 

@@ -16,9 +16,10 @@ file" was the CWD-relative path not resolving. Two takeaways from the re-test: (
 older hypothesis (drive it via `sigrity::do exec ...` inside a live PowerSI session) is
 UNNEEDED and is also not valid in 24.0 — standalone `-b` works; (2) judge success by the
 ARTIFACTS (C.CUR/V.CUR/dc.out/rtlog) and the CWD, never by that single log line. This
-tool is routed through the GUI-tool runner (GUI_TOOL_EXE_NAMES) purely because SPDSIM can
-open a GUI in some flows — a quiet successful console run must not be mistaken for
-"needs_user_intervention".
+tool ran CONSOLE-ONLY with zero windows (verified 2026-10-26: a real `-b
+<file.spd>` run produced real C.CUR/V.CUR/dc.out artifacts and exit 0 with no GUI),
+so it is NOT routed through the GUI-tool runner -- it runs as an ordinary console
+job (the earlier GUI_TOOL_EXE_NAMES routing was overhead and is now removed).
 """
 
 from __future__ import annotations

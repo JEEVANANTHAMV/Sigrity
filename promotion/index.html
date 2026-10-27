@@ -1,0 +1,527 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Sigrity Agent Hub — 18 Agents, One Command Center</title>
+<style>
+  :root{
+    --bg:#0a0e1a; --panel:#111827; --ink:#e6edf7; --muted:#93a4bf;
+    --accent:#38bdf8; --accent2:#818cf8; --good:#34d399; --line:#1e293b;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--ink);
+    font-family:"Segoe UI",system-ui,-apple-system,Roboto,Helvetica,Arial,sans-serif}
+  #stage{position:relative;width:100vw;height:100vh;overflow:hidden}
+  .scene{position:absolute;inset:0;display:flex;flex-direction:column;
+    align-items:center;justify-content:center;padding:4vw;opacity:0;
+    transform:scale(1.04);transition:opacity .8s ease,transform .8s ease;pointer-events:none}
+  .scene.active{opacity:1;transform:scale(1);pointer-events:auto}
+  .scene.enter-from-left .cap{transform:translateX(-40px)}
+  .scene.active .cap,.scene.active .name,.scene.active .bignum,
+  .scene.active .pill,.scene.active .task{animation:rise .7s cubic-bezier(.2,.7,.2,1) both}
+  @keyframes rise{from{opacity:0;transform:translateY(26px)}to{opacity:1;transform:translateY(0)}}
+  .cap{font-size:clamp(11px,1.3vw,15px);letter-spacing:.32em;text-transform:uppercase;
+    color:var(--accent);font-weight:600;margin-bottom:18px}
+  .name{font-size:clamp(30px,5.6vw,72px);font-weight:800;line-height:1.02;
+    background:linear-gradient(90deg,#fff,#9ec5ff);-webkit-background-clip:text;background-clip:text;
+    color:transparent;text-align:center;margin-bottom:14px}
+  .tag{font-size:clamp(13px,1.7vw,20px);color:var(--muted);max-width:52ch;
+    text-align:center;margin-bottom:26px}
+  .bignum{position:absolute;right:3vw;top:50%;transform:translateY(-50%);
+    font-size:clamp(120px,26vw,340px);font-weight:900;color:#16213e;line-height:1;
+    letter-spacing:-.04em;z-index:0}
+  .card{position:relative;z-index:1;background:linear-gradient(160deg,#0f172a 0%,#131c33 100%);
+    border:1px solid var(--line);border-radius:18px;padding:26px 30px;max-width:860px;width:100%;
+    box-shadow:0 30px 80px -20px rgba(0,0,0,.6)}
+  .row{display:flex;gap:16px;flex-wrap:wrap;justify-content:center;margin-top:6px}
+  .pill{background:#0b1220;border:1px solid #24324d;border-radius:999px;
+    padding:8px 16px;font-size:clamp(11px,1.35vw,15px);color:#cfe0ff;
+    display:inline-flex;align-items:center;gap:8px}
+  .pill .dot{width:8px;height:8px;border-radius:50%;background:var(--accent);box-shadow:0 0 12px var(--accent)}
+  .task{margin-top:22px;background:#0a1020;border:1px solid #1d2b45;border-left:3px solid var(--accent2);
+    border-radius:10px;padding:14px 18px;font-size:clamp(12px,1.5vw,16px);color:#bcd0f2;line-height:1.5}
+  .task .lbl{display:block;font-size:10px;letter-spacing:.2em;text-transform:uppercase;
+    color:var(--accent2);margin-bottom:6px;font-weight:700}
+  .resp{margin-top:14px;background:#070c16;border:1px solid #18243a;border-radius:10px;
+    padding:14px 18px;font-family:"Cascadia Code",Consolas,monospace;font-size:clamp(10px,1.2vw,13px);
+    color:#8fd6a0;line-height:1.55;white-space:pre-wrap;max-height:160px;overflow:hidden;
+    position:relative;mask-image:linear-gradient(180deg,#000 78%,transparent 100%)}
+  .resp::before{content:"LIVE RESPONSE — ";color:#3f5b48;font-size:10px;letter-spacing:.15em}
+  .hero .name{font-size:clamp(26px,4.4vw,56px);max-width:92vw;white-space:normal}
+  .hero .stats{display:flex;gap:clamp(18px,5vw,70px);margin-top:34px;flex-wrap:wrap;justify-content:center}
+  .hero .stat{text-align:center}
+  .hero .stat .n{font-size:clamp(40px,7vw,86px);font-weight:900;
+    background:linear-gradient(180deg,#38bdf8,#c7d7fe);-webkit-background-clip:text;background-clip:text;color:transparent}
+  .hero .stat .l{font-size:clamp(11px,1.3vw,14px);color:var(--muted);letter-spacing:.14em;text-transform:uppercase;margin-top:4px}
+  .outro .name{font-size:clamp(24px,4vw,48px)}
+  .outro .cta{margin-top:26px;font-size:clamp(14px,2vw,22px);color:var(--good);font-weight:600;letter-spacing:.02em}
+  .url{margin-top:10px;font-family:Consolas,monospace;font-size:clamp(12px,1.6vw,18px);color:#7fb0e6}
+  .footnote{margin-top:26px;font-size:clamp(10px,1.2vw,13px);color:#5c7295;max-width:64ch;line-height:1.5}
+
+  /* progress */
+  #barWrap{position:fixed;top:0;left:0;right:0;height:4px;background:#131c33;z-index:50}
+  #bar{height:100%;width:0;background:linear-gradient(90deg,var(--accent),var(--accent2));transition:width .2s linear}
+  /* controls */
+  #hud{position:fixed;bottom:0;left:0;right:0;display:flex;gap:10px;align-items:center;
+    padding:12px 16px;background:linear-gradient(0deg,rgba(5,8,16,.85),transparent);z-index:50}
+  .btn{background:#0d1526;border:1px solid #26344f;color:#dbe6f7;border-radius:9px;
+    padding:9px 15px;font-size:13px;cursor:pointer;transition:all .15s;font-weight:600}
+  .btn:hover{background:#16233c;border-color:var(--accent)}
+  .btn.primary{background:var(--accent);color:#04121f;border-color:var(--accent)}
+  #progress{margin-left:auto;font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums}
+  #title{position:fixed;top:14px;left:18px;font-size:13px;letter-spacing:.18em;text-transform:uppercase;
+    color:#5c7295;font-weight:700;z-index:50}
+  /* start overlay */
+  #overlay{position:fixed;inset:0;z-index:100;display:flex;flex-direction:column;align-items:center;justify-content:center;
+    background:radial-gradient(1200px 600px at 50% 20%,#101a33,#070a14);text-align:center;padding:4vw}
+  #overlay h1{font-size:clamp(30px,6vw,70px);font-weight:900;
+    background:linear-gradient(90deg,#fff,#7fb0e6);-webkit-background-clip:text;background-clip:text;color:transparent}
+  #overlay p{color:var(--muted);margin-top:14px;font-size:clamp(14px,1.8vw,19px);max-width:60ch}
+  #overlay .big{margin-top:34px;font-size:clamp(16px,2.3vw,24px);padding:16px 38px;border-radius:999px;
+    background:linear-gradient(90deg,var(--accent),var(--accent2));color:#04121f;font-weight:800;border:none;cursor:pointer}
+  #overlay.hide{opacity:0;pointer-events:none;transition:opacity .6s}
+  .grid-bg{position:absolute;inset:0;z-index:-1;opacity:.25;
+    background-image:linear-gradient(#1b2740 1px,transparent 1px),linear-gradient(90deg,#1b2740 1px,transparent 1px);
+    background-size:44px 44px;animation:pan 30s linear infinite}
+  @keyframes pan{to{background-position:44px 44px}}
+  .glow{position:absolute;width:60vw;height:60vw;border-radius:50%;filter:blur(80px);opacity:.25;z-index:-1;
+    background:radial-gradient(circle,var(--accent),transparent 60%);top:-10%;left:-10%;animation:float 18s ease-in-out infinite}
+  @keyframes float{50%{transform:translate(20vw,14vh)}}
+</style>
+</head>
+<body>
+<div id="barWrap"><div id="bar"></div></div>
+<div id="title">Sigrity Agent Hub &mdash; Live Demo</div>
+<div id="stage"></div>
+<div id="hud">
+  <button class="btn" id="bPrev">&#9664; Prev</button>
+  <button class="btn primary" id="bPlay">&#10074;&#10074; Pause</button>
+  <button class="btn" id="bNext">Next &#9654;</button>
+  <button class="btn" id="bMute">&#128266; Sound On</button>
+  <div id="progress"></div>
+</div>
+<div id="overlay">
+  <div class="grid-bg"></div>
+  <div class="glow"></div>
+  <h1>Sigrity Agent Hub</h1>
+  <p><b>18 AI agents</b> driving the full Cadence Sigrity &amp; Allegro/OrCAD flow &mdash; from schematic to sign-off.
+     This presentation was built from <b>live message&rarr;response</b> captures against the running app
+     (localhost:5173, logged in as <code>admin@sigrityagenthub.app</code> via <code>.env.example</code>).</p>
+  <button class="big" id="bStart">&#9654; Play the Show</button>
+  <p style="margin-top:18px;font-size:12px;color:#4a5c78">BGM generated in-browser (Web Audio) &middot; no external files &middot; click once to enable sound</p>
+</div>
+
+<script>
+const AGENTS = [
+ {
+  "id": "capture_schematic",
+  "name": "Capture & Schematic",
+  "family": "CAD / Allegro-OrCAD",
+  "summary": "Builds and checks OrCAD Capture schematics and PCB netlists, fully headless.",
+  "caps": [
+   "Author a Capture schematic from scratch",
+   "Extract netlist from .dsn (headless)",
+   "Generate PCB netlist (.pst)",
+   "Design-rule checklist (decoupling, resets, test pts)",
+   "Import .pst / ASCII netlists to .brd"
+  ],
+  "task": "Draw a simple schematic with a 5V regulator, two 10k resistors, and a decoupling cap, then generate the PCB netlist.",
+  "live": "I'll start by loading the live playbook for my domain, then plan the schematic. I have the playbook. This is the headless Capture pipeline (Task 10): author schematic → generate PCB netlist. First I need to find real `.olb` libraries containing a regulator, resistor, and capacitor. Let me search. Found `Regulator.olb`...."
+ },
+ {
+  "id": "allegro_project_library",
+  "name": "Allegro Project & Library",
+  "family": "CAD / Allegro-OrCAD",
+  "summary": "Sets up and manipulates Allegro board projects, libraries, and mechanical data.",
+  "caps": [
+   "Create a blank .brd from a real template",
+   "Import DXF outline (new .brd)",
+   "Export mechanical data to DXF",
+   "Copy / package a schematic project",
+   "Compile .dra into an Allegro symbol",
+   "Run a full SKILL session"
+  ],
+  "task": "Create a new blank Allegro board and import my board outline DXF into it.",
+  "live": "I'll start by loading the live playbook and checking what's in your workspace. I've loaded the playbook. Now let me check for your DXF file — I don't see an `/uploads` directory yet, so let me look more broadly. Let me narrow the search to just my workspace (excluding the large Cadence install). I've loaded the playboo..."
+ },
+ {
+  "id": "allegro_placement_routing",
+  "name": "Allegro Placement & Routing",
+  "family": "CAD / Allegro-OrCAD",
+  "summary": "Runs placement, auto-routing, stackup generation, and constraint setup.",
+  "caps": [
+   "Auto-placement + APR (any-angle router)",
+   "Z-Router fan-out / pin escape",
+   "One-shot place -> autoroute -> DRC assist",
+   "SPECCTRA export/autoroute/import",
+   "Multilayer & 18-layer rigid-flex stackups",
+   "High-speed constraint presets (DDR/PCIe/USB4)"
+  ],
+  "task": "Run auto-placement on my board, autoroute it, and report the result.",
+  "live": "I'll start by loading the live playbook and checking what board file you have available. The playbook is loaded. Now I need to find your board file — the `/cadence` output dir is empty, so let me check for attached files and any existing boards. No board file is attached in your workspace, and the only `.brd` indexed i..."
+ },
+ {
+  "id": "allegro_drc_manufacturing",
+  "name": "Allegro DRC & Manufacturing",
+  "family": "CAD / Allegro-OrCAD",
+  "summary": "Runs DRC, design reports, and every manufacturing/release export.",
+  "caps": [
+   "Headless batch DRC + written report",
+   "dbdoctor board-integrity check",
+   "Real Gerber (RS274X) artwork",
+   "IPC-2581 / IPC-356 / STEP / PDF / IDF / IDX",
+   "Manufacturing-package validation",
+   "Format translators (Concept/OLB/DML <-> XML)"
+  ],
+  "task": "Run a full DRC check on my board and export the Gerber files and an IPC-2581.",
+  "live": "I'll start by loading the live playbook and finding your board file. I have the playbook. Now let me find your board file — checking uploads and the workspace. No board file is attached in `/uploads` and `/cadence` is empty. Let me search the workspace and library roots for any `.brd` files. I don't see a board file at..."
+ },
+ {
+  "id": "allegro_export_docs",
+  "name": "Allegro Export & Documentation",
+  "family": "CAD / Allegro-OrCAD",
+  "summary": "Extracts design data and auto-generates engineering documentation + AI audit artifacts.",
+  "caps": [
+   "Design-DB extraction (extracta)",
+   "Hardware Design Document (HDD)",
+   "Bring-up & validation test plan",
+   "Board user guide",
+   "Traceability matrix",
+   "AI audit: tag revision, record approval, change report"
+  ],
+  "task": "Extract the design data from my board and generate a Hardware Design Document.",
+  "live": null
+ },
+ {
+  "id": "pspice",
+  "name": "PSpice Simulation",
+  "family": "CAD / Allegro-OrCAD",
+  "summary": "Runs batch PSpice circuit simulations on .cir netlists and retrieves results.",
+  "caps": [
+   "Batch PSpice sim of a .cir netlist",
+   "Background job, wait for completion",
+   "Tail log + read output waveforms",
+   "Live sigrity-cad playbook on load"
+  ],
+  "task": "Run a transient simulation on my PSpice .cir netlist and tell me the results.",
+  "live": null
+ },
+ {
+  "id": "powerdc",
+  "name": "PowerDC",
+  "family": "Power Integrity",
+  "summary": "Sets up and runs PowerDC DC/AC power-integrity (IR-drop) analyses and sign-off reports.",
+  "caps": [
+   "Open doc + attach .spd layout",
+   "Batch session configuration",
+   "Launch PowerDC as a background job",
+   "PowerDC sign-off report export",
+   "Job polling / log reading",
+   "Live sigrity-pi playbook on load"
+  ],
+  "task": "Check IR drop on my board and export the PowerDC sign-off report.",
+  "live": null
+ },
+ {
+  "id": "xcitepi",
+  "name": "XcitePI",
+  "family": "Power Integrity",
+  "summary": "Runs XcitePI frequency-domain power-integrity (PDN impedance) analyses.",
+  "caps": [
+   "Open XcitePI doc + load technology file",
+   "Batch configuration (PDN features)",
+   "Launch XcitePI as a background job",
+   "Job polling / result reading",
+   "Live sigrity-pi playbook on load"
+  ],
+  "task": "Run an XcitePI PDN impedance analysis on my board over 10 kHz to 1 GHz.",
+  "live": null
+ },
+ {
+  "id": "optimizepi",
+  "name": "OptimizePI",
+  "family": "Power Integrity",
+  "summary": "Drives OptimizePI to tune PDN designs (decap placement, layer stack).",
+  "caps": [
+   "Open OptimizePI doc",
+   "Batch workflow configuration",
+   "Launch OptimizePI as a background job",
+   "Job polling / result reading",
+   "Live sigrity-pi playbook on load"
+  ],
+  "task": "Use OptimizePI to propose the best decap placement for my PDN.",
+  "live": null
+ },
+ {
+  "id": "signal_integrity",
+  "name": "Signal Integrity (PowerSI / BroadbandSPICE / SPDSim)",
+  "family": "Signal Integrity",
+  "summary": "PowerSI session work, broadband-SPICE model fitting/checking, and SPDSim transmission-line sims.",
+  "caps": [
+   "PowerSI: open layout + batch config",
+   "BroadbandSPICE: fit SPICE model to S-params",
+   "BroadbandSPICE: passivity/causality check",
+   "SPDSim: transmission-line field sim",
+   "Job polling / result reading",
+   "Live sigrity-si playbook on load"
+  ],
+  "task": "Check my network file for passivity violations and fit a broadband SPICE model.",
+  "live": null
+ },
+ {
+  "id": "thermal",
+  "name": "Thermal Simulation (Celsius 2D/3D/CFD)",
+  "family": "Thermal",
+  "summary": "Runs Celsius thermal simulations across 2D, 3D, and CFD solvers.",
+  "caps": [
+   "Celsius2D thermal / stress workspace",
+   "Celsius3D session on a .3dth project",
+   "CelsiusCFD session + CPU % setting",
+   "Thermal maps & hotspot temps",
+   "Job polling / result reading",
+   "Live sigrity-celsius playbook on load"
+  ],
+  "task": "Run a thermal simulation on my board and tell me the hotspot temperatures.",
+  "live": null
+ },
+ {
+  "id": "clarity3d",
+  "name": "Clarity3D Extraction",
+  "family": "3D Extraction",
+  "summary": "Configures and runs full 3D electromagnetic simulations/extractions.",
+  "caps": [
+   "Open .3dem + import GDSII directly",
+   "Add nets, lumped + wave ports",
+   "Mesh options + frequency sweep",
+   "Local (non-HPC) run resources",
+   "Export Touchstone S-parameters"
+  ],
+  "task": "Set up a Clarity3D simulation with a 1-10 GHz sweep and export the Touchstone results.",
+  "live": null
+ },
+ {
+  "id": "xtractim",
+  "name": "XtractIM Extraction",
+  "family": "3D Extraction",
+  "summary": "Fast 3D impedance/extraction incl. Electrical Package Analysis on layouts.",
+  "caps": [
+   "Open .spd + Tcl session",
+   "Select nets (one or all)",
+   "Analysis mode (EPA) + package type",
+   "PG analysis options + resolution",
+   "Process & save workspace",
+   "Background job + results"
+  ],
+  "task": "Extract the PDN impedance for my board using XtractIM in EPA mode.",
+  "live": null
+ },
+ {
+  "id": "extraction_utilities",
+  "name": "Extraction Utilities (T2B / Format Translators / Model Checks)",
+  "family": "3D Extraction",
+  "summary": "Format translators, model conversion, field solves, and model validation.",
+  "caps": [
+   "SPICE I/O -> IBIS (T2B)",
+   "GDS/OASIS/NDd/PADS/RIF/DSN -> .spd",
+   "Touchstone de-embed / cascade (abcd)",
+   "2D field solver (bem2d3, x-hatch)"
+  ],
+  "task": "Convert my GDS layout to .spd using Gds2Spd.",
+  "live": null
+ },
+ {
+  "id": "platform_ops",
+  "name": "Platform & Job Ops",
+  "family": "Platform",
+  "summary": "The back-office agent: job lifecycle, install/env status, file ops, AMM, sessions, pipelines.",
+  "caps": [
+   "Full job control (wait/tail/cancel/list)",
+   "Sigrity install manifest + name-server check",
+   "List all Sigrity/Allegro executables (+ status)",
+   "AMM library from spreadsheet",
+   "Run a multi-step tool pipeline in one shot",
+   "Sync SharePoint design repository"
+  ],
+  "task": "Show me all the jobs running right now and which Sigrity tools are installed and verified.",
+  "live": null
+ },
+ {
+  "id": "component_sourcing",
+  "name": "Component Sourcing",
+  "family": "Sourcing",
+  "summary": "Looks up real component availability/pricing and evaluates BOMs against sourcing policy.",
+  "caps": [
+   "Multi-distributor lookup (DigiKey/Mouser/Farnell/Arrow/Avnet)",
+   "Stock, lead time, price, lifecycle, alternates",
+   "BOM evaluation vs AVL / vendor policy",
+   "Rank & filter alternate candidates"
+  ],
+  "task": "Look up stock and lead time for part 0402WGF10K00T5E (a 0402 10k resistor).",
+  "live": null
+ },
+ {
+  "id": "aurora_scoping",
+  "name": "Aurora Scoping",
+  "family": "In-Design Analysis",
+  "summary": "Scopes and runs Sigrity Aurora in-design SI/PI checks; maps each to standalone-tool equivalents.",
+  "caps": [
+   "Honest scope notice (what Aurora can/can't do)",
+   "Run Aurora in-design SI/PI workflow as job",
+   "Standalone alternatives per in-design check",
+   "Job polling / result reading"
+  ],
+  "task": "Tell me what Sigrity Aurora can and can't do in-design, and which standalone tools replace each check.",
+  "live": null
+ },
+ {
+  "id": "knowledge_store",
+  "name": "Documentation Knowledge Store",
+  "family": "Knowledge / RAG",
+  "summary": "Answers 'how do I do X in Cadence' from the installed docs via vector search (RAG).",
+  "caps": [
+   "Multi-query vector search over Cadence docs (Milvus + local backup)",
+   "Breaks compound questions into sub-queries",
+   "Cites exact doc file names per claim",
+   "Honest 'not in library' gaps"
+  ],
+  "task": "How do I write a SKILL script to place components on an Allegro board? Cite the doc file.",
+  "live": null
+ }
+];
+
+// ---------- build scenes ----------
+const stage = document.getElementById('stage');
+let html = '';
+// hero
+html += `<div class="scene hero"><div class="glow"></div>
+  <div style="z-index:1;text-align:center">
+  <div class="cap">Cadence Automation &middot; 211+ tools</div>
+  <div class="name">One Command Center.<br/>Eighteen Agents.</div>
+  <div class="tag">Every signal-, power- and thermal-integrity decision &mdash; orchestrated, audited, and reproducible.<br/>Schematic &rarr; Layout &rarr; SI/PI &rarr; Thermal &rarr; Manufacturing &rarr; Sign-off.</div>
+  <div class="stats">
+    <div class="stat"><div class="n">18</div><div class="l">Specialist Agents</div></div>
+    <div class="stat"><div class="n">151</div><div class="l">Live MCP Tools</div></div>
+    <div class="stat"><div class="n">8</div><div class="l">Engineering Domains</div></div>
+    <div class="stat"><div class="n">1</div><div class="l">Chat Interface</div></div>
+  </div>
+  <div class="footnote">17 Cadence domain agents + 1 RAG knowledge store &middot; 151 registered MCP tool functions of 211+ underlying Cadence capabilities</div>
+  </div></div>`;
+
+AGENTS.forEach((a,i)=>{
+  const resp = a.live ? `<div class="resp">${escapeHtml(a.live.slice(0,320))}&hellip;</div>` : '';
+  html += `<div class="scene"><div class="bignum">${String(i+1).padStart(2,'0')}</div>
+    <div class="cap">${esc(a.family)}</div>
+    <div class="name">${esc(a.name)}</div>
+    <div class="tag">${esc(a.summary)}</div>
+    <div class="card">
+      <div class="row">${a.caps.map(c=>`<span class="pill"><span class="dot"></span>${esc(c)}</span>`).join('')}</div>
+      <div class="task"><span class="lbl">Demo Task (in-app)</span>${esc(a.task)}</div>
+      ${resp}
+    </div></div>`;
+});
+
+// outro
+html += `<div class="scene outro"><div class="glow"></div>
+  <div style="z-index:1;text-align:center">
+  <div class="cap">Ready to deploy</div>
+  <div class="name">Bring the full flow<br/>into one conversation.</div>
+  <div class="tag">React + Vite front-end &middot; FastAPI deepagents orchestrator &middot; Sigrity MCP server &middot; MySQL + vLLM</div>
+  <div class="cta">&#9679; 18 agents online &middot; zero unassigned tools &middot; zero overlapping domain tools</div>
+  <div class="url">http://localhost:5173</div></div></div>`;
+
+stage.innerHTML = html;
+const scenes = [...stage.querySelectorAll('.scene')];
+const SCENE_MS = 9000; // each agent scene; hero/outro handled with longer hold
+const sceneDur = i => (i===0 ? 9000 : (i===scenes.length-1 ? 12000 : SCENE_MS));
+
+function esc(s){return String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}
+function escapeHtml(s){return String(s).replace(/^\n+/,'').replace(/\s+/g,' ')}
+
+// ---------- player ----------
+let idx=0, playing=false, timer=null, hold=0, lastFrame=0;
+const bar=document.getElementById('bar'), prog=document.getElementById('progress'),
+  bPlay=document.getElementById('bPlay');
+
+function show(i){
+  scenes.forEach((s,n)=>s.classList.toggle('active',n===i));
+  idx=i;
+  hold=0;
+  prog.textContent=`${i+1} / ${scenes.length}`;
+  bPlay.innerHTML = playing ? '&#10074;&#10074; Pause' : '&#9654; Resume';
+}
+function tick(now){
+  if(!playing) return;
+  if(!lastFrame) lastFrame=now;
+  const dt=now-lastFrame; lastFrame=now;
+  hold += dt;                    // real elapsed ms -> correct on 30/60/120 Hz
+  const d=sceneDur(idx);
+  bar.style.width=(Math.min(hold/d,1)*100)+'%';
+  if(hold>=d){ show(idx+1>=scenes.length ? 0 : idx+1); }
+}
+function play(){ playing=true; lastFrame=0; bPlay.innerHTML='&#10074;&#10074; Pause'; startMusic(); }
+function pause(){ playing=false; lastFrame=0; bPlay.innerHTML='&#9654; Resume'; }
+function next(){ show((idx+1)%scenes.length); }
+function prev(){ show((idx-1+scenes.length)%scenes.length); }
+
+let loop=null;
+function arm(){ if(loop)cancelAnimationFrame(loop); lastFrame=0; const step=(now)=>{tick(now);loop=requestAnimationFrame(step)};loop=requestAnimationFrame(step); }
+
+document.getElementById('bPlay').onclick=()=>playing?pause():play();
+document.getElementById('bNext').onclick=()=>{next();};
+document.getElementById('bPrev').onclick=()=>{prev();};
+
+// ---------- BGM (Web Audio: soft synth pad, truly loops, no files) ----------
+let actx=null, master=null, musicOn=true, scheduledUntil=0, musicTimer=null;
+const CHORDS=[[220,277.18,329.63],[174.61,220,261.63],[196,246.94,293.66],[164.81,207.65,246.94]];
+const CHORD_SEC=4;
+const bMute=document.getElementById('bMute');
+bMute.onclick=()=>{ musicOn=!musicOn; if(master)master.gain.value=musicOn?0.16:0;
+  bMute.innerHTML=musicOn?'&#128263; Mute':'&#128266; Unmute'; };
+
+function scheduleChord(start, idxCycle){
+  CHORDS[idxCycle % CHORDS.length].forEach(f=>{
+    const o=actx.createOscillator(), g=actx.createGain(), lp=actx.createBiquadFilter();
+    o.type='sine'; o.frequency.value=f; lp.type='lowpass'; lp.frequency.value=900;
+    g.gain.setValueAtTime(0,start);
+    g.gain.linearRampToValueAtTime(0.5/3,start+0.8);
+    g.gain.setValueAtTime(0.5/3,start+CHORD_SEC-1.0);
+    g.gain.linearRampToValueAtTime(0,start+CHORD_SEC);
+    o.connect(lp); lp.connect(g); g.connect(master);
+    o.start(start); o.stop(start+CHORD_SEC+0.05);
+  });
+}
+
+function startMusic(){
+  if(actx){ if(actx.state==='suspended')actx.resume(); return; }
+  try{
+    actx=new (window.AudioContext||window.webkitAudioContext)();
+    master=actx.createGain(); master.gain.value=musicOn?0.16:0; master.connect(actx.destination);
+    // gentle pad drone (continuous)
+    const drone=actx.createOscillator(), dg=actx.createGain(), dl=actx.createBiquadFilter();
+    drone.type='triangle'; drone.frequency.value=55; dl.type='lowpass'; dl.frequency.value=300;
+    dg.gain.value=0.06; drone.connect(dl); dl.connect(dg); dg.connect(master); drone.start(actx.currentTime);
+    // continuously schedule chords ahead so the harmonic pad never stops
+    let cycle=0;
+    const pump=()=>{
+      if(actx.state!=='running') return;
+      while(scheduledUntil < actx.currentTime + 8){ // keep ~8s buffer ahead
+        scheduleChord(scheduledUntil, cycle);
+        scheduledUntil += CHORD_SEC; cycle++;
+      }
+    };
+    scheduledUntil=actx.currentTime; pump();
+    musicTimer=setInterval(pump, 2000);
+  }catch(e){ console.warn('audio',e); }
+}
+
+// start
+document.getElementById('bStart').onclick=()=>{
+  document.getElementById('overlay').classList.add('hide');
+  show(0); play(); arm();
+};
+show(0); // pre-render first scene behind overlay
+prog.textContent=`1 / ${scenes.length}`;
+</script>
+</body>
+</html>

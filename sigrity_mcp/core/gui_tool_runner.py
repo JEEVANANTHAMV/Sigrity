@@ -1,14 +1,13 @@
 """GUI tool runner: screens as logs, dialogs auto-dismissed, no license involved.
 
-On this PREMIUM / no-license-required Sigrity install the PI/SI/extraction/
-thermal tools (PowerDC, PowerSI, XtractIM, Clarity3DWorkbench, OptimizePI,
-XcitePI, XcitePICon, BroadbandSPICE, SPDSIM, SPDsimCon, PowerTree, Optimality,
-Celsius3D) open real GUI windows and block on interactive startup dialogs
-("Product Choices", welcome, "what would you like to do?" ...) even when
-launched from a command line. A console-oriented watcher ("bytes in run.log")
-misreads that: zero output for a while looks like a stall, and the old
-negative-rc / empty-log heuristic labelled exactly that shape a "license
-issue" -- impossible on this build, where no license exists to fail.
+On this PREMIUM / no-license-required Sigrity install, a SMALL number of tools
+genuinely open a real GUI window even when launched from the command line (no
+batch surface exists that runs them headless -- currently just PowerTree and
+Optimality, which have no confirmed `-b`/`-tcl` entry point and block on a
+"Product Choices"/welcome dialog). For those, a console-oriented watcher
+("bytes in run.log") misreads the run: zero output for a while looks like a
+stall, and the old negative-rc / empty-log heuristic labelled that shape a
+"license issue" -- impossible on this build, where no license exists to fail.
 
 This module is the GUI-tool replacement for that model. Design:
 
@@ -31,16 +30,35 @@ This module is the GUI-tool replacement for that model. Design:
     status="success"                   process exited with return code 0
     status="failed"                    process exited non-zero
     status="running_long"              still running after `timeout_s`: a real
-                                       long simulator run, not a hang; the
-                                       caller is expected to keep the job
-                                       'running' and let cancel()/wait manage it
+                                        long simulator run, not a hang; the
+                                        caller is expected to keep the job
+                                        'running' and let cancel()/wait manage it
     status="timeout"                   (reserved; the monitor ended abnormally
-                                       before a normal observation)
+                                        before a normal observation)
     status="needs_user_intervention"   a dialog survived all dismissal attempts
-                                       (latest shot renamed screen_NN_STUCK_Here.png)
-                                       OR the runner prerequisites (pyautogui/PIL/
-                                       pywin32) are unavailable on this host
-                                       (headless / non-Windows dev machine)
+                                        (latest shot renamed screen_NN_STUCK_Here.png)
+                                        OR the runner prerequisites (pyautogui/PIL/
+                                        pywin32) are unavailable on this host
+                                        (headless / non-Windows dev machine)
+
+WHY THIS SET IS SMALL AND MUST STAY SMALL (2026-10-26 correction):
+The earlier version of this set lumped in PowerDC, PowerSI, XtractIM,
+Clarity3DWorkbench, OptimizePI, XcitePI, XcitePICon, BroadbandSPICE, SPDSIM,
+SPDsimCon and Celsius3D on the (wrong) premise that they "open a window and
+block on a dialog even under their batch flags." That premise was disproven
+live (2026-10-26): each of those tools, driven with its DOCUMENTED batch
+invocation (PowerDC/PowerSI/XtractIM/XcitePI `--NoUI`-free `-b -tcl <script>`,
+Clarity3DWorkbench `--NoUI -tcl`, OptimizePI `-b -export_data`, BroadbandSPICE
+`-b -<mode>`, SPDSIM/-Con `-b <spd>`, Celsius3D `-tcl`), runs CONSOLE-ONLY with
+ZERO windows and a real rc + (for most) real log output. Routing them through
+this GUI observer was pure overhead that (a) made them "open the GUI" in the
+screenshot/dismiss sense the user sees and (b) disabled the log-stall watchdog
+(`stall_disabled=gui_tool` in core.jobs), which is why XcitePI-style runs
+appeared to hang indefinitely. They are therefore NOT in GUI_TOOL_EXE_NAMES and
+run as ordinary console jobs. Only the two tools with no confirmed headless
+surface (PowerTree, Optimality -- both probed: open 1 window, stay alive) remain.
+If Cadence ever adds a `-b`/`-tcl` surface to one of the two, move it out here;
+if a new tool proves to open a window even on its batch flags, add it.
 """
 
 from __future__ import annotations
@@ -56,23 +74,21 @@ from sigrity_mcp.core import win32gui_helper
 from sigrity_mcp.core.executables import SELECTOR_DIALOG_PATTERNS
 
 GUI_TOOL_EXE_NAMES: frozenset[str] = frozenset({
-    "PowerDC",
-    "PowerSI",
-    "XtractIM",
-    "Clarity3DWorkbench",
-    "OptimizePI",
-    "XcitePI",
-    "XcitePICon",
-    "BroadbandSPICE",
-    "SPDSIM",
-    "SPDsimCon",
+    # ONLY the tools that open a real window even on their batch invocation and
+    # have no confirmed headless surface. See the module docstring's 2026-10-26
+    # correction for why the other 11 exes moved OUT of this set: under their
+    # documented batch flags they run console-only with zero windows, so routing
+    # them through the GUI observer was pure overhead (it "opened the GUI" in
+    # screenshot/dismiss terms and disabled the log-stall watchdog).
     "PowerTree",
     "Optimality",
-    "Celsius3D",
 })
 """Exe stems (without .exe) that open a GUI on this install. This set is the
 routing source of truth; core.executables.GUI_TOOL_NAMES mirrors it by logical
-name for tool-facing messages."""
+name for tool-facing messages. KEEP THIS LIST MINIMAL -- every stem here makes
+its jobs skip the log-stall watchdog and attach a screen-watching/dialog-dismissing
+observer, which is only correct for a tool that genuinely opens a window on its
+batch flags."""
 
 CONFIRM_BUTTON_WORDS: tuple[str, ...] = (
     "I Agree",

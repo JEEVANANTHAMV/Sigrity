@@ -34,9 +34,19 @@ but fully self-documenting via their own `-help` output (confirmed live on this 
   "BEM2D2" internally — a legacy name baked into its help text, not a typo in this
   module): a 2D static field solver, "complementary to existing BEM2D in order to
   support rigid-flex design" — extracts transmission-line impedance/propagation delay
-  over x-hatched ground planes. `bem2d3.exe -in <geometry.in> -out <results.out>
-  [-xhatchmode y -xhatchhp <hatch_space_m> -xhatchw <hatch_line_width_m>
-  -xhatchangle <angle_deg>]`.
+   over x-hatched ground planes. `bem2d3.exe -in <geometry.in> -out <results.out>
+   [-xhatchmode y -xhatchhp <hatch_space_m> -xhatchw <hatch_line_width_m>
+   -xhatchangle <angle_deg>]`.
+- `XPITechGen.exe -i <input.tech> -o <output.tech> [-key <key_string>]` (doc:
+  doc/xcitepiUG ch9 "Encryption of the Technology File"): XcitePI technology-file
+  encryption utility. Takes an ASCII `.tech` file containing an
+  `encrypt start here` ... `encrypt ends here` block and writes an encrypted tech file
+  (internal key, or a custom `-key`) consumable by XcitePI. CONFIRMED LIVE: a real run
+  on the doc's own example input returned "xpitechgen is finished successfully." and
+  produced a genuine non-empty encrypted artifact (tag body replaced with non-ASCII
+  bytes, header structure preserved). Unlike abcd, XPITechGen's rc 0 is reliable here,
+  but the suite's standing rule still applies — verify the output file exists and is
+  non-empty rather than trusting state alone.
 """
 
 from __future__ import annotations
@@ -44,6 +54,7 @@ from __future__ import annotations
 import os
 from typing import Optional
 
+from sigrity_mcp.core.paths import resolve_path
 from sigrity_mcp.core.process import submit_job
 from sigrity_mcp.mcp_app import mcp
 
@@ -99,3 +110,34 @@ Call load_skill('sigrity-extraction') for the full verified playbook, pitfalls, 
             args += ["-xhatchangle", str(hatch_angle_degrees)]
     record = await submit_job(tool="bem2d3", build_args=args)
     return {"job_id": record.job_id, "state": record.state, "job_dir": record.job_dir, "command": record.command}
+
+
+@mcp.tool
+async def run_xpitechgen(
+    input_tech_file: str,
+    output_tech_file: str,
+    key: Optional[str] = None,
+) -> dict:
+    """Encrypt an XcitePI ASCII technology file into XcitePI-consumable form with XPITechGen, as a background job.
+
+    XPITechGen.exe takes an ASCII `.tech` file containing an `encrypt start here` ...
+    `encrypt ends here` block and writes an encrypted tech file (internal key, or a
+    custom `key` via `-key`). The input must be a real `.tech` file (e.g. the shipped
+    `share/XcitePI/Samples/XcitePI/XcitePI.tech` style); pass absolute paths. Verify by
+    confirming `output_tech_file` exists and is non-empty after the job — do not rely on
+    the job state alone. Call load_skill('sigrity-extraction') for the full playbook."""
+    # XPITechGen runs with the per-job scratch dir as its cwd; resolve both paths to
+    # absolute (relative to the server's cwd) so a caller's relative path can't send it
+    # into the same interactive re-prompt loop the other tools/bin CLIs fall into.
+    args = ["-i", resolve_path(input_tech_file), "-o", resolve_path(output_tech_file)]
+    if key:
+        args += ["-key", key]
+    record = await submit_job(tool="xtractim_techgen", build_args=args)
+    return {
+        "job_id": record.job_id,
+        "state": record.state,
+        "job_dir": record.job_dir,
+        "command": record.command,
+        "note": "Verify 'output_tech_file' exists and is non-empty after the job; "
+        "stdout should contain 'xpitechgen is finished successfully.'",
+    }

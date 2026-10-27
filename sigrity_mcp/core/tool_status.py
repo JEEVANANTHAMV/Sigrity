@@ -112,6 +112,34 @@ TOOL_STATUS: dict[str, ToolStatus] = {
     "netrev": "confirmed_live",
     "netin": "confirmed_live",
     "pstswp": "confirmed_live",
+    # 2026-10-26 suite-wide scenario-test pass (SigrityAgentHub audit): every one of the
+    # previously "untracked / built_untested" layout translators and solvers below was run
+    # live against a real shipped sample input and verified by its real output ARTIFACT
+    # (non-empty .spd / .sNp / result file / encrypted .tech), not by rc. See the
+    # per-tool TOOL_STATUS_NOTES entries for the full evidence + confirmed argv.
+    "gds2spd": "confirmed_live",
+    "oasis2spd": "confirmed_live",
+    "ndd2spd": "confirmed_live",
+    "pads2spd": "confirmed_live",
+    "rif2spd": "confirmed_live",
+    "spdlinks": "confirmed_live",
+    "clarity3d_workbench": "confirmed_live",
+    "broadbandspice": "confirmed_live",
+    "xtractim_techgen": "confirmed_live",
+    # 2026-10-26: the `*_Con.exe` console variants of the working translators are
+    # individually known-not-runnable (crash / silent-no-op on every probe on this build).
+    # They have NO MCP tool wrapping them -- they are registered only so `resolve()` can
+    # raise a clean ExecutableNotFoundError rather than a bare file-not-found. Listed
+    # here explicitly so `list_sigrity_tools` / `get_tool_status` reports a definitive
+    # status instead of the default `built_untested`.
+    "gds2spd_console": "known_blocked",
+    "oasis2spd_console": "known_blocked",
+    "ndd2spd_console": "known_blocked",
+    "pads2spd_console": "known_blocked",
+    "rif2spd_console": "known_blocked",
+    "spdlinks_console": "known_blocked",
+    "dsn2spd_console": "known_blocked",
+    "spdsim_console": "known_blocked",
 }
 # NOTE: allegro_constraint_tools.py's and allegro_geometry_tools.py's individual SKILL
 # calls all execute through the single "allegro" logical tool above (same session/
@@ -1130,9 +1158,10 @@ TOOL_STATUS_NOTES: dict[str, str] = {
     "Key takeaways: (1) the proposed in-session `sigrity::do exec ...` path is UNNEEDED "
     "-- standalone `-b` works, and 24.0 doesn't even support that `sigrity::do exec` "
     "form; (2) judge SPDSIM success by the ARTIFACTS (C.CUR/V.CUR/dc.out/rtlog) and the "
-    "CWD, not by a single log line; (3) it sits in GUI_TOOL_EXE_NAMES, but that routing "
-    "must not let a 'quiet successful run' be mistaken for 'needs intervention'. "
-    "Reclassified known_blocked -> confirmed_live.",
+    "CWD, not by a single log line; (3) re-verified 2026-10-26 that `-b <file.spd>` "
+    "runs CONSOLE-ONLY with zero windows, so it was removed from GUI_TOOL_EXE_NAMES "
+    "and now runs as an ordinary console job (no screen watcher, log-stall watchdog "
+    "active). Reclassified known_blocked -> confirmed_live.",
     "abcd": "Confirmed live for 2-port cascade and de-embed. The apparent silent "
     "no-op seen on every earlier attempt (rc 0, no output, no error, zero diagnostic "
     "output) was root-caused, not a broken binary: `abcd.exe` only resolves its file "
@@ -1296,6 +1325,32 @@ TOOL_STATUS_NOTES: dict[str, str] = {
     "'Photoplot outline rectangle not found; using drawing extents') are the tool "
     "falling back to sane defaults, not errors — read photoplot.log/check for the "
     "actual .art files before treating a nonzero exit as failure.",
+    # ---------------------------------------------------------------------------
+    # 2026-10-26 suite-wide scenario-test pass (SigrityAgentHub audit).
+    # Every entry below was run LIVE against a real shipped sample and verified by its
+    # real output artifact (not rc). Sample inputs live under doc/.../examples or
+    # share/Translators/Samples / share/PostInstallationCheck; staging copies went to
+    # runs/agent_<family>/.
+    "gds2spd": "CONFIRMED LIVE (2026-10-26): `Gds2Spd.exe -b -gds <abs.gds> [-map <m>] [-tech <t>] -spd <abs.spd>` run against the real shipped sample (share/Translators/Samples/Gds2Spd/demo.gds, 108MB, 7-layer multi-block) produced a genuine 111,423,471-byte .spd (valid 'Title - PowerSI file for version 2000.10' header) with a clean error.log ('Finish writing the SPD file'). ~3 min for that design. Doc: doc/Translators_UG/Batch_Mode_Executions_for_Gds2Spd_Translator.html. The wrapper argv (translate_gds_to_spd) matches this exactly. The sibling Gds2SpdCon.exe is NOT-runnable (see gds2spd_console note).",
+    "oasis2spd": "CONFIRMED LIVE (2026-10-26): `Oasis2Spd.exe -b -oasis <abs.oasis> [-map] [-tech] -spd <abs.spd>` on the real sample (share/Translators/Samples/Oasis2spd/demo_oasis/iome_demo.oasis, 7.3MB) produced a genuine 213,932,833-byte .spd plus its internal DTree DB/ dir. ~80s. NOTE: doc's own log-file example text mislabels the command as 'gds2spd' (a doc typo); the real command is oasis2spd. Wrapper argv matches. Oasis2SpdCon.exe is NOT-runnable (see oasis2spd_console note).",
+    "ndd2spd": "CONFIRMED LIVE (2026-10-26): `Ndd2Spd.exe -b <abs.ndd> <abs.spd>` (positional, no format flag) on the real sample (share/Translators/Samples/Ndd2Spd/demo.ndd, 280KB) produced a genuine 655,783-byte .spd + demo.spd.log ('Total No Of Components Not Linked = 0'). 0.6s. Wrapper argv matches. Ndd2SpdCon.exe is NOT-runnable (see ndd2spd_console note).",
+    "pads2spd": "CONFIRMED LIVE (2026-10-26): `Pads2Spd.exe -b <abs.asc> <abs.spd>` (positional) on the real sample (share/Translators/Samples/pads2spd/demo.asc, 1.98MB) produced a genuine 26,295,014-byte .spd + log. 10.2s. Wrapper argv matches. Pads2SpdCon.exe is NOT-runnable (see pads2spd_console note).",
+    "rif2spd": "CONFIRMED LIVE (2026-10-26): `Rif2Spd.exe -b <abs.rif> <abs.spd>` (positional) on the real sample (share/Translators/Samples/rif2spd/demo.rif, 6.1MB) produced a genuine 19,572,753-byte .spd + 110KB log. 3.6s. Wrapper argv matches. Rif2SpdCon.exe is NOT-runnable (see rif2spd_console note).",
+    "spdlinks": "CONFIRMED LIVE (2026-10-26), PARTIAL 2024.0 format coverage: SPDLinks.exe 2024.0 accepts ONLY the format flags from its own 'Valid choices' list: -dbr (Cadvance), -mbs (Mentor BoardStation), -zip (ODB++ .zip/.tgz), and the Zuken CR-5000/8000 set -ftf/-pcf/-dsgf/-mrf/-sdf/-sff (plus -log replay). Live-verified artifacts: -dbr (demo.dbr -> 81,679,220-byte .spd), -ftf (2,841,979-byte .spd), -pcf (2,841,979-byte .spd), -zip (ODB++ demo.tgz -> 2,423,440-byte .spd). The OLD doc-listed formats -brd/-dbg/-mcm/-sip/-txt are REJECTED by this build ('Unknown File Type') -- the wrapper's format Literal was narrowed accordingly (translate_to_spd_via_spdlinks). For .brd/Altium/IPC-2581/DXF use the PowerSI built-in translator instead (SPDLinks does not accept them here). .mbs is accepted but needs a MentorNeutralFile subdir alongside the input (no valid .mbs archive on this machine to run end-to-end). SPDLinksCon.exe is NOT-runnable (see spdlinks_console note).",
+    "clarity3d_workbench": "CONFIRMED LIVE (2026-10-26): `Clarity3DWorkbench.exe --NoUI -tcl <script>` with the 6-line sigrity:: sequence (configure version / close file / open file / update DynamicClarity3dResource / begin simulation / end simulation) run against the only .3dem on this machine (doc/Clarity3DWorkbenchnewdesign/examples/mydesign.3dem). Real solver run: mydesign_run.log shows license check -> meshing (13993 -> 30107 elements over 4 AMR passes) -> adaptive freq sweep 10MHz..10GHz -> 'Simulation succeeded'; artifacts mydesign_FIT.S4P (769KB valid 4-port Touchstone), mydesign_AFS_fitted.S4P (827KB), mydesign_R3D (6.9MB), mydesign.bnf (453KB), plus mydesign_table_summary.log (adaptive mesh summary). Doc: doc/Clarity3DWorkbenchuser/runningsimulation_tk_Running_the_Simulation_From_the_Command_Line.html + the Clarity3DWorkbenchTcl chapter. INPUT GATE: accepts only .3dem/.spdb -- a .spd re-confirmed to hit 'File format is not supported.' + dead process (the wrapper's up-front ValueError guard is correct). NOTE: stdout ALWAYS prints an 119-byte legacy-syntax banner even in --NoUI mode; the REAL progress/status is in <design>_run.log + <design>_table_summary_*.log beside the design. Exit 0 on BOTH success and the format-gate crash -- gate on the artifacts/run.log, not rc. The wrapper's 10 clarity3d_* tools' base Tcl lines match the doc-verbatim sample.",
+    "broadbandspice": "CONFIRMED LIVE (2026-10-26), BOTH paths: (1) Checking: `BroadbandSPICE.exe -b -Checking <abs.s2p>` (CWD = input's folder) -> BBSResult_.../S-parameter Checking Report.htm (69,327 bytes, 'No non-passive points'). (2) Extraction: `BroadbandSPICE.exe -b -Passivity -HSPICE -i200 -uf<GHz> -cf:<circuit> <abs.s2p>` (CWD = input's folder) -> a genuine 2,953-byte HSPICE .subckt netlist (R + LAPLACE G-elements) plus _Fitted.s2p + Error_Order.txt; log ends 'End *~*~*~*' + 'The extracted model is passive.' Real input: share/PostInstallationCheck/optimizepi/S-Parameter File/*.s2p (grm*.s2p valid; gcm155r71c104ka55.s2p is invalid/binary). Doc: doc/bbs_ug/ch4_settings_Command_Line_Format__{Extraction,Checking}_Options_.html. LOCATION TRAP: output lands NEXT TO THE INPUT FILE's dir, not job_dir -- list_job_files shows nothing. Wrapper (run_broadbandspice_extraction / run_broadbandspice_check) argv matches both forms exactly. (An unused -ign flag is in the doc but not exposed -- a minor omission, not a bug.)",
+    "xtractim_techgen": "CONFIRMED LIVE (2026-10-26): `XPITechGen.exe [-h] [-key <key>] -i <input.tech> -o <output.tech>` -- the XcitePI technology-file encryption utility (doc/xcitepiUG ch9 'Encryption of the Technology File'). Run on the doc's exact reconstructed sample input -> stdout 'xpitechgen is finished successfully.' + a genuine 154-byte encrypted artifact (header/`encrypt start here`..`encrypt ends here` tag structure preserved, tag body replaced with non-ASCII bytes = real encryption, not a copy). Real unmodified .tech files available for round-trip validation: share/XcitePI/Samples/XcitePI/XcitePI.tech and share/Translators/Samples/Gds2Spd/XcitePI.tech. NOW WRAPPED as run_xpitechgen (domains/extraction/utility_solvers.py) -- resolve_path on both -i/-o so a relative path can't trigger the interactive re-prompt loop the other tools/bin CLIs fall into. Distinguish from xtractim (XtractIM.exe, the 2.5D/3D extraction solver, already confirmed_live) -- this is the separate tech-file encryption helper.",
+    # ---- NOT-RUNNABLE console-variant / GUI-only / internal-worker exes (deliberately
+    #      NOT wrapped with a tool surface; flagged here so the dispatcher never routes
+    #      to them, matching this suite's HexMesh/SigmaMesh/AFSfor3DEM non-wrapping rule) ----
+    "gds2spd_console": "NOT-RUNNABLE (2026-10-26): Gds2SpdCon.exe crashes with STATUS_ACCESS_VIOLATION (rc 3221225477) on -help AND no-args, 0 bytes output, <3s each. No doc-tree coverage of the Con variant; the GUI exe's `-b` batch mode is the ONLY working path. Do not dispatch jobs to this logical name.",
+    "oasis2spd_console": "NOT-RUNNABLE (2026-10-26): Oasis2SpdCon.exe crashes with STATUS_ACCESS_VIOLATION on -help, 0 bytes, ~2s. No doc coverage. The GUI exe's `-b` is the working path.",
+    "ndd2spd_console": "NOT-RUNNABLE (2026-10-26): Ndd2SpdCon.exe fails with rc 0xFFFFFFFE (STATUS_NO_MEMORY) on -help/-h/-?, 0 bytes, instant (<0.3s). No doc coverage. The GUI exe's `-b` is the working path.",
+    "pads2spd_console": "NOT-RUNNABLE (2026-10-26): Pads2SpdCon.exe fails with rc 0xFFFFFFFE (STATUS_NO_MEMORY) on -help, 0 bytes. No doc coverage. The GUI exe's `-b` is the working path.",
+    "rif2spd_console": "NOT-RUNNABLE (2026-10-26): Rif2SpdCon.exe fails with rc 0xFFFFFFFE (STATUS_NO_MEMORY) on -help, 0 bytes. No doc coverage. The GUI exe's `-b` is the working path.",
+    "spdlinks_console": "NOT-RUNNABLE (2026-10-26): SPDLinksCon.exe crashes with STATUS_ACCESS_VIOLATION on -help and no-args, 0 bytes, <2s each. No doc coverage. The GUI exe's `-b`/`-{format}` is the working path.",
+    "dsn2spd_console": "NOT-RUNNABLE (2026-10-26): Dsn2SpdCon.exe -help returns rc=0 but 0 bytes after ~2s (silent no-op, no CLI surface). No doc coverage. dsn2spd (Dsn2Spd.exe) is confirmed_live -- use that, not the Con variant.",
+    "spdsim_console": "INTERNAL-WORKER / ALIAS (2026-10-26): SPDsimCon.exe is a BYTE-IDENTICAL copy of SPDSIM.exe (same SHA-1, same 25,024,256-byte size). It runs the same `-b <abs.spd>` invocation with CWD = the .spd's folder and produces byte-identical C.CUR/V.CUR artifacts (verified: SHA-1 of SPDsimCon output == SHA-1 of SPDSIM output). It has no distincr CLI, no -help text, zero doc coverage. NOT-runnable as a distinct tool -- the existing `spdsim` wrapper (run_spdsim_simulation, which drives SPDSIM.exe) fully covers it. Do not dispatch to spdsim_console; use spdsim.",
 }
 
 

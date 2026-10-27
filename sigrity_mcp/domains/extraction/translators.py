@@ -134,10 +134,18 @@ Call load_skill('sigrity-extraction') for the full verified playbook, pitfalls, 
 async def translate_to_spd_via_spdlinks(
     input_file: str,
     spd_file: str,
-    format: Literal["dbr", "dbg", "mcm", "sip", "brd", "txt", "pcf", "ftf", "zip"],
+    format: Literal["dbr", "mbs", "zip", "ftf", "pcf", "dsgf", "mrf", "sdf", "sff"],
     log_file: Optional[str] = None,
 ) -> dict:
     """Convert a broader range of third-party layout/netlist formats to `.spd` using SPDLinks, as a background job.
+
+    `format` must be one of the formats THIS 2024.0 binary actually accepts (confirmed from
+    SPDLinks.exe's own "Valid choices" error list, not just the doc tree): Cadvance `.dbr`,
+    Mentor BoardStation `.mbs`, ODB++ `.zip`/`.tgz` archive, and the Zuken CR-5000/8000 set
+    `.ftf`/`.pcf`/`.dsgf`/`.mrf`/`.sdf`/`.sff`. The older doc-listed `dbg`/`brd`/`mcm`/`sip`/
+    `txt` are REJECTED by this build ("Unknown File Type") — do not use them. For `.brd`/
+    Altium/IPC-2581/DXF imports, use the PowerSI built-in translator (start_powersi_session +
+    powersi_save_document) instead — SPDLinks does not accept them here.
 Call load_skill('sigrity-extraction') for the full verified playbook, pitfalls, and a live example."""
     if log_file:
         args = ["-b", "-log", log_file, input_file, spd_file]

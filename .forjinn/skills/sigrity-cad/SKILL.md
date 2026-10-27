@@ -454,6 +454,62 @@ existed with the exact right bbox the whole time.
   (swap the layer string to `"ROUTE KEEPIN/ALL"` to verify the keepin instead), then read that
   file after the run. A real bbox matching your intended board size is the only real proof.
 
+## Task 7d — placing a NAMED component at a coordinate — CONFIRMED DEAD END for externally-downloaded manufacturer libraries (2026-10-26, superseding everything below and the earlier "Task 7d" guidance)
+
+**Do not spend further time retrying `place_module_instance`, `axlDBCreateSymbol`, or the
+Capture-import pipeline against manufacturer-downloaded library parts (SamacSys/Ultra Librarian
+style one-folder-per-part archives, e.g. the kind found under a vendor "Orcad" library export).
+The root cause is now confirmed and it is a DATA problem, not a tool or scripting problem.**
+
+**The full evidence chain (every mechanism tried, in order, each a genuine dead end):**
+1. `place_module_instance` (`axlDBCreateModuleInstance`) — fails with
+   `ERROR(SPMHDB-287): Module definition <name> could not be opened` across every PSMPATH
+   variant tried. Root cause (confirmed by reading `axlDBCreateModuleInstance`'s own SKILL doc):
+   this function is for **hierarchical module definitions** (reusable circuit
+   blocks, `.mdd` files) — it was NEVER the right function for placing a component footprint at
+   all, regardless of PSMPATH. Its doc's own example places a `mod.mdd`, not a package/footprint.
+2. Capture-schematic-import pipeline (`author_capture_schematic_headless` →
+   `generate_capture_pcb_netlist` → `run_netrev_import`) — DOES work for creating real logical
+   components with real pins (confirmed: 605 real pins, 2 real components, on a test board,
+   `report_code="cmp"` shows correct `COMP_DEVICE_TYPE`/`COMP_PACKAGE` strings). But
+   `report_code="sum"` on the same board shows `Package Symbols: Total(0)` — the physical
+   footprint geometry was never attached, only the logical netlist entry. `run_allegro_placement`
+   (the real auto-place engine) then fails outright (`Error return`, rc=2) because there is no
+   footprint geometry for it to place.
+3. The real, correct SKILL function for attaching physical footprint geometry to an existing
+   logical (unplaced) component **is `axlDBCreateSymbol`** (confirmed via its own doc: `"Typical
+   component driven symbol placement: p = axlDBCreateSymbol("U1" 2175:1000)"` — exactly this
+   situation). Calling it against the two unplaced test-board components returns `nil` for both.
+4. PSMPATH itself was verified correctly set (readback via `axlGetVariableList "psmpath"` showed
+   the real library directory present) and the mechanism was verified to **genuinely work**: the
+   exact same `axlLoadSymbol("package" "<name>")` call against a symbol file **shipped with this
+   Cadence installation** (`C:\Cadence\SPB_22.1\share\pcb\pcb_lib\symbols\0603rf_wv_12d.psm`)
+   returns a real dbid. So the SKILL API, PSMPATH resolution, and session scripting are all
+   confirmed correct.
+5. The manufacturer library's own `.psm`/`.dra` binary files are the thing that fails to load —
+   and this is systemic, not part-specific: every `.psm` sampled from the downloaded library
+   (8 different component families checked, including the 2 critical ICs) opens with a binary
+   header byte that differs from the one known-good, installed-native symbol file that *does*
+   load (`...6c 00 04 14 00 03...` / `...04 14 00 03...` for every manufacturer-library file vs
+   `...00 14 00 03...` for the installed-native file) — a format/version signature mismatch
+   between whatever tool generated the downloaded library and this Allegro 22.1P001 install.
+
+**Conclusion: this is not a missing tool, and no amount of further prompt or SKILL-call guessing
+will fix it.** The placement/footprint mechanism (`axlDBCreateSymbol` after a Capture-import or
+direct symbol load) is the right one and is proven to work — the specific manufacturer library
+files supplied for this project cannot be read by the installed Allegro version. Real options, in
+order of preference, none of which this toolset can perform automatically without fabricating
+footprint geometry:
+- Re-download/re-export the same parts' footprints targeting an Allegro-compatible format/version
+  from the library source, if the provider (SamacSys/Ultra Librarian/manufacturer portal) offers
+  a version selector.
+- Rebuild the handful of critical footprints by hand in Allegro's own Symbol/Padstack Editor from
+  the real datasheet mechanical drawing (legitimate, but manual and out of this toolset's scope).
+- Upgrade/patch the Cadence installation if a newer version is confirmed to read the newer
+  library format (unverified — do not assume without testing).
+Do not report any of these as "coverage" without a human actually doing them; report physical
+placement/footprint of manufacturer-library parts as a confirmed, named gap instead.
+
 ## Task 8 — EASY once you know the real keywords: `run_allegro_extracta` (BOM/nets/components/pins/DRC dump)
 
 ```

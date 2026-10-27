@@ -287,7 +287,24 @@ async def allegro_place_module_instance(
     logic_from_schematic: bool = False,
     mirror: bool = False,
 ) -> dict:
-    """Place a module (component footprint) instance at an explicit board coordinate and rotation, within the current Allegro SKILL session.
+    """Place a HIERARCHICAL MODULE instance (a reusable circuit block, `.mdd` file) at an explicit
+    board coordinate and rotation, within the current Allegro SKILL session.
+
+    CONFIRMED 2026-10-26: despite the name, `axlDBCreateModuleInstance` (what this wraps) is
+    NOT the function for placing a component's PCB footprint/package symbol — its own SKILL doc's
+    only example places a `mod.mdd` hierarchical module definition. Using it to place a named IC's
+    footprint (e.g. a BGA/QFN from a manufacturer `.psm`/`.dra` library) will reliably fail with
+    `ERROR(SPMHDB-287): Module definition <name> could not be opened`, no matter how PSMPATH is
+    set — this is confirmed to be the wrong tool for that job, not a PSMPATH bug. For placing a
+    real component footprint, use the Capture-import pipeline
+    (`author_capture_schematic_headless` -> `generate_capture_pcb_netlist` -> `run_netrev_import`)
+    to create the logical component, then `axlDBCreateSymbol` to attach its physical footprint —
+    and read `load_skill('sigrity-cad')`'s "Task 7d" section FIRST: it documents a confirmed,
+    systemic dead end where manufacturer-downloaded `.psm`/`.dra` files fail to load into this
+    Allegro install (binary format/version mismatch), verified across 8 different parts, while the
+    exact same mechanism against an Allegro-installed native symbol succeeds. Do not re-attempt
+    this op, Capture-import, or `axlDBCreateSymbol` against manufacturer-library parts expecting a
+    different result — re-read that section before spending further tool calls on this.
 Call load_skill('sigrity-cad') for the full verified playbook, pitfalls, and a live example."""
     logic_method = 1 if logic_from_schematic else 0
     mirror_arg = "t" if mirror else "nil"
@@ -669,37 +686,39 @@ async def allegro_list_packages(
     session_id: str,
     package_dir: Optional[str] = None,
 ) -> dict:
-    """Discover the package-sym symbol names actually available in a directory, written to a
-    file Allegro's own SKILL emits, so `place_module_instance`(op) /
-    `allegro_import_package` can be called with a `module_def_name` that resolves.
+    """Discover real `.psm` package/footprint files in a directory and report which of their
+    candidate names resolve under `PSMPATH`, so `place_module_instance`(op) /
+    `allegro_import_package` can be called with a `module_def_name` that actually works.
 
-    `axlDBCreateModuleInstance` only succeeds if `module_def_name` is resolvable via
-    `axlGetParam("library:<name>")` under `PSMPATH` (see this module's
-    `allegro_place_module_instance` note — the `CAP300` case returned nil precisely because
-    the name wasn't resolvable this way). The NXP/manufacturer `.psm` files are usually
-    named after their *package geometry* (e.g. `bga548c50p29x29`), NOT the part name, so
-    guessing the right `module_def_name` is the fragile step of the whole
-    "reuse-a-prebuilt-footprint" flow. This tool removes the guesswork.
+    REWRITTEN 2026-10-26 (real client BRS build) — the original implementation called two SKILL
+    functions, `axlDBGetPackageNames` and `axlDBGetPackageDefinition`, that DO NOT EXIST
+    anywhere in this install's vendored SKILL docs (confirmed: a search of the entire SPB_22.1
+    tree found zero references to either name). Both calls always failed
+    (`*Error* eval: undefined function - axlDBGetPackageNames`), so this tool had never
+    actually discovered a single package in any prior run — it just produced an empty or
+    missing output file, which a caller could easily mistake for "no packages found" rather
+    than "this tool has been broken since it was written."
 
-    HOW IT WORKS (headless, same session as a placement): it adds `package_dir` to
-    `PSMPATH` (append-if-needed via an `axlGetVariableList` merge so existing paths aren't
-    clobbered), then emits a `(load)` of a one-off `.il` (written to the workdir) that loads
-    the package defs and reports, per discovered symbol name, its `axlDBGetPackageDefinition`
-    `?pinCount`/`?bBox` and whether that name resolves via `axlGetParam("library:<name>")`
-    — the exact predicate `axlDBCreateModuleInstance` uses. The report is written by
-    Allegro's own `outfile`/`fprintf` (SKILL return values never surface in run.log — see
-    this module's docstring, and this is the same readback technique used for
-    `allegro_create_trace`'s dbid).
+    FIX: package discovery now happens where it belongs — directly on the real filesystem
+    (the MCP server runs on the same machine as the library files; no SKILL round-trip is
+    needed to list files in a directory). Only the one part that genuinely needs a live
+    Allegro session — checking whether a candidate name actually RESOLVES — still goes
+    through SKILL, using `axlGetParam("library:<name>")`, the same predicate
+    `axlDBCreateModuleInstance` itself uses (confirmed via this module's own prior live
+    `CAP300` test, returning nil for an unresolvable name). The previous report's `pins=`/
+    `bBox=` fields depended entirely on the non-existent `axlDBGetPackageDefinition` and have
+    been removed rather than left in with fabricated placeholder values.
 
     OUTPUT: `<workdir>/packages_<session-token>.txt` (path in the returned `output_file`),
-    one line per discovered package: `<name> | resolves=t/nil | pins=<n> | bBox=<(...)>`.
-    Run via the usual `start_allegro_session` -> `allegro_list_packages` ->
-    `allegro_run_session(session_id, board_file)`, then read `output_file` and pick a
-    `pinCount`/`units`-matching `name` (with `resolves=t`) for `allegro_import_package`.
+    one line per `.psm` file found: `<candidate-name> | resolves=t/nil`. Run via the usual
+    `start_allegro_session` -> `allegro_list_packages` -> `allegro_run_session(session_id,
+    board_file)`, then read `output_file` and pick a `resolves=t` name for
+    `place_module_instance`/`allegro_import_package`.
 
     `package_dir` defaults to the SPB install root if omitted (usually wrong — pass the real
     directory that contains the `.psm` files, e.g. the `Allegro/` folder of an extracted
-    parts zip).
+    parts zip). Searches `package_dir` recursively, since a manufacturer parts archive
+    commonly nests the real `.psm` one or more directories below the top-level part folder.
     Call load_skill('sigrity-cad') for the full verified playbook, pitfalls, and a live example."""
     pkg_dir = package_dir or str(settings.cadence_spb_home)
     workdir = settings.resolve_workdir()
@@ -707,39 +726,79 @@ async def allegro_list_packages(
     token = getattr(sess, "session_id", session_id)
     out_abs = workdir / f"packages_{token}.txt"
 
-    # (1) Ensure pkg_dir is on PSMPATH (append-if-needed, list form per allegro_set_variable).
+    # Real filesystem discovery — no SKILL round-trip needed for this part.
+    from pathlib import Path as _Path
+
+    psm_files = sorted(_Path(pkg_dir).rglob("*.psm"))
+    candidate_names = sorted({p.stem for p in psm_files})
+
+    if not candidate_names:
+        tcl_sessions.add_line(
+            session_id,
+            _skill_line(
+                f'(let ((f (outfile "{str(out_abs).replace(chr(92), chr(47))}" "w"))) '
+                f'(fprintf f "NO_PSM_FILES_FOUND_UNDER {skill_str(pkg_dir)}\\n") (close f))'
+            ),
+        )
+        return {"session_id": session_id, "package_dir": pkg_dir, "output_file": str(out_abs), "candidates_found": 0}
+
+    # Ensure pkg_dir is on PSMPATH (append-if-needed, list form per allegro_set_variable).
+    #
+    # CONFIRMED BUG FIX (2026-10-26, real client BRS build): both `axlGetVariableList` and
+    # `axlSetVariable` take `t_variable` — a STRING naming the Allegro env var (confirmed
+    # against the vendored `axlGetVariableList.txt`/`axlSetVariable.txt` docs, whose own
+    # examples use `axlGetVariableList("psmpath")` / `axlSetVariable("psmpath" ...)`, never a
+    # quoted symbol). The original code passed the SKILL SYMBOL `'psmpath` instead, which
+    # fails outright: live journal capture showed `*WARNING* (axlGetVariableList): psmpath has
+    # to be a string or nil` followed by `*Error* axlSetVariable: argument #1 should be a
+    # string ... - psmpath` — so PSMPATH was NEVER actually updated, and every
+    # `place_module_instance` call downstream silently failed to resolve the module def
+    # (`ERROR(SPMHDB-287): Module definition <name> could not be opened`) while this tool's own
+    # dispatcher still reported success, since no exception ever reached Python.
     new_dir = skill_str(pkg_dir)
     add_path_line = (
-        f"(let ((cur (axlGetVariableList 'psmpath))) "
-        f"(if (member {new_dir} cur) 'already (axlSetVariable 'psmpath (cons {new_dir} cur))))"
+        f'(let ((cur (axlGetVariableList "psmpath"))) '
+        f'(if (member {new_dir} cur) \'already (axlSetVariable "psmpath" (cons {new_dir} cur))))'
     )
     tcl_sessions.add_line(session_id, _skill_line(add_path_line))
 
-    # (2) One-off .il, queued via add_il so allegro_run_session writes it and emits the
-    #     documented `skill (load "...")` + `skill (pkglist_report)` single-token pair —
-    #     sidestepping the -s lineread multi-token corruption (same mechanism run_session
-    #     already uses for multi-arg constraint calls). `outfile` writes the report to the
-    #     absolute workdir path embedded below (Allegro runs with cwd=the job dir, so an
-    #     absolute path is required, not a design-dir-relative one).
+    # One-off .il, queued via add_il so allegro_run_session writes it and emits the documented
+    # `skill (load "...")` + `skill (pkglist_report)` single-token pair — sidestepping the -s
+    # lineread multi-token corruption (same mechanism run_session already uses for multi-arg
+    # constraint calls). `outfile` writes the report to the absolute workdir path embedded
+    # below (Allegro runs with cwd=the job dir, so an absolute path is required). The candidate
+    # name list is baked directly into the generated SKILL as a literal quoted list — Python
+    # already knows every name, so there is nothing left for Allegro to "discover".
+    names_list_expr = "(list " + " ".join(skill_str(n) for n in candidate_names) + ")"
     il_body = (
         "(defun pkglist_report ()\n"
         f"  (let ((f (outfile \"{str(out_abs).replace(chr(92), chr(47))}\" \"w\"))\n"
-        f"        (names (axlDBGetPackageNames \"{str(pkg_dir).replace(chr(92), chr(47))}\")))\n"
-        f"    (if (null names) (progn (fprintf f \"NO_PACKAGES_FOUND\\n\") (close f) nil)\n"
-        f"      (progn\n"
-        f"        (mapcar (lambda (nm)\n"
-        f"          (let ((defn (car (axlDBGetPackageDefinition nm nil))))\n"
-        f"            (fprintf f \"%%s | resolves=%%s | pins=%%L | bBox=%%L\\n\"\n"
-        f"                     nm\n"
-        f"                     (if (car (axlGetParam (strcat \"library:\" nm))) t nil)\n"
-        f"                     (if defn (get defn 'pinCount) -1)\n"
-        f"                     (if defn (get defn 'bBox) '-)))\n"
-        f"          nm) names)\n"
-        f"        (close f)\n"
-        f"        t))))\n"
+        f"        (names {names_list_expr}))\n"
+        # CONFIRMED BUG FIX (2026-10-26): Python f-strings do not treat `%` as special (that's
+        # only relevant to old-style `%`-formatting) — `%%s` here produced the literal 2-char
+        # output `%%s` in the generated SKILL, not the single `%s` fprintf needs, so the real
+        # report line came back as the raw unsubstituted format string `%s | resolves=%s`
+        # instead of a real name/value. One `%` is correct.
+        #
+        # CONFIRMED BUG FIX (2026-10-26, same run): `%s` requires an actual STRING value —
+        # passing the SKILL boolean `t`/`nil` directly failed with
+        # `*Error* fprintf/sprintf: format spec. incompatible with data - argument #2 is nil`.
+        # Returning the string literals "t"/"nil" (not the symbols) satisfies `%s`.
+        f"    (mapcar (lambda (nm)\n"
+        f"      (fprintf f \"%s | resolves=%s\\n\"\n"
+        f"               nm\n"
+        f"               (if (car (axlGetParam (strcat \"library:\" nm))) \"t\" \"nil\")))\n"
+        f"      names)\n"
+        f"    (close f)\n"
+        f"    t))\n"
     )
     tcl_sessions.add_il(session_id, il_body, func_name="pkglist_report")
-    return {"session_id": session_id, "package_dir": pkg_dir, "output_file": str(out_abs)}
+    return {
+        "session_id": session_id,
+        "package_dir": pkg_dir,
+        "output_file": str(out_abs),
+        "candidates_found": len(candidate_names),
+    }
 
 
 async def allegro_import_package(

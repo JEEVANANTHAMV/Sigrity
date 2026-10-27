@@ -1,20 +1,29 @@
 """Regression tests for the GUI-tool job layer (core.gui_tool_runner + the
 JobManager submit() routing that adds it for GUI exes).
 
-This install is PREMIUM / no-license-required: the GUI tools (PowerDC, PowerSI,
-XtractIM, ...) open windows and block on interactive startup dialogs, and their
-run.log is empty BY DESIGN. JobManager must therefore route them through the
-screen-based runner (screenshot + dialog dismissal) instead of the console
-watcher's log-size heuristics, and must NEVER label a GUI tool's empty output /
-non-zero exit as a license failure.
+On this PREMIUM / no-license-required install, a SMALL number of tools genuinely
+open a real GUI window even on their batch invocation (no confirmed headless
+surface: currently just PowerTree and Optimality). For those, the console watcher's
+log-size/stall heuristics mislead (a GUI tool's empty log is normal), so
+JobManager routes them through the screen-based runner (screenshot + dialog
+dismissal) and must NEVER label a GUI tool's empty output / non-zero exit as a
+license failure.
 
-These tests need no real Sigrity or GUI: submit_job is tested with a command
-whose first token is named like a GUI exe (PowerDC.exe -> a throwaway copy of
-the running python), and the runner's blocking monitor / async entry point are
-monkeypatched out, so only the wiring under test -- gui_tool flag,
-gui_tool_result capture, state, license_issue_suspected forced False for GUI
-tools, stall/success/failed transitions, cancel() on a needs_user_intervention
-job -- is exercised.
+2026-10-26 CORRECTION under test: PowerDC, PowerSI, XtractIM, Clarity3DWorkbench,
+OptimizePI, XcitePI, XcitePICon, BroadbandSPICE, SPDSIM, SPDsimCon and Celsius3D
+moved OUT of the GUI set after live verification (each launched with its documented
+batch flags -- `-b -tcl` / `--NoUI -tcl` / `-b -export_data` / `-b -<mode>` /
+`-b <file>` / `-tcl` -- ran CONSOLE-ONLY with zero windows and a real rc). They MUST
+now route through the normal CONSOLE job path, not the GUI observer. The tests
+below assert both directions of that routing.
+
+These tests need no real Sigrity or GUI: submit_job is tested with a command whose
+first token is named like a GUI exe (PowerTree.exe -> a throwaway copy of the
+running python), and the runner's blocking monitor / async entry point are
+monkeypatched out, so only the wiring under test -- gui_tool flag, gui_tool_result
+capture, state, license_issue_suspected forced False for GUI tools,
+success/failed transitions, cancel() on a needs_user_intervention job -- is
+exercised.
 """
 
 import shutil
@@ -30,8 +39,8 @@ from sigrity_mcp.core.gui_tool_runner import GuiToolResult
 from sigrity_mcp.core.jobs import JobManager
 
 
-def _stub_gui_exe(tmp_path: Path, stem: str = "PowerDC") -> Path:
-    """A native stub named like the GUI tool's exe so `is_gui_tool(command[0])`
+def _stub_gui_exe(tmp_path: Path, stem: str = "PowerTree") -> Path:
+    """A native stub named like a GUI tool's exe so `is_gui_tool(command[0])`
     matches by stem, while remaining harmless.
 
     Copying the VENV's python.exe here is not viable (a venv launcher reads
@@ -57,16 +66,30 @@ def _stub_gui_exe(tmp_path: Path, stem: str = "PowerDC") -> Path:
 # --- is_gui_tool(): the routing predicate ------------------------------------
 
 
+def test_gui_set_is_exactly_the_two_tools_with_no_headless_surface():
+    """The 2026-10-26 corrected GUI set contains ONLY the tools that open a real
+    window even on their batch flags. The 11 analysis tools moved out (they run
+    console-only under -b/-tcl/--NoUI) -- asserting the set exactly guards
+    against any regression that re-lumps them back in and re-routes them through
+    the (overhead) GUI observer."""
+    assert gui.GUI_TOOL_EXE_NAMES == frozenset({"PowerTree", "Optimality"})
+    from sigrity_mcp.core import executables
+    assert executables.GUI_TOOL_NAMES == frozenset({"powertree", "optimality"})
+
+
 def test_is_gui_tool_matches_known_gui_exes():
-    for stem in ("PowerDC", "PowerSI", "XtractIM", "Clarity3DWorkbench",
-                 "OptimizePI", "XcitePI", "XcitePICon", "BroadbandSPICE",
-                 "SPDSIM", "SPDsimCon", "PowerTree", "Optimality", "Celsius3D"):
+    for stem in ("PowerTree", "Optimality"):
         assert gui.is_gui_tool(f"C:\\fake\\{stem}.exe") is True, stem
         assert gui.is_gui_tool(f"C:\\fake\\{stem}") is True, stem
 
 
 def test_is_gui_tool_rejects_console_tools():
-    for name in ("psp_cmd", "checkplus", "batch_drc", "report", "artwork",
+    # The 11 tools that were (wrongly) in the old set now run as console jobs.
+    for name in ("PowerDC", "PowerSI", "XtractIM", "Clarity3DWorkbench",
+                 "OptimizePI", "XcitePI", "XcitePICon", "BroadbandSPICE",
+                 "SPDSIM", "SPDsimCon", "Celsius3D",
+                 # plus the always-console standalone CLIs
+                 "psp_cmd", "checkplus", "batch_drc", "report", "artwork",
                  "allegro", "capture", "spif_batch"):
         assert gui.is_gui_tool(f"C:\\fake\\{name}.exe") is False, name
 
@@ -92,8 +115,8 @@ async def test_run_gui_tool_attaches_and_reports_success(tmp_path, monkeypatch):
     monkeypatch.setattr(gui, "_load_imports", lambda: None)
 
     result = await gui.run_gui_tool(
-        exe_path=tmp_path / "PowerDC.exe",
-        args=[], workdir=tmp_path, timeout_s=120.0, job_name="powerdc-test",
+        exe_path=tmp_path / "PowerTree.exe",
+        args=[], workdir=tmp_path, timeout_s=120.0, job_name="powertree-test",
         pid=4242,
     )
     assert result.status == "success"
@@ -114,7 +137,7 @@ async def test_run_gui_tool_headless_degrades_to_intervention_not_crash(
     NEVER classify as a license failure."""
     monkeypatch.setattr(gui, "_load_imports", lambda: "ImportError: no display")
     result = await gui.run_gui_tool(
-        exe_path=tmp_path / "PowerDC.exe",
+        exe_path=tmp_path / "PowerTree.exe",
         args=[], workdir=tmp_path, timeout_s=1.0, job_name="x",
     )
     assert result.status == "needs_user_intervention"
@@ -142,8 +165,8 @@ async def test_stuck_dialog_renames_screenshot_and_reports_intervention(
     monkeypatch.setattr(gui, "_blocking_attach_monitor", fake_monitor)
     monkeypatch.setattr(gui, "_load_imports", lambda: None)
     result = await gui.run_gui_tool(
-        exe_path=tmp_path / "PowerSI.exe",
-        args=[], workdir=tmp_path, timeout_s=120.0, job_name="powersi",
+        exe_path=tmp_path / "Optimality.exe",
+        args=[], workdir=tmp_path, timeout_s=120.0, job_name="optimality",
         pid=1, max_dismiss_attempts=3,
     )
     assert result.status == "needs_user_intervention"
@@ -166,14 +189,14 @@ def test_gui_tool_result_to_dict_fields():
 
 @pytest.mark.asyncio
 async def test_submit_job_for_gui_exe_sets_gui_tool_flag(tmp_path, monkeypatch):
-    """A command whose first token is a GUI exe must get gui_tool=True on the
-    record, have the runner attached with that process's pid and the job dir as
-    workdir, and (with a real exit code 0) finish as a genuine success with
-    license_issue_suspected forced to False for GUI tools."""
+    """A command whose first token is a GUI exe (PowerTree) must get gui_tool=True
+    on the record, have the runner attached with that process's pid and the job
+    dir as workdir, and (with a real exit code 0) finish as a genuine success
+    with license_issue_suspected forced to False for GUI tools."""
     monkeypatch.chdir(tmp_path)
     jm = JobManager()
-    job_id, job_dir = jm.new_job_dir("powerdc")
-    exe = _stub_gui_exe(tmp_path, "PowerDC")
+    job_id, job_dir = jm.new_job_dir("powertree")
+    exe = _stub_gui_exe(tmp_path, "PowerTree")
 
     runner_calls = {}
 
@@ -187,7 +210,7 @@ async def test_submit_job_for_gui_exe_sets_gui_tool_flag(tmp_path, monkeypatch):
     monkeypatch.setattr(gui, "run_gui_tool", fake_run_gui_tool)
 
     record = await jm.submit(
-        tool="powerdc",
+        tool="powertree",
         command=[str(exe), "-c", "print('hi')"],
         job_dir=job_dir,
         job_id=job_id,
@@ -233,6 +256,42 @@ async def test_submit_job_for_console_exe_does_not_route_to_gui(
 
 
 @pytest.mark.asyncio
+async def test_analysis_tools_route_through_console_path_not_gui(
+    tmp_path, monkeypatch
+):
+    """The 2026-10-26 regression test: an analysis tool that moves OUT of the GUI
+    set (here PowerSI, which now runs console-only under -b -tcl) must be
+    treated as a CONSOLE job -- gui_tool False, the screen runner NEVER invoked,
+    and its real exit code honored (a fast clean exit = succeeded). This is
+    exactly the routing that previously 'opened the GUI' (screenshot+dismiss)
+    and disabled the log-stall watchdog."""
+    monkeypatch.chdir(tmp_path)
+    jm = JobManager()
+    job_id, job_dir = jm.new_job_dir("powersi")
+    exe = _stub_gui_exe(tmp_path, "PowerSI")  # name it PowerSI; it is no longer a GUI tool
+    called = {"n": 0}
+
+    async def fake_run_gui_tool(*a, **kw):
+        called["n"] += 1
+        return GuiToolResult(status="success", screenshots=[],
+                             dismissed_dialogs=[], error=None, returncode=0)
+
+    monkeypatch.setattr(gui, "run_gui_tool", fake_run_gui_tool)
+
+    await jm.submit(
+        tool="powersi",
+        command=[str(exe), "-c", "import sys; sys.exit(0)"],
+        job_dir=job_dir,
+        job_id=job_id,
+    )
+    finished = await jm.wait(job_id, timeout=15)
+    assert finished.gui_tool is False
+    assert called["n"] == 0
+    assert finished.state == "succeeded"
+    assert finished.returncode == 0
+
+
+@pytest.mark.asyncio
 async def test_needs_user_intervention_state_is_set_and_cancelable(
     tmp_path, monkeypatch
 ):
@@ -241,8 +300,8 @@ async def test_needs_user_intervention_state_is_set_and_cancelable(
     issue -- and the job must still be cancellable (the process is alive)."""
     monkeypatch.chdir(tmp_path)
     jm = JobManager()
-    job_id, job_dir = jm.new_job_dir("powersi")
-    exe = _stub_gui_exe(tmp_path, "PowerSI")
+    job_id, job_dir = jm.new_job_dir("powertree")
+    exe = _stub_gui_exe(tmp_path, "PowerTree")
 
     async def fake_run_gui_tool(exe_path, args, workdir, timeout_s, job_name,
                                 pid=None, screenshot_interval=2.0,
@@ -255,7 +314,7 @@ async def test_needs_user_intervention_state_is_set_and_cancelable(
     monkeypatch.setattr(gui, "run_gui_tool", fake_run_gui_tool)
 
     await jm.submit(
-        tool="powersi",
+        tool="powertree",
         command=[str(exe), "-c", "import time; time.sleep(30)"],
         job_dir=job_dir,
         job_id=job_id,
@@ -284,8 +343,8 @@ async def test_wait_keeps_polling_while_needs_user_intervention(
     outcome (success here) must win over the stale intervention state."""
     monkeypatch.chdir(tmp_path)
     jm = JobManager()
-    job_id, job_dir = jm.new_job_dir("powersi")
-    exe = _stub_gui_exe(tmp_path, "PowerSI")
+    job_id, job_dir = jm.new_job_dir("powertree")
+    exe = _stub_gui_exe(tmp_path, "PowerTree")
     import asyncio
 
     async def fake_run_gui_tool(exe_path, args, workdir, timeout_s, job_name,
@@ -298,8 +357,8 @@ async def test_wait_keeps_polling_while_needs_user_intervention(
 
     monkeypatch.setattr(gui, "run_gui_tool", fake_run_gui_tool)
     await jm.submit(
-        tool="powersi",
-        command=[str(exe), "-c", "import time; time.sleep(5); import sys; sys.exit(0)"],
+        tool="powertree",
+        command=[str(exe), "-c", "import time,sys; time.sleep(5); sys.exit(0)"],
         job_dir=job_dir,
         job_id=job_id,
     )
@@ -311,9 +370,9 @@ async def test_wait_keeps_polling_while_needs_user_intervention(
 @pytest.mark.asyncio
 async def test_submit_via_process_module_routes_gui_exe(tmp_path, monkeypatch, job_manager_holder):
     """The MCP-facing process.submit_job entry point must route a GUI tool
-    (resolved exe named PowerDC.exe) through the runner path, while leaving
+    (resolved exe named PowerTree.exe) through the runner path, while leaving
     console tools on the normal path."""
-    exe = _stub_gui_exe(tmp_path, "PowerDC")
+    exe = _stub_gui_exe(tmp_path, "PowerTree")
     monkeypatch.setattr(process_module.executables, "resolve", lambda name: exe)
 
     async def fake_run_gui_tool(*a, **kw):
@@ -321,7 +380,7 @@ async def test_submit_via_process_module_routes_gui_exe(tmp_path, monkeypatch, j
                              dismissed_dialogs=[], error=None, returncode=0)
     monkeypatch.setattr(gui, "run_gui_tool", fake_run_gui_tool)
 
-    rec = await process_module.submit_job(tool="powerdc", build_args=["-c", "pass"])
+    rec = await process_module.submit_job(tool="powertree", build_args=["-c", "pass"])
     finished = await job_manager_holder["jm"].wait(rec.job_id, timeout=15)
     assert finished.gui_tool is True
 
@@ -353,13 +412,13 @@ async def test_run_gui_tool_end_to_end_short_exit(tmp_path):
     process exits, and the status is the honest success -- with or without a
     display. This proves the runner works against a real process (not a mocked
     one) and that a headless screen-grab failure is non-fatal."""
-    exe = _stub_gui_exe(tmp_path, "PowerDC")
+    exe = _stub_gui_exe(tmp_path, "PowerTree")
     result = await gui.run_gui_tool(
         exe_path=exe,
         args=["-c", "import time,sys; time.sleep(0.25); sys.exit(0)"],
         workdir=tmp_path,
         timeout_s=20.0,
-        job_name="powerdc-e2e",
+        job_name="powertree-e2e",
         screenshot_interval=0.05,
     )
     assert result.status == "success"
@@ -372,13 +431,13 @@ async def test_run_gui_tool_end_to_end_short_exit(tmp_path):
 async def test_run_gui_tool_end_to_end_nonzero_exit(tmp_path):
     """A non-zero exit is reported as 'failed' with the code -- and, critically,
     is NOT dressed up as a license problem for a GUI tool."""
-    exe = _stub_gui_exe(tmp_path, "PowerSI")
+    exe = _stub_gui_exe(tmp_path, "Optimality")
     result = await gui.run_gui_tool(
         exe_path=exe,
         args=["-c", "import sys; sys.exit(7)"],
         workdir=tmp_path,
         timeout_s=20.0,
-        job_name="powersi-e2e",
+        job_name="optimality-e2e",
         screenshot_interval=0.05,
     )
     assert result.status == "failed"
